@@ -508,6 +508,18 @@ table.ptbl tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--teal);}
 .filt-pop .opts{scrollbar-width:thin;scrollbar-color:#b9c4cd var(--paper);}
 .filt-pop .fbtns{display:flex;gap:6px;margin-top:7px;border-top:1px solid var(--line);padding-top:7px;}
 .filt-pop .lk{font-size:10.5px;color:var(--navy);cursor:pointer;font-weight:600;}
+/* Date-range filter (preset chips + custom range) */
+.filt-pop.dfilt{width:210px;}
+.dfilt-list{display:flex;flex-direction:column;gap:4px;}
+.dfilt-opt{width:100%;text-align:left;font-family:var(--sans);font-size:11.5px;font-weight:600;
+  color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:4px;padding:6px 9px;cursor:pointer;}
+.dfilt-opt:hover{background:var(--paper);border-color:var(--navy);}
+.dfilt-opt.on{background:var(--navy);border-color:var(--navy);color:#fff;}
+.dfilt-custom{margin-top:7px;border-top:1px solid var(--line);padding-top:7px;display:flex;flex-direction:column;gap:6px;}
+.dfilt-fld{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;font-weight:600;
+  color:var(--ink);text-transform:none;letter-spacing:0;}
+.dfilt-fld input{font-family:var(--sans);font-size:11.5px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;flex:1;}
+.dfilt-submit{align-self:stretch;background:var(--teal);border-color:var(--teal);color:#fff;margin-top:1px;}
 .tbl-empty{text-align:center;padding:40px;color:#8794a0;font-size:13px;}
 
 /* ── Project detail modal ── */
@@ -1583,8 +1595,65 @@ const isClosedStage = (s) => /complete|cancel/i.test(s||'');
 const stageProgress = (s) => { if (isClosedStage(s)) return 1; const i=DEFAULT_STAGES.indexOf(s); return i<0?0:(i+1)/DEFAULT_STAGES.length; };
 const _m2 = (v) => v==null?'—':'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 
+// Convert a preset name into an inclusive ISO {from,to} range (YYYY-MM-DD).
+// dateReceived is stored as ISO, so lexicographic string compare == chronological.
+function presetRange(preset){
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+  const iso = (dt) => dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+  const today = new Date(y,m,d);
+  if (preset==='This Week'){ const dow=today.getDay(); return { from:iso(new Date(y,m,d-dow)), to:iso(new Date(y,m,d-dow+6)) }; }
+  if (preset==='Past Two Weeks'){ return { from:iso(new Date(y,m,d-13)), to:iso(today) }; }
+  if (preset==='This Month'){ return { from:iso(new Date(y,m,1)), to:iso(new Date(y,m+1,0)) }; }
+  if (preset==='This Year'){ return { from:iso(new Date(y,0,1)), to:iso(new Date(y,11,31)) }; }
+  return { from:'', to:'' };
+}
+
+// Clean date-range filter: preset chips (apply immediately) + a Custom range with
+// From/To inputs and an explicit "Apply range" submit button.
+function DateFilterPop({ col, value, onChange, onClear, onClose, alignLeft }){
+  const [showCustom, setShowCustom] = useState(value.preset==='Custom');
+  const [cfrom, setCfrom] = useState(value.from||'');
+  const [cto, setCto] = useState(value.to||'');
+  const active = value.preset;
+  const applyPreset = (p) => {
+    if (p==='Custom'){ setShowCustom(true); return; }
+    const r = presetRange(p);
+    onChange({ preset:p, from:r.from, to:r.to, sel:[], q:'' });
+    onClose();
+  };
+  const applyCustom = () => {
+    if (!cfrom && !cto) return;
+    onChange({ preset:'Custom', from:cfrom, to:cto, sel:[], q:'' });
+    onClose();
+  };
+  return (
+    <div className="filt-pop dfilt" style={alignLeft?{left:0,right:'auto'}:undefined} onClick={e=>e.stopPropagation()}>
+      <div className="dfilt-list">
+        {['This Week','Past Two Weeks','This Month','This Year'].map(p=>(
+          <button key={p} className={'dfilt-opt'+(active===p?' on':'')} onClick={()=>applyPreset(p)}>{p}</button>
+        ))}
+        <button className={'dfilt-opt'+((showCustom||active==='Custom')?' on':'')} onClick={()=>applyPreset('Custom')}>Custom range…</button>
+      </div>
+      {(showCustom || active==='Custom') && (
+        <div className="dfilt-custom">
+          <label className="dfilt-fld"><span>From</span><input type="date" value={cfrom} onChange={e=>setCfrom(e.target.value)}/></label>
+          <label className="dfilt-fld"><span>To</span><input type="date" value={cto} onChange={e=>setCto(e.target.value)}/></label>
+          <button className="fbtn sm dfilt-submit" onClick={applyCustom} disabled={!cfrom&&!cto}>Apply range</button>
+        </div>
+      )}
+      <div className="fbtns">
+        <span className="lk" onClick={()=>{ setShowCustom(false); setCfrom(''); setCto(''); onClear(); }}>Clear</span>
+        <span style={{marginLeft:'auto'}}/>
+        <span className="lk" onClick={onClose}>Done</span>
+      </div>
+    </div>
+  );
+}
+
 function FilterPop({ col, value, distinct, onChange, onClear, onClose, alignLeft }){
   const v = value || {q:'',sel:[]};
+  if (col.type==='date') return <DateFilterPop col={col} value={v} onChange={onChange} onClear={onClear} onClose={onClose} alignLeft={alignLeft}/>;
   const q = v.q||''; const sel = v.sel||[];
   const shown = distinct.filter(d => !q || d.toLowerCase().includes(q.toLowerCase()));
   const toggle = (d) => { const s = sel.includes(d) ? sel.filter(x=>x!==d) : [...sel,d]; onChange({sel:s}); };
@@ -1631,7 +1700,7 @@ function ProjectTable({ rows, closed, onOpen, noun }){
         cell:p=> p.dosageForm ? <span className="plabel" style={{background:FORM_CLR[p.dosageForm]||'#7b8794'}}>{p.dosageForm}</span> : '—'},
       {key:'stage', label:'Status', options:DEFAULT_STAGES, get:p=>p.stage||'',
         cell:p=> <span style={{display:'inline-flex',alignItems:'center',gap:6,whiteSpace:'nowrap'}}><span style={{width:8,height:8,borderRadius:'50%',background:stageHex(p.stage),flexShrink:0}}/>{p.stage||'—'}</span>},
-      {key:'dateReceived', label:'Received', get:p=>p.dateReceived||'',
+      {key:'dateReceived', label:'Received', type:'date', get:p=>p.dateReceived||'',
         cell:p=>p.dateReceivedDisplay||p.dateReceived||'—'},
       {key:'pn', label:'Project #', get:p=>p.pn||'', cell:p=><span className="pcell-pn">{p.pn}</span>},
       {key:'customer', label:'Customer', get:p=>p.customer||''},
@@ -1680,6 +1749,14 @@ function ProjectTable({ rows, closed, onOpen, noun }){
         .some(v => String(v||'').toLowerCase().includes(gq))) return false;
     return cols.every(c => {
       const f = filters[c.key]; if (!f) return true;
+      if (c.type==='date'){
+        if (!f.from && !f.to) return true;
+        const rv = c.get(p); const val = rv ? String(rv).slice(0,10) : '';
+        if (!val) return false;
+        if (f.from && val < f.from) return false;
+        if (f.to && val > f.to) return false;
+        return true;
+      }
       const raw = c.get(p); const val = (raw==null||raw==='')?'—':String(raw);
       if (f.sel && f.sel.length && !f.sel.includes(val)) return false;
       if (f.q && !val.toLowerCase().includes(f.q.toLowerCase())) return false;
@@ -1698,7 +1775,7 @@ function ProjectTable({ rows, closed, onOpen, noun }){
   const setF = (k,patch) => setFilters(f => ({...f,[k]:{q:'',sel:[],...(f[k]||{}),...patch}}));
   const clearF = (k) => setFilters(f => { const n={...f}; delete n[k]; return n; });
   const resetAll = () => { setFilters({}); setSort({key:'dateReceived',dir:'desc'}); setOpenFilter(null); setQ(''); };
-  const activeFilters = Object.values(filters).filter(f=>f&&((f.sel&&f.sel.length)||f.q)).length;
+  const activeFilters = Object.values(filters).filter(f=>f&&((f.sel&&f.sel.length)||f.q||f.from||f.to)).length;
   const pristine = activeFilters===0 && !q && sort.key==='dateReceived' && sort.dir==='desc';
 
   const exportCSV = () => {
@@ -1729,7 +1806,7 @@ function ProjectTable({ rows, closed, onOpen, noun }){
       <div style={{position:'relative'}}>
         <table className="ptbl">
           <thead><tr>{cols.map((c,ci)=>{
-            const f=filters[c.key]; const on=!!(f&&((f.sel&&f.sel.length)||f.q));
+            const f=filters[c.key]; const on=!!(f&&((f.sel&&f.sel.length)||f.q||f.from||f.to));
             return (<th key={c.key} style={openFilter===c.key?{zIndex:80}:undefined}><div className="th-in">
               <span className="th-lbl" onClick={()=>toggleSort(c.key)}>{c.label}</span>
               <span className="th-sort" onClick={()=>toggleSort(c.key)}>

@@ -1377,6 +1377,67 @@ function exportProjectWorkbook(p){
   XLSX.writeFile(wb, d.filename);
 }
 
+/* ══════════════ DATA INTEGRITY — migration + validation (reliable backend) ══════════════
+   Every project the app loads (Supabase hydrate, realtime echo, or first-run seed) is
+   passed through migrateProject() so the in-memory model is always complete, typed, and
+   normalized — old records self-heal, missing fields backfill, bad numbers clamp. This is
+   the single choke point that keeps the shared store consistent as the schema evolves. */
+const SCHEMA_VERSION = 2;
+function migrateProject(raw){
+  if (!raw || typeof raw !== 'object') return raw;
+  const p = { ...FORMULATION_DEFAULTS, formulaLock:null, auditLog:[], approvals:{}, ...raw };
+  const nn = (v,d)=>{ const n=Number(v); return isFinite(n)&&n>=0 ? n : d; };
+  const nOr = (v,d)=>{ const n=Number(v); return isFinite(n)&&n>=0 ? n : d; };
+  // enums
+  p.stage = normalizeStage(p.stage) || 'Formulation/Sample Development';
+  p.dosageForm = normalizeForm(p.dosageForm) || 'Capsules';
+  // required structures
+  if (!Array.isArray(p.auditLog)) p.auditLog = [];
+  if (!Array.isArray(p.ingredients)) p.ingredients = [];
+  if (!Array.isArray(p.attachments)) p.attachments = [];
+  if (p.formulaLock === undefined) p.formulaLock = null;
+  if (!p.pkg || typeof p.pkg!=='object') p.pkg = {};
+  if (!p.baseItems || typeof p.baseItems!=='object') p.baseItems = {};
+  if (!p.approvals || typeof p.approvals!=='object') p.approvals = {};
+  // numerics (clamp: never negative)
+  p.servingSize     = nOr(p.servingSize, 1);
+  p.servingsPerUnit = nOr(p.servingsPerUnit, 30);
+  p.batchUnits      = nn(p.batchUnits, 0);
+  p.overage      = nOr(p.overage, 0.03);
+  p.materialLoss = nOr(p.materialLoss, 0.02);
+  if (p.unitsPerContainer!=null){ const u=Number(p.unitsPerContainer); p.unitsPerContainer = isFinite(u)&&u>0 ? u : null; }
+  if (p.gummyWt!=null){ const g=Number(p.gummyWt); p.gummyWt = isFinite(g)&&g>0 ? g : 4500; }
+  // rows
+  p.ingredients = p.ingredients.map(r => ({ ...r,
+    inputMg: nn(r && r.inputMg, 0),
+    potencyPct: (r && isFinite(Number(r.potencyPct)) && Number(r.potencyPct)>0) ? Number(r.potencyPct) : 100 }));
+  if (Array.isArray(p.tierPricing)) p.tierPricing = p.tierPricing.map(t => ({
+    units: nn(t && t.units, 0),
+    price: (!t || t.price==null || t.price==='') ? null : (isFinite(Number(t.price)) ? Number(t.price) : null) }));
+  p.schemaVersion = SCHEMA_VERSION;
+  return p;
+}
+
+// Data-quality / readiness checks. Pure; returns typed issues. The Enova employee is
+// still the authority (non-blocking) — but "safe/accurate" means these are shown before
+// approval and recorded in the audit trail.
+function validateProject(p){
+  const errors = [], warnings = [];
+  const ings = p.ingredients || [];
+  const real = ings.filter(r => (Number(r.inputMg)||0) > 0);
+  if (!real.length) errors.push('No ingredients with a dose captured.');
+  const resolve = (r) => (r.item && ((typeof INV_IX!=='undefined'&&INV_IX[r.item.n])||r.item)) || (r.importedAlt && typeof INV_IX!=='undefined' && INV_IX[r.importedAlt]) || null;
+  const unmatched = real.filter(r => !resolve(r));
+  const uncosted  = real.filter(r => { const it=resolve(r); return it && (it.u==null || it.u===0); });
+  if (unmatched.length) errors.push(unmatched.length+' ingredient(s) not matched to a MISys SKU — COGS understated.');
+  if (uncosted.length)  errors.push(uncosted.length+' matched ingredient(s) at $0.00 cost — needs pricing.');
+  if (!(Number(p.batchUnits)>0)) warnings.push('No batch quantity set — COGS is estimated at the form MOQ.');
+  if (!(Number(p.servingsPerUnit)>0)) warnings.push('Servings per unit is 0.');
+  const cb = p.cogsBreakdown;
+  if (!cb || !(cb.cogsPerUnit>0)) warnings.push('No costed COGS yet.');
+  return { errors, warnings, ok: errors.length===0 };
+}
+
 // Shared helper: read a browser File object into base64 (used by both the WIP
 // Board attachment uploader and the Formulation page document intake).
 function fileToB64(file) {
@@ -3938,6 +3999,7 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
   const approvedCogs = locked && lock.cogs && lock.cogs.cogsPerUnit != null ? lock.cogs.cogsPerUnit : null;
   const costDrift    = locked && approvedCogs != null && Math.abs(cogsPerUnit - approvedCogs) > 0.00005;
   const formulaChanged = locked && formulaHash(proj) !== lock.hash;
+  const readiness = validateProject(proj);   // data-quality / readiness (non-blocking)
 
   const liveBreakdown = {
     activeCPU: actCPU, baseCPU, shellCPU, pkgCPU, materialsCPU,
@@ -3964,9 +4026,11 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
       const snap = { ...liveBreakdown };
       const fl = { locked:true, by:CURRENT_ACTOR.email, byName:CURRENT_ACTOR.name,
         ts:nowISO(), cogs:snap, hash:formulaHash(p) };
+      const rz = validateProject(p);
+      const rzTxt = rz.errors.length ? ` · ⚠ approved with ${rz.errors.length} data issue(s)` : (rz.warnings.length ? ` · ${rz.warnings.length} note(s)` : ' · clean');
       return withAudit({ ...p, formulaLock:fl, cogsBreakdown:snap },
         'Formula LOCKED & APPROVED',
-        `${f$(snap.cogsPerUnit)}/unit @ ${(snap.mbBatchQty||mbBatchQty).toLocaleString()} units · ${proj.dosageForm} · ${container}`);
+        `${f$(snap.cogsPerUnit)}/unit @ ${(snap.mbBatchQty||mbBatchQty).toLocaleString()} units · ${proj.dosageForm} · ${container}${rzTxt}`);
     }));
   };
   const reapprove = () => {
@@ -4267,6 +4331,15 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
 
           {!locked && (<>
             <p className="fsmall">Approving <strong>locks the formula and the cost build</strong> so approved costs cannot silently drift when MISys prices change. Every generated item still requires this Enova-employee sign-off before it is used for a customer quote or production document.</p>
+            <div className={"falert "+(readiness.errors.length?"err":readiness.warnings.length?"warn":"ok")} style={{marginBottom:8}}>
+              {readiness.errors.length===0 && readiness.warnings.length===0
+                ? <span>✓ Data readiness: no issues detected.</span>
+                : <span><strong>Data readiness</strong> — review before approving:
+                    <ul style={{margin:"4px 0 0 18px",padding:0}}>
+                      {readiness.errors.map((e,i)=><li key={"e"+i}>🔴 {e}</li>)}
+                      {readiness.warnings.map((w,i)=><li key={"w"+i}>🟡 {w}</li>)}
+                    </ul></span>}
+            </div>
             <label className="ff-check" style={{display:"flex",alignItems:"center",gap:8,margin:"8px 0",fontSize:12.5}}>
               <input type="checkbox" checked={approveChk} onChange={e=>setApproveChk(e.target.checked)}/>
               I am an Enova employee. I have reviewed this formula and I approve the cost build ({f$(cogsPerUnit)}/unit @ {mbBatchQty.toLocaleString()} units).
@@ -4761,8 +4834,7 @@ const sb = (typeof window!=='undefined' && window.supabase && window.supabase.cr
 
 // Build the seed projects exactly as the app always has (normalize stage/form + order).
 function buildSeedProjects(){
-  const normalizedSeed = SEED.map(p => ({ ...FORMULATION_DEFAULTS, ...p,
-    stage: normalizeStage(p.stage), dosageForm: normalizeForm(p.dosageForm) }));
+  const normalizedSeed = SEED.map(p => migrateProject({ ...FORMULATION_DEFAULTS, ...p }));
   const grouped = {};
   normalizedSeed.forEach(p => { (grouped[p.stage] ||= []).push(p); });
   Object.values(grouped).forEach(list => list.sort((a,b)=>(b.dateReceived||'0000-00-00').localeCompare(a.dateReceived||'0000-00-00')));
@@ -4787,7 +4859,7 @@ function useSupabaseProjects(email){
       const { data, error } = await sb.from('studio_projects').select('pn,data');
       if (error) { console.warn('[studio] load failed:', error.message); return; }
       if (data && data.length) {
-        setLocal(data.map(r => r.data));
+        setLocal(data.map(r => migrateProject(r.data)));   // normalize/backfill every stored record
       } else {
         const seed = buildSeedProjects();  // first run ever: seed the shared table from the app's data
         const { error: se } = await sb.from('studio_projects')
@@ -4803,9 +4875,13 @@ function useSupabaseProjects(email){
           setLocal(prev => {
             if (payload.eventType === 'DELETE') return prev.filter(p => p.pn !== pn);
             const row = payload.new && payload.new.data; if (!row) return prev;
+            // Concurrency guard: never clobber a project we have unsaved local edits for.
+            if (pending.current[pn] || removing.current[pn]) return prev;
+            const incoming = migrateProject(row);
             const i = prev.findIndex(p => p.pn === pn);
-            if (i === -1) return [...prev, row];
-            const copy = prev.slice(); copy[i] = row; return copy;
+            if (i === -1) return [...prev, incoming];
+            if (JSON.stringify(prev[i]) === JSON.stringify(incoming)) return prev;   // no-op echo
+            const copy = prev.slice(); copy[i] = incoming; return copy;
           });
         }).subscribe();
     })();

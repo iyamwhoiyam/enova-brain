@@ -839,6 +839,11 @@ table.ptbl tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--teal);}
 .pp-f:last-child{border-bottom:none;}
 .pp-l{color:#7c8a96;font-weight:600;}
 .pp-v{color:var(--ink);text-align:right;font-weight:600;max-width:60%;}
+.pp-editable{cursor:text;border-bottom:1px dashed transparent;transition:border-color .12s;}
+.pp-editable:hover{border-bottom-color:var(--teal);}
+.pp-edit{font-size:12.5px;padding:2px 6px;border:1px solid var(--teal);border-radius:4px;color:var(--ink);
+  text-align:right;max-width:64%;background:#fff;font-family:inherit;font-weight:600;}
+select.pp-edit{text-align:left;}
 .pp-job{background:var(--card);border:1px solid var(--line);border-radius:6px;overflow:hidden;}
 .pp-job-h{display:flex;justify-content:space-between;align-items:center;background:var(--navy);color:#fff;
   padding:9px 16px;font-size:13px;font-weight:700;letter-spacing:.02em;}
@@ -1044,6 +1049,38 @@ input.fcell:focus{border-color:var(--teal);outline:none;background:#fff;}
 .app-sidebar.collapsed .sb-userchip{display:none;}
 .login-brand .enova-word .ew1{color:var(--navy-dk);}
 .login-brand .enova-word .ew2{color:var(--teal);}
+/* Notification bell + panel */
+.sb-userrow{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.notif-wrap{position:relative;}
+.notif-bell{background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.22);border-radius:5px;
+  color:#eafaf5;font-size:13px;padding:3px 7px;cursor:pointer;position:relative;line-height:1;}
+.notif-bell:hover{background:rgba(255,255,255,.20);}
+.notif-badge{position:absolute;top:-6px;right:-6px;background:var(--amber);color:#fff;font-size:9px;font-weight:800;
+  min-width:15px;height:15px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;}
+.notif-panel{position:fixed;bottom:16px;left:14px;width:320px;max-height:60vh;background:#fff;border:1px solid var(--navy-dk);
+  border-radius:8px;box-shadow:0 14px 40px rgba(0,0,0,.35);z-index:9999;display:flex;flex-direction:column;overflow:hidden;}
+.notif-head{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid var(--line);
+  font-size:12px;font-weight:800;color:var(--navy-dk);background:var(--paper);}
+.notif-mark{font-size:10.5px;font-weight:700;color:var(--navy);cursor:pointer;}
+.notif-list{overflow-y:auto;}
+.notif-empty{padding:18px 12px;font-size:12px;color:#8a97a3;text-align:center;}
+.notif-item{padding:9px 12px;border-bottom:1px solid var(--paper);cursor:pointer;}
+.notif-item:hover{background:var(--teal-soft);}
+.notif-item.unread{background:#eef6fb;}
+.notif-item.unread .notif-pn{color:var(--amber);}
+.notif-item-top{display:flex;justify-content:space-between;gap:8px;}
+.notif-pn{font-family:var(--mono);font-weight:800;font-size:11px;color:var(--navy-dk);}
+.notif-time{font-size:10px;color:#8a97a3;}
+.notif-item-body{font-size:11.5px;color:var(--ink);line-height:1.45;margin-top:2px;}
+/* Send-for-review control on the project page */
+.pp-review{margin-top:12px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 0 4px;border-top:1px solid var(--line);}
+.pp-review-label{font-size:12.5px;font-weight:700;color:var(--navy-dk);}
+.pp-review-sel{font-size:12.5px;padding:6px 8px;border:1px solid var(--line);border-radius:5px;color:var(--ink);background:#fff;}
+.pp-review-note{flex:1;min-width:180px;font-size:12.5px;padding:6px 9px;border:1px solid var(--line);border-radius:5px;color:var(--ink);}
+.pp-review-btn{background:var(--teal);color:#fff;border:none;border-radius:5px;padding:7px 14px;font-size:12.5px;font-weight:700;cursor:pointer;}
+.pp-review-btn:hover{filter:brightness(1.06);}
+.pp-review-btn:disabled{opacity:.5;cursor:default;}
+.pp-review-msg{font-size:11.5px;font-weight:700;color:var(--ok);}
 </style>
 </head>
 <body>
@@ -1807,14 +1844,48 @@ function ProjectDetail({ proj, onClose }){
   );
 }
 
+// Inline click-to-edit field for the Project Page cards. Shows as plain text; click to
+// edit (Enter/blur saves, Esc cancels). Read-only when no onSave is given.
+function EditableField({ label, value, onSave, type, options, placeholder, format }){
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(value);
+  useEffect(() => { setVal(value); }, [value]);
+  const shown = format ? format(value) : (value===''||value==null ? '—' : value);
+  const commit = () => { setEditing(false); if (val !== value && onSave) onSave(val); };
+  if (!onSave) return <div className="pp-f"><span className="pp-l">{label}</span><span className="pp-v">{shown}</span></div>;
+  return (
+    <div className="pp-f">
+      <span className="pp-l">{label}</span>
+      {!editing ? (
+        <span className="pp-v pp-editable" title="Click to edit" onClick={()=>setEditing(true)}>{shown}</span>
+      ) : options ? (
+        <select className="pp-edit" autoFocus value={val==null?'':val}
+          onChange={e=>{ setVal(e.target.value); onSave(e.target.value); setEditing(false); }}
+          onBlur={()=>setEditing(false)}>
+          {options.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+      ) : (
+        <input className="pp-edit" autoFocus type={type||'text'} value={val==null?'':val}
+          placeholder={placeholder||''}
+          onChange={e=>setVal(e.target.value)} onBlur={commit}
+          onKeyDown={e=>{ if(e.key==='Enter') commit(); else if(e.key==='Escape'){ setVal(value); setEditing(false); } }}/>
+      )}
+    </div>
+  );
+}
+
 /* ══════════════════ PROJECT PAGE — Shop-Ware repair-order equivalent ══════════════════
    Starting-point scaffold. Opens full-screen when an Enova user clicks a project square.
    Top section = customer / product / assignment blocks. Body = the customizable
    "Job square": Labor · Materials · Parts · Fees line-item sections wired to live
    MISys inventory (INV_IX). Footer Cost/Revenue totals auto-update from the project's
    stored cogsBreakdown + tier pricing — no numbers invented here. */
-function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate }){
+function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendReview, people, onUpdate }){
+  const [reviewer, setReviewer] = useState('');
+  const [reviewNote, setReviewNote] = useState('');
+  const [sentMsg, setSentMsg] = useState('');
   const p = proj;
+  const upd = (patch) => { if (onUpdate) onUpdate(p.pn, patch); };
   const cb = p.cogsBreakdown || null;
   const qty = Number(p.batchUnits)||0;
   const sell   = projUnitPrice(p);
@@ -1881,27 +1952,31 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate }){
         <div className="pp-cards">
           <div className="pp-card">
             <div className="pp-card-h">Customer</div>
-            {field('Name', cleanCustomer(p.customer))}
-            {field('Contact', p.contact)}
-            {field('Email', p.email)}
-            {field('Phone', p.phone)}
-            {field('Previous projects', prevVisits!=null ? String(prevVisits) : '—')}
+            <EditableField label="Name" value={cleanCustomer(p.customer)} placeholder="Customer name" onSave={onUpdate && (v=>upd({customer:v}))}/>
+            <EditableField label="Contact" value={p.contact} placeholder="Add contact" onSave={onUpdate && (v=>upd({contact:v}))}/>
+            <EditableField label="Email" value={p.email} type="email" placeholder="Add email" onSave={onUpdate && (v=>upd({email:v}))}/>
+            <EditableField label="Phone" value={p.phone} placeholder="Add phone" onSave={onUpdate && (v=>upd({phone:v}))}/>
+            <EditableField label="Previous projects" value={prevVisits!=null ? String(prevVisits) : '—'}/>
           </div>
           <div className="pp-card">
             <div className="pp-card-h">Product</div>
-            {field('Product', p.product)}
-            {field('Dosage form', p.dosageForm)}
-            {field('Serving size', p.servingSize)}
-            {field('Servings / unit', p.servingsPerUnit)}
-            {field('Item / RD #', p.itemNo)}
+            <EditableField label="Product" value={p.product} placeholder="Product name" onSave={onUpdate && (v=>upd({product:v}))}/>
+            <EditableField label="Dosage form" value={p.dosageForm} options={ENOVA_FORMS} onSave={onUpdate && (v=>upd({dosageForm:v}))}/>
+            <EditableField label="Serving size" value={p.servingSize} type="number" placeholder="e.g. 1" onSave={onUpdate && (v=>upd({servingSize:Number(v)||0}))}/>
+            <EditableField label="Servings / unit" value={p.servingsPerUnit} type="number" placeholder="e.g. 30" onSave={onUpdate && (v=>upd({servingsPerUnit:Number(v)||0}))}/>
+            <EditableField label="Item / RD #" value={p.itemNo} placeholder="Add item #" onSave={onUpdate && (v=>upd({itemNo:v}))}/>
           </div>
           <div className="pp-card">
             <div className="pp-card-h">Assignment &amp; Schedule</div>
-            {field('Project Mgr', p.pm && p.pm!=='All' && p.pm!=='`' ? p.pm : '—')}
-            {field('Sales Rep', p.rep)}
-            {field('Stage', p.stage)}
-            {field('Date Received', p.dateReceivedDisplay || p.dateReceived)}
-            {field('Batch Qty', qty ? qty.toLocaleString() : '—')}
+            <EditableField label="Project Mgr" value={p.pm && p.pm!=='All' && p.pm!=='`' ? p.pm : ''} placeholder="Add PM" onSave={onUpdate && (v=>upd({pm:v}))}/>
+            <EditableField label="Sales Rep" value={p.rep} placeholder="Add rep" onSave={onUpdate && (v=>upd({rep:v}))}/>
+            <EditableField label="Stage" value={p.stage} options={DEFAULT_STAGES} onSave={onUpdate && (v=>upd({stage:v}))}/>
+            <EditableField label="Date Received" value={p.dateReceived||''} type="date"
+              format={()=> p.dateReceivedDisplay || p.dateReceived || '—'}
+              onSave={onUpdate && (v=>{ let disp=''; try{ disp = v ? new Date(v+'T00:00:00').toLocaleDateString('en-US') : ''; }catch(e){ disp=v; } upd({dateReceived:v, dateReceivedDisplay:disp}); })}/>
+            <EditableField label="Batch Qty" value={p.batchUnits||''} type="number" placeholder="Add batch qty"
+              format={()=> qty ? qty.toLocaleString() : '—'}
+              onSave={onUpdate && (v=>upd({batchUnits:Number(v)||0}))}/>
           </div>
         </div>
 
@@ -2019,13 +2094,33 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate }){
             <span className="pp-footer-note">Opens the Formulation page for {proj.pn} and begins a new formula revision.</span>
           </div>
         )}
+
+        {onSendReview && (
+          <div className="pp-review">
+            <span className="pp-review-label">📨 Send for Review:</span>
+            <select className="pp-review-sel" value={reviewer} onChange={e=>setReviewer(e.target.value)}>
+              <option value="">Choose a person…</option>
+              {(people||[]).map(pp => <option key={pp.email} value={pp.email}>{pp.name}</option>)}
+            </select>
+            <input className="pp-review-note" placeholder="Add a note (optional)…"
+              value={reviewNote} onChange={e=>setReviewNote(e.target.value)}/>
+            <button className="pp-review-btn" disabled={!reviewer} onClick={async () => {
+              const r = await onSendReview(proj.pn, reviewer, reviewNote);
+              if (r && r.error) { setSentMsg('Could not send — check connection.'); }
+              else { const nm = ((people||[]).find(x=>x.email===reviewer)||{}).name || 'them';
+                     setSentMsg('✓ Sent to ' + nm + '.'); setReviewer(''); setReviewNote(''); }
+              setTimeout(()=>setSentMsg(''), 4000);
+            }}>Send →</button>
+            {sentMsg && <span className="pp-review-msg">{sentMsg}</span>}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 /* ══════════════════ WIP BOARD PAGE ══════════════════ */
-function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate }) {
+function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onSendReview, people, openPagePn, onPageOpened, onUpdateProject }) {
   const [stages, setStages]     = useState(DEFAULT_STAGES);
   const [zoom, setZoom]         = useState(1.0);
   const [search, setSearch]     = useState('');
@@ -2063,6 +2158,8 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate }) {
   // Live-linked project for the full page: looked up by PN so cost/revenue
   // updates elsewhere flow in automatically (no stale snapshot).
   const pageProj = pagePn ? projects.find(p => p.pn === pagePn) : null;
+  // Open a project's full page when requested from a notification (one-shot).
+  useEffect(() => { if (openPagePn) { setPagePn(openPagePn); if (onPageOpened) onPageOpened(); } }, [openPagePn]);
 
   // Unique reps and forms from data
   // Full PM list (for dropdowns) vs. clean single-person PM list (for filter buttons)
@@ -2398,7 +2495,8 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate }) {
     return <ProjectPage proj={pageProj} prevVisits={prevVisits}
              onBack={() => setPagePn(null)}
              onEdit={() => openEdit(pageProj)}
-             onFormulate={onFormulate} />;
+             onFormulate={onFormulate}
+             onSendReview={onSendReview} people={people} onUpdate={onUpdateProject} />;
   }
   const openNew  = () => setModal({ type: 'new', proj: emptyProject(nextPN(projects)) });
   const closeModal = () => setModal(null);
@@ -3800,14 +3898,14 @@ const EnovaMark = () => (
    A dedicated page (nav tab under WIP Board) listing every project — open and closed — in the
    sortable, per-column-filterable spreadsheet grid, with a global search across #, customer,
    product, PM, rep, stage, and notes. Any row opens the project detail. Recallable at any time. */
-function ProjectsPage({ projects, onToggleNav, onFormulate }){
+function ProjectsPage({ projects, onToggleNav, onFormulate, onSendReview, people, onUpdateProject }){
   const [pagePn, setPagePn] = useState(null);   // open the full project page by PN
   const pageProj = pagePn ? projects.find(p => p.pn === pagePn) : null;
   if (pageProj) {
     const prevVisits = projects.filter(x => x.pn !== pageProj.pn &&
       cleanCustomer(x.customer) !== '—' &&
       cleanCustomer(x.customer).toLowerCase() === cleanCustomer(pageProj.customer).toLowerCase()).length;
-    return <ProjectPage proj={pageProj} prevVisits={prevVisits} onBack={() => setPagePn(null)} onFormulate={onFormulate} />;
+    return <ProjectPage proj={pageProj} prevVisits={prevVisits} onBack={() => setPagePn(null)} onFormulate={onFormulate} onSendReview={onSendReview} people={people} onUpdate={onUpdateProject} />;
   }
   return (
     <div className="app-page" style={{background:'var(--paper)'}}>
@@ -4301,6 +4399,109 @@ function useSupabaseProjects(email){
   return [projects, setProjects];
 }
 
+/* ══════════════════ NOTIFICATIONS — in-app alerts (shared, realtime) ══════════════════ */
+// Enova people you can route a project to for review (name → login email).
+const ENOVA_PEOPLE = [
+  { name:'Carlos',   email:'carlos@enovascience.com' },
+  { name:'Tong',     email:'tong@enovascience.com' },
+  { name:'Marina',   email:'marina@enovascience.com' },
+  { name:'Nick',     email:'nick@enovascience.com' },
+  { name:'Jonathan', email:'jonathan@enovascience.com' },
+  { name:'Ryan',     email:'ryan@enovascience.com' },
+  { name:'Joseph',   email:'joseph@enovascience.com' },
+];
+const emailToName = (e) => { const p = ENOVA_PEOPLE.find(x=>x.email===e); return p ? p.name : (e||'').split('@')[0]; };
+
+function useNotifications(email){
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    if (!sb || !email) return;
+    let ch;
+    (async () => {
+      const { data, error } = await sb.from('studio_notifications')
+        .select('*').order('created_at', { ascending:false }).limit(100);
+      if (error) { console.warn('[notif] load failed:', error.message); return; }
+      if (data) setItems(data);
+      ch = sb.channel('studio_notifications_rt')
+        .on('postgres_changes', { event:'*', schema:'public', table:'studio_notifications' }, (payload) => {
+          setItems(prev => {
+            if (payload.eventType === 'DELETE') return prev.filter(x => x.id !== (payload.old && payload.old.id));
+            const n = payload.new; if (!n) return prev;
+            if (n.recipient_email !== email && n.sender_email !== email) return prev; // only mine
+            const i = prev.findIndex(x => x.id === n.id);
+            if (i === -1) return [n, ...prev];
+            const copy = prev.slice(); copy[i] = n; return copy;
+          });
+        }).subscribe();
+    })();
+    return () => { if (ch && sb) sb.removeChannel(ch); };
+  }, [email]);
+
+  const inbox  = items.filter(n => n.recipient_email === email);
+  const unread = inbox.filter(n => !n.read).length;
+  const markAllRead = async () => {
+    const ids = inbox.filter(n => !n.read).map(n => n.id);
+    if (!ids.length || !sb) return;
+    setItems(prev => prev.map(n => ids.includes(n.id) ? { ...n, read:true } : n));
+    await sb.from('studio_notifications').update({ read:true }).in('id', ids);
+  };
+  const markRead = async (id) => {
+    if (!sb) return;
+    setItems(prev => prev.map(n => n.id === id ? { ...n, read:true } : n));
+    await sb.from('studio_notifications').update({ read:true }).eq('id', id);
+  };
+  const send = async (recipientEmail, pn, message) => {
+    if (!sb) return { error:'offline' };
+    return sb.from('studio_notifications').insert({
+      recipient_email: recipientEmail, sender_email: email, project_pn: pn,
+      type:'review_request', message: message || null });
+  };
+  return { inbox, unread, markAllRead, markRead, send };
+}
+
+function NotificationCenter({ notif, onOpenProject }){
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+  const fmt = (ts) => { try { return new Date(ts).toLocaleString('en-US',{month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'}); } catch(e){ return ''; } };
+  return (
+    <div className="notif-wrap" ref={ref}>
+      <button className="notif-bell" onClick={()=>{ setOpen(o=>!o); }} title="Notifications">
+        🔔{notif.unread > 0 && <span className="notif-badge">{notif.unread>99?'99+':notif.unread}</span>}
+      </button>
+      {open && (
+        <div className="notif-panel">
+          <div className="notif-head">
+            <span>Notifications</span>
+            {notif.unread > 0 && <span className="notif-mark" onClick={notif.markAllRead}>Mark all read</span>}
+          </div>
+          <div className="notif-list">
+            {notif.inbox.length === 0 && <div className="notif-empty">No notifications yet.</div>}
+            {notif.inbox.map(n => (
+              <div key={n.id} className={`notif-item ${n.read?'':'unread'}`}
+                onClick={()=>{ notif.markRead(n.id); if (n.project_pn && onOpenProject) onOpenProject(n.project_pn); setOpen(false); }}>
+                <div className="notif-item-top">
+                  <span className="notif-pn">{n.project_pn || '—'}</span>
+                  <span className="notif-time">{fmt(n.created_at)}</span>
+                </div>
+                <div className="notif-item-body">
+                  <strong>{emailToName(n.sender_email)}</strong> sent this to you for review
+                  {n.message ? ` — “${n.message}”` : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LoginScreen(){
   const [email,setEmail] = useState('');
   const [pw,setPw]       = useState('');
@@ -4357,6 +4558,15 @@ function App({ session }) {
   const [projects, setProjects] = useSupabaseProjects(email);
   const [formulationPn, setFormulationPn] = useState(null);   // project to focus on the Formulation page
   const [pendingGen, setPendingGen] = useState(null);         // one-shot: auto-start the generator for this pn
+  const [openPn, setOpenPn] = useState(null);                 // one-shot: open a project's full page (from an alert)
+  const notif = useNotifications(email);
+
+  // Route a project to someone for review → creates an in-app alert on their dashboard.
+  const sendReview = (pn, recipientEmail, note) => notif.send(recipientEmail, pn, note);
+  // Inline edits from the project page (Customer/Product/Assignment cards) → save + sync.
+  const updateProject = (pn, patch) => setProjects(prev => prev.map(p => p.pn === pn ? { ...p, ...patch } : p));
+  // Open a project's full page (used when clicking a notification).
+  const openProjectPage = (pn) => { setNav('wip'); setOpenPn(pn); };
 
   // Project page "Formulate" → bump the revision (V1→V2→…), open the Formulation page for it,
   // and auto-start the formula generator on that project's customer request.
@@ -4406,14 +4616,17 @@ function App({ session }) {
         ))}
         {sb && email && (
           <div className="sb-userchip">
-            <span className="sb-user" title={email}>{email}</span>
+            <div className="sb-userrow">
+              <span className="sb-user" title={email}>{email}</span>
+              <NotificationCenter notif={notif} onOpenProject={openProjectPage} />
+            </div>
             <button className="sb-signout" onClick={()=>sb.auth.signOut()} title="Sign out">Sign out</button>
           </div>
         )}
       </div>
       <div className="app-page">
-        {nav === 'wip' && <WIPBoardPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onFormulate={goFormulate} />}
-        {nav === 'projects' && <ProjectsPage projects={projects} onToggleNav={toggleNav} onFormulate={goFormulate} />}
+        {nav === 'wip' && <WIPBoardPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onFormulate={goFormulate} onSendReview={sendReview} people={ENOVA_PEOPLE} openPagePn={openPn} onPageOpened={()=>setOpenPn(null)} onUpdateProject={updateProject} />}
+        {nav === 'projects' && <ProjectsPage projects={projects} onToggleNav={toggleNav} onFormulate={goFormulate} onSendReview={sendReview} people={ENOVA_PEOPLE} onUpdateProject={updateProject} />}
         {nav === 'formulation' && <FormulationPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} targetPn={formulationPn} autoGenPn={pendingGen} onGenConsumed={()=>setPendingGen(null)} />}
         {nav === 'generate' && <GeneratePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}
         {nav === 'quote' && <QuotePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}

@@ -888,6 +888,13 @@ select.pp-edit{text-align:left;}
 .pp-note{padding:10px 16px;font-size:11px;color:#7c8a96;line-height:1.5;border-top:1px solid var(--line);}
 .pp-notes{padding:12px 16px;font-size:12.5px;color:var(--ink);white-space:pre-wrap;line-height:1.55;
   max-height:280px;overflow-y:auto;}
+.pp-audit{max-height:300px;overflow-y:auto;font-size:12px;}
+.pp-audit-row{display:grid;grid-template-columns:150px 110px 1fr;gap:10px;padding:6px 16px;border-top:1px solid var(--line);align-items:baseline;}
+.pp-audit-row:first-child{border-top:none;}
+.pp-audit-ts{color:#8794a0;font-size:11px;white-space:nowrap;}
+.pp-audit-by{font-weight:600;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.pp-audit-act{color:var(--ink);}
+.pp-audit-det{color:#7c8a96;}
 .pp-footer{margin-top:18px;display:flex;flex-direction:column;align-items:center;gap:6px;padding:18px 0 6px;
   border-top:1px solid var(--line);}
 .pp-formulate-btn{background:var(--navy);color:#fff;border:none;border-radius:6px;padding:11px 26px;
@@ -1262,6 +1269,7 @@ function nextPN(projects) {
 // warning the moment that field is later assigned a real value.
 const FORMULATION_DEFAULTS = {
   servingSize:1, servingsPerUnit:30, batchUnits:0, overage:0.03,
+  containerType:null, unitsPerContainer:null, materialLoss:0.02,
   gummyType:'sugar', gummyWt:4500, ingredients:[], pkg:{}, shellItem:null, baseItems:{},
   laborPerUnit:null, overheadPct:0.15, cogsBreakdown:null, attachments:[],
 };
@@ -1271,8 +1279,99 @@ function emptyProject(pn) {
     stage:'Formulation', rep:'', pm:'', dateReceived:new Date().toISOString().slice(0,10),
     dateReceivedDisplay: new Date().toLocaleDateString('en-US'),
     revision:1, revCount:1, bidPriced:false, notes:'', status:'', approvals:{},
+    formulaLock:null, auditLog:[],
     ...FORMULATION_DEFAULTS,
   };
+}
+
+/* ══════════════ AUDIT TRAIL + APPROVAL LOCK (safe · auditable · reliable) ══════════════
+   Every meaningful, cost-bearing action is recorded to an append-only per-project
+   auditLog (who / when / what). Approving a formula LOCKS it — the cost build is
+   snapshotted so it can never silently drift; live re-computation is shown only as a
+   drift warning until an Enova employee re-approves. Quotes/MFSO read the approved
+   snapshot, not the live number. */
+let CURRENT_ACTOR = { email:null, name:'Enova' };
+function nowISO(){ try { return new Date().toISOString(); } catch(e){ return ''; } }
+function fmtTs(iso){ try { return new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}); } catch(e){ return iso||''; } }
+function auditEntry(action, detail){
+  return { id: Math.random().toString(36).slice(2,10), ts: nowISO(),
+    by: CURRENT_ACTOR.email, byName: CURRENT_ACTOR.name || (CURRENT_ACTOR.email||'').split('@')[0] || 'Enova',
+    action, detail: detail||'' };
+}
+function withAudit(project, action, detail){
+  const log = Array.isArray(project.auditLog) ? project.auditLog : [];
+  return { ...project, auditLog: [...log, auditEntry(action, detail)].slice(-500) };
+}
+// Append an audit entry to one project inside a setProjects updater.
+function logAudit(setProjects, pn, action, detail){
+  setProjects(prev => prev.map(p => p.pn===pn ? withAudit(p, action, detail) : p));
+}
+// Stable signature of the cost-bearing inputs — detects silent formula/setup drift.
+function formulaHash(p){
+  const ings = (p.ingredients||[]).map(r => [ (r.item&&r.item.n)||r.importedAlt||r.importedName||'?', Number(r.inputMg)||0, Number(r.potencyPct)||100 ]);
+  return JSON.stringify({ ings, form:p.dosageForm||'', container:p.containerType||'', upc:p.unitsPerContainer??null,
+    ss:p.servingSize??null, spu:p.servingsPerUnit??null, batch:Number(p.batchUnits)||0,
+    gw:p.gummyWt??null, gt:p.gummyType||'', ov:p.overage??null });
+}
+const isLocked = (p) => !!(p && p.formulaLock && p.formulaLock.locked);
+
+// ── Auditable workbook (Cover · Master Formula · Batch Cost Build · Bid) ──────
+// Pure data builder (unit-testable); mirrors the Master Formula + Master Bid
+// layout from the project's captured formula + the (approved) cost snapshot.
+function buildAuditWorkbook(p){
+  const cb = p.cogsBreakdown || {};
+  const spu = Number(p.servingsPerUnit)||1;
+  const ov = p.overage!=null ? p.overage : 0;
+  const num = (x)=> x==null||x==='' ? '' : Number(x);
+  const mfHead = ['Ingredient','MISys ALT','Input mg/serving','Potency %','$/g (MISys)','Cost/serving','Cost/unit'];
+  const mfRows = (p.ingredients||[]).map(r=>{
+    const it = (r.item && ((typeof INV_IX!=='undefined'&&INV_IX[r.item.n])||r.item)) || (r.importedAlt && typeof INV_IX!=='undefined' && INV_IX[r.importedAlt]) || null;
+    const pot = r.potencyPct>0 ? r.potencyPct/100 : 1;
+    const mgPS = (Number(r.inputMg||0)*(1+ov))/pot;
+    const u = it && it.u!=null ? it.u : null;
+    const cps = u!=null ? (mgPS/1000)*u : null;
+    return [ r.importedName||(it&&it.d)||'—', r.importedAlt||(it&&it.n)||'', +mgPS.toFixed(3),
+      Number(r.potencyPct)||100, u!=null?+u.toFixed(5):'', cps!=null?+cps.toFixed(6):'', cps!=null?+(cps*spu).toFixed(6):'' ];
+  });
+  const fl = p.formulaLock||{};
+  const cover = [
+    ['Enova Science — Project Record',''],
+    ['Project #', p.pn], ['Customer', p.customer||''], ['Product', p.product||''],
+    ['Revision', 'V'+(p.revision||1)], ['Dosage Form', p.dosageForm||''],
+    ['Container', cb.container||p.containerType||''],
+    ['Units per Container', cb.piecesPerContainer!=null?cb.piecesPerContainer:''],
+    ['Batch Units', Number(p.batchUnits)||0], ['Stage', p.stage||''],
+    ['Approved & Locked', isLocked(p)?'YES':'NO'],
+    ['Approved by', fl.byName||fl.by||''], ['Approved on', fl.ts?fmtTs(fl.ts):''],
+    ['Exported', fmtTs(nowISO())],
+    ['NOTE','Costs trace to MISys / the Master Bid model. Tier pricing is manual. Requires Enova review before use.'],
+  ];
+  const bc = [
+    ['Line item','$ / unit'],
+    ['Active ingredients', num(cb.activeCPU)], ['Gummy base', num(cb.baseCPU)],
+    ['Capsule shells', num(cb.shellCPU)], ['Packaging', num(cb.pkgCPU)],
+    ['Direct materials / unit', num(cb.materialsCPU)],
+    ['Freight-in + material loss', num(cb.dmExtraCPU)],
+    ['Direct labor (Master Bid)', num(cb.laborPerUnit)],
+    ['Mfg overhead (Master Bid)', num(cb.overheadCPU)],
+    ['TOTAL COGS / unit', num(cb.cogsPerUnit)],
+    ['Master Bid form', cb.mbForm||''], ['Costed at (units)', cb.mbBatchQty!=null?cb.mbBatchQty:''],
+  ];
+  const tiers = Array.isArray(p.tierPricing) ? p.tierPricing : [];
+  const bid = [['Number of Units','Sale Price / Unit (manual)','COGS / Unit','Extended Revenue']];
+  tiers.forEach(t=>{ const units=Number(t.units)||0, price=t.price!=null?Number(t.price):null;
+    bid.push([units, price!=null?price:'', cb.cogsPerUnit!=null?Number(cb.cogsPerUnit):'', price!=null?+(price*units).toFixed(2):'']); });
+  if (!tiers.length) bid.push(['(no tiers entered — tier pricing is manual)','','','']);
+  return { filename:`${p.pn}_record.xlsx`, sheets:[
+    {name:'Cover', aoa:cover}, {name:'Master Formula', aoa:[mfHead, ...mfRows]},
+    {name:'Batch Cost Build', aoa:bc}, {name:'Bid', aoa:bid} ] };
+}
+function exportProjectWorkbook(p){
+  if (typeof XLSX==='undefined' || !XLSX.utils){ if(typeof window!=='undefined'&&window.alert) window.alert('Spreadsheet library still loading — try again in a moment.'); return; }
+  const d = buildAuditWorkbook(p);
+  const wb = XLSX.utils.book_new();
+  d.sheets.forEach(s => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s.aoa), s.name));
+  XLSX.writeFile(wb, d.filename);
 }
 
 // Shared helper: read a browser File object into base64 (used by both the WIP
@@ -1964,7 +2063,10 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
   const [sentMsg, setSentMsg] = useState('');
   const p = proj;
   const upd = (patch) => { if (onUpdate) onUpdate(p.pn, patch); };
+  // Append an audit entry through the shared onUpdate (Project Page has no setProjects).
+  const auditUpd = (action, detail, extra) => { if (onUpdate) onUpdate(p.pn, { ...(extra||{}), auditLog:[...(p.auditLog||[]), auditEntry(action, detail)].slice(-500) }); };
   const cb = p.cogsBreakdown || null;
+  const audit = Array.isArray(p.auditLog) ? p.auditLog : [];
   const qty = Number(p.batchUnits)||0;
   const sell   = projUnitPrice(p);
   const cogs   = cb && cb.cogsPerUnit!=null ? cb.cogsPerUnit : null;
@@ -2164,6 +2266,37 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
           <div className="pp-notes">{p.notes}</div>
         </div>)}
 
+        {/* Auditable record export + approval status */}
+        <div className="pp-job" style={{marginTop:14}}>
+          <div className="pp-job-h"><span>Record &amp; Approval</span>
+            <span style={{marginLeft:'auto',display:'flex',gap:10,alignItems:'center'}}>
+              {isLocked(p)
+                ? <span className="fbadge ok">🔒 Approved &amp; locked — {(p.formulaLock&&(p.formulaLock.byName||p.formulaLock.by))||'—'}</span>
+                : <span className="fbadge warn">Not approved / locked</span>}
+              <button className="fbtn sec sm" onClick={()=>exportProjectWorkbook(p)}>⬇ Export Workbook (.xlsx)</button>
+            </span>
+          </div>
+          <div className="pp-note" style={{padding:'8px 12px'}}>
+            The workbook export mirrors the Master Formula + Master Bid layout (Cover · Master Formula · Batch Cost Build · Bid) using the project's captured formula and the approved cost snapshot — an auditable record for QA. Nothing is invented; tier pricing stays manual.
+          </div>
+        </div>
+
+        {/* Append-only audit trail (who / when / what) */}
+        <div className="pp-job" style={{marginTop:14}}>
+          <div className="pp-job-h"><span>Audit Trail</span><span style={{marginLeft:'auto',fontSize:11,color:'#8794a0'}}>{audit.length} event{audit.length===1?'':'s'}</span></div>
+          {audit.length===0
+            ? <div className="pp-note" style={{padding:'8px 12px'}}>No recorded activity yet. Actions (generate, edit, approve/lock, stage changes, reviews) are logged here automatically.</div>
+            : <div className="pp-audit">
+                {[...audit].reverse().map(a => (
+                  <div className="pp-audit-row" key={a.id}>
+                    <span className="pp-audit-ts">{fmtTs(a.ts)}</span>
+                    <span className="pp-audit-by">{a.byName||a.by||'—'}</span>
+                    <span className="pp-audit-act">{a.action}{a.detail?<span className="pp-audit-det"> — {a.detail}</span>:null}</span>
+                  </div>
+                ))}
+              </div>}
+        </div>
+
         {onFormulate && (
           <div className="pp-footer">
             <button className="pp-formulate-btn" onClick={()=>onFormulate(proj.pn)}>
@@ -2186,6 +2319,7 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
               const r = await onSendReview(proj.pn, reviewer, reviewNote);
               if (r && r.error) { setSentMsg('Could not send — check connection.'); }
               else { const nm = ((people||[]).find(x=>x.email===reviewer)||{}).name || 'them';
+                     auditUpd('Sent for review', 'to '+nm+(reviewNote?' — "'+reviewNote+'"':''));
                      setSentMsg('✓ Sent to ' + nm + '.'); setReviewer(''); setReviewNote(''); }
               setTimeout(()=>setSentMsg(''), 4000);
             }}>Send →</button>
@@ -3113,16 +3247,59 @@ const FORM_CFG = {
   },
 };
 
-// Map an app dosage form → the Master Bid Template's form key (drives the
+// ── Pack-out layer ────────────────────────────────────────────────────────
+// The blend (formula) and the DOSE FORM (how it's made — capsule/tablet/gummy/
+// powder/liquid/stickpack, = `dosageForm`) are independent of the CONTAINER the
+// finished units ship in. A powder can be jarred, bagged, or (as a capsule/
+// tablet dose form) bottled; a gummy can ship in a bottle, jar, bag, or bulk;
+// a liquid can be a tincture, bottle, or pouch; stick-packs go in a box that
+// holds a customer-specific number of sticks. Container type drives the
+// packaging line items, the "units per container" label, and bulk handling.
+const CONTAINER_TYPES = {
+  'Bottle':         { unitWord:'Bottle',  label:'Units per Bottle',       bulk:false,
+    pkg:[{k:'container',l:'Bottle',cat:'Bottle / Jar'},{k:'closure',l:'Cap / Closure',cat:'Cap / Closure'},{k:'label',l:'Label',cat:'Label'},{k:'desiccant',l:'Desiccant',cat:'Desiccant'},{k:'tamper',l:'Tamper Seal',cat:'Tamper Seal / Shrink Band'},{k:'shipper',l:'Master Shipper',cat:'Shipper / Box'}] },
+  'Jar':            { unitWord:'Jar',     label:'Units per Jar',          bulk:false,
+    pkg:[{k:'container',l:'Jar',cat:'Bottle / Jar'},{k:'closure',l:'Lid / Closure',cat:'Cap / Closure'},{k:'label',l:'Label',cat:'Label'},{k:'tamper',l:'Tamper Seal',cat:'Tamper Seal / Shrink Band'},{k:'shipper',l:'Master Shipper',cat:'Shipper / Box'}] },
+  'Bag / Pouch':    { unitWord:'Bag',     label:'Units per Bag',          bulk:false,
+    pkg:[{k:'container',l:'Retail Bag / Pouch',cat:'Bag / Pouch'},{k:'label',l:'Label',cat:'Label'},{k:'tamper',l:'Tamper Seal',cat:'Tamper Seal / Shrink Band'},{k:'shipper',l:'Master Shipper',cat:'Shipper / Box'}] },
+  'Stick-Pack Box': { unitWord:'Box',     label:'Stick Packs per Box',    bulk:false,
+    pkg:[{k:'foil',l:'Stick Pack Foil',cat:'Stick Pack'},{k:'display',l:'Display / Inner Box',cat:'Inner Case / Display'},{k:'shipper',l:'Master Shipper',cat:'Shipper / Box'}] },
+  'Tincture':       { unitWord:'Tincture',label:'mL per Tincture',        bulk:false,
+    pkg:[{k:'container',l:'Dropper Bottle',cat:'Bottle / Jar'},{k:'closure',l:'Dropper / Closure',cat:'Cap / Closure'},{k:'label',l:'Label',cat:'Label'},{k:'shipper',l:'Master Shipper',cat:'Shipper / Box'}] },
+  'Canister / Tub': { unitWord:'Canister',label:'Servings per Canister',  bulk:false,
+    pkg:[{k:'container',l:'Canister / Tub',cat:'Bottle / Jar'},{k:'closure',l:'Lid / Closure',cat:'Cap / Closure'},{k:'label',l:'Label',cat:'Label'},{k:'scoop',l:'Scoop',cat:'Scoop'},{k:'tamper',l:'Tamper Seal',cat:'Tamper Seal / Shrink Band'},{k:'shipper',l:'Master Shipper',cat:'Shipper / Box'}] },
+  'Bulk Bag':       { unitWord:'Bulk Bag',label:'Units per Bulk Bag',     bulk:true,
+    pkg:[{k:'bag',l:'Bulk Bag',cat:'Bag / Pouch (Bulk)'},{k:'shipper',l:'Master Shipper',cat:'Shipper / Box'}] },
+  'Bulk Drum':      { unitWord:'Drum',    label:'Units per Drum',         bulk:true,
+    pkg:[{k:'bag',l:'Drum / Liner',cat:'Bag / Pouch (Bulk)'},{k:'shipper',l:'Master Shipper',cat:'Shipper / Box'}] },
+  'Bulk Case':      { unitWord:'Case',    label:'Units per Master Case',  bulk:true,
+    pkg:[{k:'shipper',l:'Master Shipper / Case',cat:'Shipper / Box'}] },
+};
+// Sensible default container for a dose form + bulk flag (used when a project has
+// no explicit containerType yet — keeps every existing project rendering the same).
+function defaultContainerFor(dosageForm, isBulk){
+  switch(dosageForm){
+    case 'Capsules':
+    case 'Tablets':        return isBulk ? 'Bulk Bag' : 'Bottle';
+    case 'Powder':         return isBulk ? 'Bulk Bag' : 'Canister / Tub';
+    case 'Liquid':         return isBulk ? 'Bulk Drum' : 'Bottle';
+    case 'Stickpacks':     return isBulk ? 'Bulk Case' : 'Stick-Pack Box';
+    case 'Gummies - Retail': return isBulk ? 'Bulk Bag' : 'Bottle';
+    case 'Gummies - Bulk':   return 'Bulk Bag';
+    default:               return isBulk ? 'Bulk Bag' : 'Bottle';
+  }
+}
+// Map dose form + container → the Master Bid Template form key (drives the
 // per-form labor + packout model in window.EnovaMasterBid). Tablets run on the
 // Capsule-Bottle line (matches the real P26132 Edibolts tablet bid).
-function mbFormFor(dosageForm, isBulk){
+function mbFormFor(dosageForm, container){
+  const c = String(container||'');
   switch(dosageForm){
-    case 'Capsules':        return isBulk ? 'Capsule - Bulk' : 'Capsule - Bottle';
+    case 'Capsules':        return /bulk/i.test(c) ? 'Capsule - Bulk' : 'Capsule - Bottle';
     case 'Tablets':         return 'Capsule - Bottle';
-    case 'Powder':          return isBulk ? 'Powder - Bag' : 'Powder - Canister';
+    case 'Powder':          return /bag|bulk|drum|case/i.test(c) ? 'Powder - Bag' : 'Powder - Canister';
     case 'Liquid':          return 'Liquid';
-    case 'Stickpacks':      return 'Powder - Stickpack';
+    case 'Stickpacks':      return /bulk|case/i.test(c) ? 'Stickpack - Outsourced' : 'Powder - Stickpack';
     case 'Gummies - Retail':
     case 'Gummies - Bulk':  return 'Gummy';
     default:                return 'Capsule - Bottle';
@@ -3553,7 +3730,7 @@ function ProjectPicker({projects, activePn, onSelect, onNew}) {
               placeholder="Search project #, customer, or product…"/>
           </div>
         </div>
-        <button className="fbtn teal sm" style={{marginTop:16}} onClick={onNew}>+ New Formulation</button>
+        {onNew && <button className="fbtn teal sm" style={{marginTop:16}} onClick={onNew}>+ New Formulation</button>}
       </div>
       {open && (
         <div className="proj-picker-list">
@@ -3574,11 +3751,12 @@ function ProjectPicker({projects, activePn, onSelect, onNew}) {
 }
 
 // ── Gummy Base Panel ─────────────────────────────────────────────────────
-function FGummyBase({proj, cfg, onBaseItemSelect}) {
+function FGummyBase({proj, cfg, bulk, onBaseItemSelect}) {
+  const isBulk = bulk!==undefined ? bulk : cfg.bulk;
   const baseT = proj.gummyType==="sugarFree" ? SF_BASE : SUGAR_BASE;
   const rows = useMemo(() => {
     return baseT
-      .filter(t => !(t.coating && cfg.bulk))
+      .filter(t => !(t.coating && isBulk))
       .map((t,i) => {
         if (t.nc) return { ...t, mgG: proj.gummyWt*t.pct, cost:0 };
         const sel = (proj.baseItems||{})[i];
@@ -3586,14 +3764,14 @@ function FGummyBase({proj, cfg, onBaseItemSelect}) {
         const mgG = t.mgFixed != null ? t.mgFixed : proj.gummyWt*t.pct;
         return { ...t, mgG, cost: fresh&&fresh.u>0 ? (mgG/1000)*fresh.u : 0, fresh };
       });
-  }, [baseT, cfg.bulk, proj.gummyWt, proj.baseItems]);
+  }, [baseT, isBulk, proj.gummyWt, proj.baseItems]);
 
   const totalCost = rows.reduce((s,r)=>s+r.cost,0);
 
   return (
     <div className="panel amber">
       <h2>Gummy Base — {proj.gummyType==="sugarFree"?"Sugar-Free":"Sugar"} · {fN(proj.gummyWt,0)} mg/gummy
-        <span className="fbadge neutral" style={{marginLeft:"auto"}}>{cfg.bulk?"Bulk — no coating":"Retail — full coating process"}</span>
+        <span className="fbadge neutral" style={{marginLeft:"auto"}}>{isBulk?"Bulk — no coating":"Retail — full coating process"}</span>
       </h2>
       <table className="ftbl">
         <thead><tr><th>Section</th><th>Ingredient</th><th>% / Fixed</th><th>mg/gummy</th><th>Inventory SKU</th><th>$/gummy</th><th>Status</th></tr></thead>
@@ -3627,6 +3805,7 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
   // starts a new formulation. (Arriving via a project page's "Formulate" button
   // still focuses that project — see the targetPn effect below.)
   const [activePn, setActivePn] = useState(null);
+  const [approveChk, setApproveChk] = useState(false);   // Enova-employee approval gate for Lock & Approve
   // When the user arrives via a project page's "Formulate" button, focus that project.
   useEffect(() => { if (targetPn) setActivePn(targetPn); }, [targetPn]);
 
@@ -3637,7 +3816,7 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
 
   const newFormulation = () => {
     const pn = nextPN(projects);
-    const np = emptyProject(pn);
+    const np = withAudit(emptyProject(pn), 'Project created', 'New blank formulation');
     setProjects(prev => [...prev, np]);
     setActivePn(pn);
   };
@@ -3664,7 +3843,18 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
     );
   }
 
-  const totalUPC = (proj.servingSize||1) * (proj.servingsPerUnit||1);
+  const totalUPC = (proj.servingSize||1) * (proj.servingsPerUnit||1);   // computed pieces/container
+  // ── Pack-out (container) layer — independent of dose form ──
+  const container = proj.containerType || defaultContainerFor(proj.dosageForm, proj.isBulk);
+  const ctInfo = CONTAINER_TYPES[container] || CONTAINER_TYPES['Bottle'];
+  const isBulkPack = ctInfo.bulk || cfg.bulk || !!proj.isBulk;
+  const pkgSlots = ctInfo.pkg || [];
+  // Units (dose pieces) per finished container: editable override, else computed.
+  const piecesPerContainer = Number(proj.unitsPerContainer)>0 ? Number(proj.unitsPerContainer) : totalUPC;
+  // Effective servings/container consistent with the (possibly overridden) piece
+  // count — keeps Master Bid pieces & stick counts correct when the user types a
+  // non-derived units/container (e.g. a 90ct bottle or an N-stick box).
+  const mbServings = (proj.servingSize||0)>0 ? piecesPerContainer/(proj.servingSize||1) : (proj.servingsPerUnit||1);
   // Manual labor/overhead are now only a FALLBACK (used if the Master Bid engine
   // can't run — e.g. batch qty 0). The real numbers come from window.EnovaMasterBid.
   const laborManual = proj.laborPerUnit != null ? proj.laborPerUnit : cfg.laborDefault;
@@ -3688,20 +3878,21 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
   const baseT = proj.gummyType==="sugarFree" ? SF_BASE : SUGAR_BASE;
   const baseCPG = useMemo(() => {
     if (!cfg.gummy) return 0;
-    return baseT.filter(t=>!(t.coating&&cfg.bulk)).reduce((sum,t,i)=>{
+    return baseT.filter(t=>!(t.coating&&isBulkPack)).reduce((sum,t,i)=>{
       if (t.nc) return sum;
       const sel = (proj.baseItems||{})[i];
       const fresh = sel ? INV_IX[sel.n] : (t.rm ? INV_IX[t.rm] : null);
       const mgG = t.mgFixed != null ? t.mgFixed : proj.gummyWt*t.pct;
       return sum + (fresh&&fresh.u>0 ? (mgG/1000)*fresh.u : 0);
     }, 0);
-  }, [cfg.gummy, cfg.bulk, baseT, proj.gummyWt, proj.baseItems]);
-  const baseCPU = cfg.gummy ? baseCPG * (proj.servingSize||1) * (proj.servingsPerUnit||1) : 0;
+  }, [cfg.gummy, isBulkPack, baseT, proj.gummyWt, proj.baseItems]);
+  const baseCPU = cfg.gummy ? baseCPG * piecesPerContainer : 0;
 
   // ── Shell + packaging ────────────────────────────────────────────────
+  // Shell count follows the (possibly overridden) pieces per container.
   const shellFresh = cfg.shell && proj.shellItem ? INV_IX[proj.shellItem.n] : null;
-  const shellCPU = shellFresh ? shellFresh.u * totalUPC : 0;
-  const pkgCPU = (cfg.pkg||[]).reduce((s,slot)=>{
+  const shellCPU = shellFresh ? shellFresh.u * piecesPerContainer : 0;
+  const pkgCPU = pkgSlots.reduce((s,slot)=>{
     const sel = (proj.pkg||{})[slot.k];
     if (!sel) return s;
     const f = INV_IX[sel.n];
@@ -3723,10 +3914,10 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
   // Blend mass per serving (mg): gummy total wt already includes actives+base, so
   // gummyWt × pieces/serving; every other form = summed ingredient input mg.
   const blendMassMgServ = cfg.gummy ? (Number(proj.gummyWt)||0)*(proj.servingSize||1) : actMg;
-  const blendKgPerUnit  = (blendMassMgServ*(proj.servingsPerUnit||1))/1e6;
+  const blendKgPerUnit  = (blendMassMgServ*mbServings)/1e6;
   const mbBuild = (q) => (MB && q>0) ? MB.build(MB.MB_DEFAULTS, {
-    form: mbFormFor(proj.dosageForm, cfg.bulk||proj.isBulk),
-    caps_per_serv: proj.servingSize||1, servings: proj.servingsPerUnit||1,
+    form: mbFormFor(proj.dosageForm, container),
+    caps_per_serv: proj.servingSize||1, servings: mbServings,
     dm_unit: materialsCPU, blend_size: blendKgPerUnit, base_qty: 1, loss: matLossPct
   }, q, null) : null;
   const mbRes = mbBuild(mbBatchQty);
@@ -3737,30 +3928,71 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
   // Freight-in + material-loss per unit (the "landed" delta on top of materials).
   const dmExtraCPU   = mbRes ? (mbRes.dml/mbBatchQty - materialsCPU) : 0;
 
-  // Save COGS breakdown to project for other pages (Quote/Documents later) to consume
+  // ── Approval lock + cost-drift guard ──────────────────────────────────
+  const lock = proj.formulaLock || null;
+  const locked = isLocked(proj);
+  const approvedCogs = locked && lock.cogs && lock.cogs.cogsPerUnit != null ? lock.cogs.cogsPerUnit : null;
+  const costDrift    = locked && approvedCogs != null && Math.abs(cogsPerUnit - approvedCogs) > 0.00005;
+  const formulaChanged = locked && formulaHash(proj) !== lock.hash;
+
+  const liveBreakdown = {
+    activeCPU: actCPU, baseCPU, shellCPU, pkgCPU, materialsCPU,
+    dmExtraCPU, laborPerUnit, overheadPct, overheadCPU, cogsPerUnit,
+    source: mbRes ? 'masterbid' : 'manual',
+    mbForm: mbRes ? mbFormFor(proj.dosageForm, container) : null,
+    container, piecesPerContainer,
+    mbBatchQty: mbRes ? mbBatchQty : null, mbBlends,
+  };
+  // Save COGS breakdown for other pages — but NEVER overwrite an approved (locked)
+  // snapshot, so approved costs can't silently drift when MISys prices change.
   useEffect(() => {
-    const breakdown = {
-      activeCPU: actCPU, baseCPU, shellCPU, pkgCPU, materialsCPU,
-      dmExtraCPU, laborPerUnit, overheadPct, overheadCPU, cogsPerUnit,
-      source: mbRes ? 'masterbid' : 'manual',
-      mbForm: mbRes ? mbFormFor(proj.dosageForm, cfg.bulk||proj.isBulk) : null,
-      mbBatchQty: mbRes ? mbBatchQty : null, mbBlends,
-    };
-    if (JSON.stringify(breakdown) !== JSON.stringify(proj.cogsBreakdown)) {
-      upd({ cogsBreakdown: breakdown });
+    if (locked) return;
+    if (JSON.stringify(liveBreakdown) !== JSON.stringify(proj.cogsBreakdown)) {
+      upd({ cogsBreakdown: liveBreakdown });
     }
-  }, [actCPU, baseCPU, shellCPU, pkgCPU, materialsCPU, laborPerUnit, overheadCPU, cogsPerUnit, mbBatchQty]);
+  }, [actCPU, baseCPU, shellCPU, pkgCPU, materialsCPU, laborPerUnit, overheadCPU, cogsPerUnit, mbBatchQty, container, piecesPerContainer, locked]);
+
+  // Lock & approve: freeze the current cost build + formula signature under the
+  // signing Enova employee. Unlock reopens editing. Both are audited.
+  const lockApprove = () => {
+    setProjects(prev => prev.map(p => {
+      if (p.pn !== proj.pn) return p;
+      const snap = { ...liveBreakdown };
+      const fl = { locked:true, by:CURRENT_ACTOR.email, byName:CURRENT_ACTOR.name,
+        ts:nowISO(), cogs:snap, hash:formulaHash(p) };
+      return withAudit({ ...p, formulaLock:fl, cogsBreakdown:snap },
+        'Formula LOCKED & APPROVED',
+        `${f$(snap.cogsPerUnit)}/unit @ ${(snap.mbBatchQty||mbBatchQty).toLocaleString()} units · ${proj.dosageForm} · ${container}`);
+    }));
+  };
+  const reapprove = () => {
+    setProjects(prev => prev.map(p => {
+      if (p.pn !== proj.pn) return p;
+      const snap = { ...liveBreakdown };
+      const fl = { ...(p.formulaLock||{}), locked:true, by:CURRENT_ACTOR.email, byName:CURRENT_ACTOR.name,
+        ts:nowISO(), cogs:snap, hash:formulaHash(p) };
+      return withAudit({ ...p, formulaLock:fl, cogsBreakdown:snap },
+        'Cost re-approved', `${f$(snap.cogsPerUnit)}/unit (was ${f$(approvedCogs)})`);
+    }));
+  };
+  const unlock = () => {
+    setProjects(prev => prev.map(p => p.pn===proj.pn
+      ? withAudit({ ...p, formulaLock:{ ...(p.formulaLock||{}), locked:false, unlockedBy:CURRENT_ACTOR.email, unlockedTs:nowISO() } }, 'Formula unlocked for editing', '')
+      : p));
+  };
 
   const noMatch = (proj.ingredients||[]).filter(r=>!r.item);
   const noCost  = calcIng.filter(r=>r.item && (!r.fresh || r.fresh.u===0));
 
-  const addIng = () => upd({ ingredients:[...(proj.ingredients||[]), {id:Math.random(), item:null, inputMg:0, potencyPct:100}] });
-  const remIng = id => upd({ ingredients:(proj.ingredients||[]).filter(r=>r.id!==id) });
-  const mutIng = (id,p) => upd({ ingredients:(proj.ingredients||[]).map(r=>r.id===id?{...r,...p}:r) });
-  const setBaseItem = (i,item) => upd({ baseItems:{...(proj.baseItems||{}), [i]:item} });
-  const setPkg = (k,item) => upd({ pkg:{...(proj.pkg||{}), [k]:item} });
+  const addIng = () => { if (locked) return; upd({ ingredients:[...(proj.ingredients||[]), {id:Math.random(), item:null, inputMg:0, potencyPct:100}] }); logAudit(setProjects, proj.pn, 'Ingredient row added', ''); };
+  const remIng = id => { if (locked) return; const r=(proj.ingredients||[]).find(x=>x.id===id); upd({ ingredients:(proj.ingredients||[]).filter(x=>x.id!==id) }); logAudit(setProjects, proj.pn, 'Ingredient removed', r?((r.item&&r.item.d)||r.importedName||''):''); };
+  const mutIng = (id,p) => { if (locked) return; upd({ ingredients:(proj.ingredients||[]).map(r=>r.id===id?{...r,...p}:r) }); };
+  const setBaseItem = (i,item) => { if (locked) return; upd({ baseItems:{...(proj.baseItems||{}), [i]:item} }); };
+  const setPkg = (k,item) => { if (locked) return; upd({ pkg:{...(proj.pkg||{}), [k]:item} }); };
 
   const handleIntakeApply = (ext, matches) => {
+    // Never overwrite an approved/locked formula without an explicit unlock.
+    if (locked) { if (typeof window!=='undefined' && window.alert) window.alert('This formula is approved & locked. Unlock it first to replace the formula.'); return; }
     const rows = matches.map(m => ({ id:Math.random(), item:m.match?m.match.item:null,
       inputMg:m.mg||0, potencyPct:100, aiSuggested:true, importedName:m.name }));
     // Guard: don't silently overwrite an existing formula.
@@ -3793,9 +4025,13 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
     // Reset form-dependent selections when the form actually changes.
     if (patch.dosageForm && patch.dosageForm !== proj.dosageForm) {
       patch.pkg = {}; patch.shellItem = null; patch.baseItems = {}; patch.laborPerUnit = null;
+      patch.containerType = defaultContainerFor(patch.dosageForm, patch.isBulk!=null?patch.isBulk:proj.isBulk);
+      patch.unitsPerContainer = null;
     }
     if (rows.length) { patch.ingredients = rows; patch.baseItems = {}; }
     upd(patch);
+    if (rows.length) logAudit(setProjects, proj.pn, 'Formula generated',
+      `${rows.length} ingredient${rows.length===1?'':'s'} extracted${ext.productName?' · '+ext.productName:''}`);
   };
 
   // ── Tier pricing preview (realistic margin model) ───────────────────
@@ -3821,6 +4057,9 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
       </div>
       <div className="fp-content">
 
+        {locked && <div className="falert ok" style={{display:"flex",alignItems:"center",gap:10}}>
+          🔒 <span><strong>Approved &amp; locked</strong> by {lock.byName||lock.by} on {fmtTs(lock.ts)}. The formula and cost build are frozen. Use <strong>Unlock to edit</strong> in the Review, Approval &amp; Lock panel below to make changes.</span></div>}
+
         <div className="panel">
           <h2>Select or Create Project</h2>
           <ProjectPicker projects={projects} activePn={activePn} onSelect={setActivePn} onNew={newFormulation}/>
@@ -3838,37 +4077,45 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
             <div className="ff"><label>Customer</label><input value={proj.customer||''} onChange={e=>upd({customer:e.target.value})}/></div>
             <div className="ff"><label>Product Name</label><input value={proj.product||''} onChange={e=>upd({product:e.target.value})}/></div>
             <div className="ff"><label>Dosage Form</label>
-              <select value={proj.dosageForm} onChange={e=>{const f=e.target.value;upd({dosageForm:f,overage:(FORM_CFG[f]&&FORM_CFG[f].overage)||.03,pkg:{},shellItem:null,baseItems:{},laborPerUnit:null});}}>
+              <select disabled={locked} value={proj.dosageForm} onChange={e=>{const f=e.target.value;upd({dosageForm:f,overage:(FORM_CFG[f]&&FORM_CFG[f].overage)||.03,pkg:{},shellItem:null,baseItems:{},laborPerUnit:null,containerType:defaultContainerFor(f,proj.isBulk),unitsPerContainer:null});}}>
                 {Object.keys(FORM_CFG).map(k=><option key={k}>{k}</option>)}
               </select></div>
             <div className="ff"><label>Order Type</label>
-              <select value={proj.isBulk?'bulk':'packaged'} onChange={e=>upd({isBulk:e.target.value==='bulk'})}>
-                <option value="packaged">Packaged / Bottled</option>
+              <select disabled={locked} value={isBulkPack?'bulk':'packaged'}
+                onChange={e=>{const b=e.target.value==='bulk'; upd({isBulk:b, containerType:defaultContainerFor(proj.dosageForm,b), pkg:{}});}}>
+                <option value="packaged">Packaged / Finished</option>
                 <option value="bulk">Bulk</option>
+              </select></div>
+            <div className="ff"><label>Container Type</label>
+              <select disabled={locked} value={container} onChange={e=>{const ct=e.target.value; upd({containerType:ct, isBulk:!!(CONTAINER_TYPES[ct]&&CONTAINER_TYPES[ct].bulk), pkg:{}});}}>
+                {Object.keys(CONTAINER_TYPES).map(k=><option key={k}>{k}</option>)}
               </select></div>
           </div>
           <div className="fr">
-            <div className="ff"><label>Serving Size ({cfg.uom})</label><input type="number" min="0" value={proj.servingSize ?? 1} onChange={e=>upd({servingSize:Number(e.target.value)||0})}/></div>
-            <div className="ff"><label>Servings / Unit</label><input type="number" min="0" value={proj.servingsPerUnit ?? 30} onChange={e=>upd({servingsPerUnit:Number(e.target.value)||0})}/></div>
-            <div className="ff"><label>Total Units/Container</label><input className="ro" disabled value={totalUPC}/></div>
-            <div className="ff"><label>Overage %</label><input type="number" step=".005" value={proj.overage ?? cfg.overage} onChange={e=>upd({overage:Number(e.target.value)||0})}/></div>
-            <div className="ff"><label>Batch Units</label><input type="number" min="0" value={proj.batchUnits ?? 0} onChange={e=>upd({batchUnits:Number(e.target.value)||0})}/></div>
+            <div className="ff"><label>Serving Size ({cfg.uom})</label><input disabled={locked} type="number" min="0" value={proj.servingSize ?? 1} onChange={e=>upd({servingSize:Number(e.target.value)||0})}/></div>
+            <div className="ff"><label>Servings / Unit</label><input disabled={locked} type="number" min="0" value={proj.servingsPerUnit ?? 30} onChange={e=>upd({servingsPerUnit:Number(e.target.value)||0})}/></div>
+            <div className="ff"><label>{ctInfo.label}</label>
+              <input disabled={locked} type="number" min="0" value={proj.unitsPerContainer ?? totalUPC}
+                onChange={e=>upd({unitsPerContainer:Number(e.target.value)||0})}/>
+              <span className="fsmall">{proj.unitsPerContainer!=null&&proj.unitsPerContainer!==totalUPC?`override · derived ${totalUPC}`:`= serving size × servings/unit`}</span></div>
+            <div className="ff"><label>Overage %</label><input disabled={locked} type="number" step=".005" value={proj.overage ?? cfg.overage} onChange={e=>upd({overage:Number(e.target.value)||0})}/></div>
+            <div className="ff"><label>Batch Units</label><input disabled={locked} type="number" min="0" value={proj.batchUnits ?? 0} onChange={e=>upd({batchUnits:Number(e.target.value)||0})}/></div>
             <div className="ff"><label>MOQ</label><input className="ro" disabled value={cfg.moq.toLocaleString()}/></div>
             {cfg.gummy && (
               <div className="ff"><label>Gummy Type</label>
-                <select value={proj.gummyType ?? 'sugar'} onChange={e=>upd({gummyType:e.target.value,baseItems:{}})}>
+                <select disabled={locked} value={proj.gummyType ?? 'sugar'} onChange={e=>upd({gummyType:e.target.value,baseItems:{}})}>
                   <option value="sugar">Sugar</option><option value="sugarFree">Sugar-Free</option>
                 </select></div>
             )}
             {cfg.gummy && (
               <div className="ff" style={{maxWidth:110}}><label>Gummy Wt (mg)</label>
-                <input type="number" min="500" value={proj.gummyWt ?? 4500} onChange={e=>upd({gummyWt:Number(e.target.value)||4500})}/></div>
+                <input disabled={locked} type="number" min="500" value={proj.gummyWt ?? 4500} onChange={e=>upd({gummyWt:Number(e.target.value)||4500})}/></div>
             )}
           </div>
           {belowMoq && <div className="falert warn">Batch ({fN(proj.batchUnits,0)} units) is below {proj.dosageForm} MOQ ({fN(cfg.moq,0)}). Confirm with customer before quoting.</div>}
         </div>
 
-        {cfg.gummy && <FGummyBase proj={proj} cfg={cfg} onBaseItemSelect={setBaseItem}/>}
+        {cfg.gummy && <FGummyBase proj={proj} cfg={cfg} bulk={isBulkPack} onBaseItemSelect={setBaseItem}/>}
 
         <div className="panel">
           <h2>{cfg.gummy?"Active Ingredients":"Ingredients"} — Amount, Potency, and Cost per Ingredient
@@ -3891,8 +4138,8 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
                       <FInvSearch val={row.item?row.item.d:""} onSelect={s=>mutIng(row.id,{item:s})}/>
                       {row.item && <div className="fsmall">{row.item.n}</div>}
                     </td>
-                    <td><input className="fcell" type="number" min="0" value={row.inputMg} onChange={e=>mutIng(row.id,{inputMg:Number(e.target.value)||0})}/></td>
-                    <td><input className="fcell" type="number" min="0" max="100" value={row.potencyPct} onChange={e=>mutIng(row.id,{potencyPct:Number(e.target.value)||0})}/></td>
+                    <td><input disabled={locked} className="fcell" type="number" min="0" value={row.inputMg} onChange={e=>mutIng(row.id,{inputMg:Number(e.target.value)||0})}/></td>
+                    <td><input disabled={locked} className="fcell" type="number" min="0" max="100" value={row.potencyPct} onChange={e=>mutIng(row.id,{potencyPct:Number(e.target.value)||0})}/></td>
                     <td className="fsmall" style={{fontFamily:"var(--mono)"}}>{fN(row.mgPS,2)}</td>
                     <td className="fsmall" style={{fontFamily:"var(--mono)"}}>{f$(row.cPS,5)}</td>
                     <td className="fsmall" style={{fontFamily:"var(--mono)",fontWeight:600}}>{f$(cost_unit,4)}</td>
@@ -3905,7 +4152,7 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
               })}
             </tbody>
           </table>
-          <div className="fbrow"><button className="fbtn sec sm" onClick={addIng}>+ Add Ingredient</button></div>
+          <div className="fbrow"><button className="fbtn sec sm" disabled={locked} onClick={addIng}>+ Add Ingredient</button></div>
           <div className="fts">
             <div><span className="ftl">Total mg/serving</span><span className="ftv">{fN(actMg,1)}</span></div>
             <div><span className="ftl">Cost/serving</span><span className="ftv">{f$(actCPS,4)}</span></div>
@@ -3915,18 +4162,19 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
         </div>
 
         <div className="panel">
-          <h2>Packaging — Type &amp; Units per Container</h2>
-          {cfg.bulk && <div className="falert info">Bulk format — bag + shipper only. No retail container/closure/label.</div>}
+          <h2>Packaging — {container} · {ctInfo.label}
+            <span className={"fbadge "+(isBulkPack?"warn":"neutral")} style={{marginLeft:"auto"}}>{isBulkPack?"Bulk pack-out":"Finished / retail"}</span></h2>
+          {isBulkPack && <div className="falert info">Bulk pack-out ({container}) — no retail bottle/closure/label. Bulk container + master shipper only.</div>}
           {cfg.shell && (
             <div className="pkgr">
               <label>Capsule Shells</label>
               <FPkgSearch val={proj.shellItem} cat="Capsule Shell" onSelect={item=>upd({shellItem:item})}/>
               <span className="fsmall">{shellFresh?f$(shellFresh.u,5)+"/ea":"—"}</span>
               <span className="fsmall" title="MISys on-hand">{shellFresh&&shellFresh.q!=null?`${fN(shellFresh.q,0)} on hand`:""}</span>
-              <span className="fsmall">×{totalUPC} = {f$(shellCPU,4)}</span>
+              <span className="fsmall">×{piecesPerContainer} = {f$(shellCPU,4)}</span>
             </div>
           )}
-          {(cfg.pkg||[]).map(slot => {
+          {pkgSlots.map(slot => {
             const sel = (proj.pkg||{})[slot.k];
             const fresh = sel ? INV_IX[sel.n] : null;
             return (
@@ -3940,7 +4188,7 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
             );
           })}
           <div className="fts">
-            <div><span className="ftl">Units per container</span><span className="ftv">{totalUPC}</span></div>
+            <div><span className="ftl">{ctInfo.label}</span><span className="ftv">{piecesPerContainer}</span></div>
             <div><span className="ftl">Packaging cost/unit</span><span className="ftv">{f$(pkgCPU,4)}</span></div>
           </div>
         </div>
@@ -3951,7 +4199,7 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
               {mbRes?"Master Bid model":"Manual fallback (set batch qty)"}</span></h2>
           {mbRes ? (
             <>
-              <p className="fsmall" style={{marginBottom:8}}>Computed by the Enova Master Bid engine at <strong>{mbBatchQty.toLocaleString()} units</strong> · <strong>{mbBlends} blend{mbBlends===1?"":"s"}</strong> · form <strong>{mbFormFor(proj.dosageForm, cfg.bulk||proj.isBulk)}</strong>. Validated to the digit against the Master Bid Template (P26132). Labor and overhead scale with quantity — see the tier reference below.</p>
+              <p className="fsmall" style={{marginBottom:8}}>Computed by the Enova Master Bid engine at <strong>{mbBatchQty.toLocaleString()} units</strong> · <strong>{mbBlends} blend{mbBlends===1?"":"s"}</strong> · form <strong>{mbFormFor(proj.dosageForm, container)}</strong>. Validated to the digit against the Master Bid Template (P26132). Labor and overhead scale with quantity — see the tier reference below.</p>
               <div className="fr">
                 <div className="ff"><label>Direct Labor $ / Unit</label><input className="ro" disabled value={f$(laborPerUnit,4)}/>
                   <span className="fsmall">Pharmacy + Blending + Encap/Deposit + Inspection + Packout</span></div>
@@ -3982,7 +4230,7 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
           <h2 style={{borderBottom:"none"}}>Finished Unit Cost (COGS) — Full Breakdown</h2>
           <div className="line"><span>Active ingredients (incl. {(proj.overage*100).toFixed(1)}% overage)</span><span>{f$(actCPU)}</span></div>
           {cfg.gummy && <div className="line"><span>Gummy base ({proj.gummyType==="sugarFree"?"Sugar-Free":"Sugar"})</span><span>{f$(baseCPU)}</span></div>}
-          {cfg.shell && <div className="line"><span>Capsule shells ({totalUPC} × shell)</span><span>{f$(shellCPU)}</span></div>}
+          {cfg.shell && <div className="line"><span>Capsule shells ({piecesPerContainer} × shell)</span><span>{f$(shellCPU)}</span></div>}
           <div className="line"><span>Packaging</span><span>{f$(pkgCPU)}</span></div>
           {mbRes && <div className="line"><span>Freight-in + material loss ({(matLossPct*100).toFixed(1)}%)</span><span>{f$(dmExtraCPU)}</span></div>}
           <div className="line"><span>Direct labor{mbRes?" (Master Bid)":""}</span><span>{f$(laborPerUnit)}</span></div>
@@ -4009,13 +4257,38 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
         </div>
 
 
-        <div className="panel">
-          <h2>Review &amp; Approval</h2>
-          <p className="fsmall">This formulation is a working draft in your current session. It has <strong>not</strong> been saved to a permanent database and requires review and sign-off by an Enova employee before it is used for a customer quote or production document.</p>
-          <div className="fbrow">
-            <button className="fbtn navy" onClick={()=>upd({stage:'Sample/Formula Development'})}>Submit Formula for Review</button>
-            <span className="fsmall">Moves this project to "Sample/Formula Development" on the WIP Board (the review/sample stage).</span>
-          </div>
+        <div className={"panel "+(locked?"fcf ok":"")}>
+          <h2>Review, Approval &amp; Lock
+            <span className={"fbadge "+(locked?"ok":"warn")} style={{marginLeft:"auto"}}>{locked?"🔒 Approved & Locked":"Draft — not approved"}</span></h2>
+
+          {!locked && (<>
+            <p className="fsmall">Approving <strong>locks the formula and the cost build</strong> so approved costs cannot silently drift when MISys prices change. Every generated item still requires this Enova-employee sign-off before it is used for a customer quote or production document.</p>
+            <label className="ff-check" style={{display:"flex",alignItems:"center",gap:8,margin:"8px 0",fontSize:12.5}}>
+              <input type="checkbox" checked={approveChk} onChange={e=>setApproveChk(e.target.checked)}/>
+              I am an Enova employee. I have reviewed this formula and I approve the cost build ({f$(cogsPerUnit)}/unit @ {mbBatchQty.toLocaleString()} units).
+            </label>
+            <div className="fbrow">
+              <button className="fbtn ok" disabled={!approveChk} onClick={()=>{ lockApprove(); setApproveChk(false); }}>🔒 Lock &amp; Approve</button>
+              <button className="fbtn navy" onClick={()=>{ upd({stage:'Sample/Formula Development'}); logAudit(setProjects, proj.pn, 'Submitted for review', 'Stage → Sample/Formula Development'); }}>Submit for Review (no lock)</button>
+              <span className="fsmall">Approve when the formula is final. "Submit for Review" just moves it to the review stage.</span>
+            </div>
+          </>)}
+
+          {locked && (<>
+            <div className="line"><span>Approved by</span><span>{lock.byName||lock.by||'—'}</span></div>
+            <div className="line"><span>Approved on</span><span>{fmtTs(lock.ts)}</span></div>
+            <div className="line"><span>Approved COGS / unit</span><span>{f$(approvedCogs)} @ {(lock.cogs&&lock.cogs.mbBatchQty||mbBatchQty).toLocaleString()} units</span></div>
+            <div className="line"><span>Live COGS / unit (now)</span><span>{f$(cogsPerUnit)}</span></div>
+            {(costDrift||formulaChanged) && (
+              <div className="falert warn" style={{marginTop:8}}>⚠ {formulaChanged?"The formula/setup has changed since approval. ":""}{costDrift?`Cost has drifted: live ${f$(cogsPerUnit)} vs approved ${f$(approvedCogs)}. `:""}Quotes &amp; the MFSO still use the <strong>approved</strong> value until an Enova employee re-approves.</div>
+            )}
+            {!costDrift && !formulaChanged && <div className="falert ok" style={{marginTop:8}}>✓ Live cost matches the approved snapshot. No drift.</div>}
+            <div className="fbrow" style={{marginTop:10}}>
+              <button className="fbtn sec" onClick={()=>{ if(!window.confirm||window.confirm('Unlock this approved formula for editing? Costs will resume auto-updating.')) unlock(); }}>🔓 Unlock to edit</button>
+              {(costDrift||formulaChanged) && <button className="fbtn ok" onClick={reapprove}>Re-approve at current cost ({f$(cogsPerUnit)})</button>}
+              <span className="fsmall">Unlocking is recorded in the audit trail.</span>
+            </div>
+          </>)}
         </div>
 
       </div>
@@ -4090,8 +4363,8 @@ const QUOTE_NOTICES = [
 const QUOTE_DISCLAIMER = "This information is provided for the exclusive use of the client listed above and is not for public circulation or for use by any other third party. The information only applies to the listed revision of the product referenced above, current at the time of client receipt of the information and is not applicable to any other product. The information has been generated by Enova Science as suggestion only and is not to be considered authoritative. Enova Science assumes no liability for errors or omissions, or for any loss associated with a non compliant label that was created referencing this information, and the client bears the sole responsibility to ensure their product is labeled in compliance with applicable laws.";
 
 function QuotePage({ projects, setProjects, onToggleNav }){
-  const firstWithFormula = projects.find(p => p.ingredients && p.ingredients.length);
-  const [pn, setPn] = useState(() => (firstWithFormula || projects[0] || {}).pn || null);
+  // Opens BLANK — the quote is empty until an Enova user recalls a project.
+  const [pn, setPn] = useState(null);
   const proj = projects.find(p => p.pn === pn) || null;
   const upd = (patch) => setProjects(prev => prev.map(p => p.pn === pn ? { ...p, ...patch } : p));
   const cfg = proj ? (FORM_CFG[proj.dosageForm] || FORM_CFG.Capsules) : FORM_CFG.Capsules;
@@ -4158,10 +4431,18 @@ function QuotePage({ projects, setProjects, onToggleNav }){
   };
 
   if (!proj) {
-    return <div className="app-page" style={{background:'var(--paper)'}}>
-      <div className="gen-top"><button className="sb-toggle gen-ham" onClick={onToggleNav}>☰</button><div className="gen-title">Quote</div></div>
-      <div className="gen-body"><div className="panel"><p className="fsmall">No projects yet. Create one on the Formulation page first.</p></div></div>
-    </div>;
+    return (
+      <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+        <div className="gen-top"><button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button><div className="gen-title">Quote</div></div>
+        <div className="gen-body">
+          <div className="panel">
+            <h2>Recall a Project</h2>
+            <ProjectPicker projects={projects} activePn={null} onSelect={(x)=>setPn(x)}/>
+            <p className="fsmall" style={{marginTop:10}}>Nothing is loaded. Search a project above to build its quote. Tier pricing is always entered manually, and the quote requires Enova review before it is sent.</p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -4238,8 +4519,8 @@ function QuotePage({ projects, setProjects, onToggleNav }){
    Formulation page's saved breakdown, tier prices entered MANUALLY. Nothing is invented.
    Every generated MFSO must be approved by an Enova employee before it is marked signed. */
 function GeneratePage({ projects, setProjects, onToggleNav }){
-  const firstWithFormula = projects.find(p => p.ingredients && p.ingredients.length);
-  const [pn, setPn] = useState(() => (firstWithFormula || projects[0] || {}).pn || null);
+  // Opens BLANK — nothing generates until an Enova user recalls a project.
+  const [pn, setPn] = useState(null);
   const [step, setStep] = useState(1);
   const [approved, setApproved] = useState(false);
   const proj = projects.find(p => p.pn === pn) || null;
@@ -4324,12 +4605,24 @@ function GeneratePage({ projects, setProjects, onToggleNav }){
     if (w) { w.document.write(doc); w.document.close(); w.focus(); setTimeout(() => w.print(), 250); }
   };
 
-  const markSignedMFSO = () => { upd({ stage: 'MFSO' }); };
+  const markSignedMFSO = () => { upd({ stage: 'MFSO' }); logAudit(setProjects, pn, 'MFSO signed', 'Stage → MFSO'); };
 
   if (!proj) {
-    return <div className="app-page" style={{background:'var(--paper)'}}>
-      <div className="gen-wrap"><div className="panel"><p className="fsmall">No projects yet. Create one on the Formulation page first.</p></div></div>
-    </div>;
+    return (
+      <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+        <div className="gen-top">
+          <button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+          <div className="gen-title">Generate</div>
+        </div>
+        <div className="gen-body">
+          <div className="panel">
+            <h2>Recall a Project</h2>
+            <ProjectPicker projects={projects} activePn={null} onSelect={(x)=>{setPn(x);setStep(1);setApproved(false);}}/>
+            <p className="fsmall" style={{marginTop:10}}>Nothing is loaded. Search a project above to run the <strong>Request → Formula → Quote → MFSO</strong> pipeline. Nothing generates until you choose one — and every generated item still requires Enova review before it is saved or sent.</p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const STEPS = ['Request','Formula','Quote','MFSO'];
@@ -4706,6 +4999,9 @@ function Root(){
 
 function App({ session }) {
   const email = (session && session.user && session.user.email) || null;
+  // Attribute every audit entry to the signed-in Enova user (module-level actor,
+  // read by logAudit/withAudit without prop-threading through every page).
+  CURRENT_ACTOR = { email, name: email ? emailToName(email) : 'Enova' };
   const [nav, setNav] = useState('wip');
   const [collapsed, setCollapsed] = useState(false);
   const toggleNav = () => setCollapsed(c => !c);
@@ -4728,7 +5024,9 @@ function App({ session }) {
     setProjects(prev => prev.map(p => {
       if (p.pn !== pn) return p;
       const nextRev = (Number(p.revision)||1) + 1;
-      return { ...p, revision: nextRev, revCount: Math.max(Number(p.revCount)||1, nextRev) };
+      // A new revision reopens editing: clear any prior approval lock and log it.
+      return withAudit({ ...p, revision: nextRev, revCount: Math.max(Number(p.revCount)||1, nextRev), formulaLock: p.formulaLock?{...p.formulaLock,locked:false}:null },
+        'New revision started', 'V'+nextRev+(isLocked(p)?' (prior approval unlocked)':''));
     }));
     setFormulationPn(pn);
     setPendingGen(pn);

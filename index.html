@@ -3113,6 +3113,22 @@ const FORM_CFG = {
   },
 };
 
+// Map an app dosage form → the Master Bid Template's form key (drives the
+// per-form labor + packout model in window.EnovaMasterBid). Tablets run on the
+// Capsule-Bottle line (matches the real P26132 Edibolts tablet bid).
+function mbFormFor(dosageForm, isBulk){
+  switch(dosageForm){
+    case 'Capsules':        return isBulk ? 'Capsule - Bulk' : 'Capsule - Bottle';
+    case 'Tablets':         return 'Capsule - Bottle';
+    case 'Powder':          return isBulk ? 'Powder - Bag' : 'Powder - Canister';
+    case 'Liquid':          return 'Liquid';
+    case 'Stickpacks':      return 'Powder - Stickpack';
+    case 'Gummies - Retail':
+    case 'Gummies - Bulk':  return 'Gummy';
+    default:                return 'Capsule - Bottle';
+  }
+}
+
 // ── Gummy base (verified from real Enova production formula, P26160 Nutrissa) ──
 const SUGAR_BASE = [
   {name:"Sugar Granulated",rm:"ALT-RP-0529",pct:.480,locked:true,section:"body"},
@@ -3607,14 +3623,14 @@ function FGummyBase({proj, cfg, onBaseItemSelect}) {
 
 // ── Formulation Page ────────────────────────────────────────────────────
 function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenPn, onGenConsumed}) {
-  const [activePn, setActivePn] = useState(() => {
-    const withFormula = projects.find(p => p.ingredients && p.ingredients.length > 0);
-    return withFormula ? withFormula.pn : (projects[0] ? projects[0].pn : null);
-  });
+  // Open blank: no project is loaded until the Enova user searches for one or
+  // starts a new formulation. (Arriving via a project page's "Formulate" button
+  // still focuses that project — see the targetPn effect below.)
+  const [activePn, setActivePn] = useState(null);
   // When the user arrives via a project page's "Formulate" button, focus that project.
   useEffect(() => { if (targetPn) setActivePn(targetPn); }, [targetPn]);
 
-  const proj = projects.find(p => p.pn === activePn) || projects[0];
+  const proj = activePn ? projects.find(p => p.pn === activePn) : null;
   const cfg  = FORM_CFG[proj && proj.dosageForm] || FORM_CFG.Capsules;
 
   const upd = (patch) => setProjects(prev => prev.map(p => p.pn === proj.pn ? { ...p, ...patch } : p));
@@ -3628,16 +3644,30 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
 
   if (!proj) {
     return (
-      <div className="fp-content">
-        <div className="panel"><p className="fsmall">No projects yet.</p>
-          <button className="fbtn teal" onClick={newFormulation}>+ New Formulation</button>
+      <div className="app-page" style={{background:'var(--paper)'}}>
+        <div className="fp-topbar">
+          <button className="sb-toggle" style={{position:'static',marginRight:10}} onClick={onToggleNav}
+            title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+          <h1>Formulation</h1>
+          <span className="fp-meta" style={{marginLeft:'auto'}}>{INVENTORY.length.toLocaleString()} SKUs</span>
+        </div>
+        <div className="fp-content">
+          <div className="panel">
+            <h2>Select or Create Project</h2>
+            <ProjectPicker projects={projects} activePn={null} onSelect={setActivePn} onNew={newFormulation}/>
+          </div>
+          <div className="panel">
+            <p className="fsmall" style={{margin:0}}>Nothing is loaded yet. Click <strong>+ New Formulation</strong> to start a formula from scratch or a customer request, or use the search above to recall an existing project. The board and inventory stay untouched until you choose one.</p>
+          </div>
         </div>
       </div>
     );
   }
 
   const totalUPC = (proj.servingSize||1) * (proj.servingsPerUnit||1);
-  const laborPerUnit = proj.laborPerUnit != null ? proj.laborPerUnit : cfg.laborDefault;
+  // Manual labor/overhead are now only a FALLBACK (used if the Master Bid engine
+  // can't run — e.g. batch qty 0). The real numbers come from window.EnovaMasterBid.
+  const laborManual = proj.laborPerUnit != null ? proj.laborPerUnit : cfg.laborDefault;
   const overheadPct  = proj.overheadPct != null ? proj.overheadPct : 0.15;
 
   // ── Ingredient costing ────────────────────────────────────────────────
@@ -3679,20 +3709,47 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
   }, 0);
 
   const blendCPU = actCPU + baseCPU;
-  const materialsCPU = blendCPU + shellCPU + pkgCPU;
-  const overheadCPU = materialsCPU * overheadPct + laborPerUnit * overheadPct;
-  const cogsPerUnit = materialsCPU + laborPerUnit + overheadCPU;
+  const materialsCPU = blendCPU + shellCPU + pkgCPU;   // Direct Materials / unit (not landed)
+
+  // ── Enova Master Bid cost engine (validated to the digit vs. Master Bid
+  //    Template + filled P26132). Labor & overhead come from the REAL per-form
+  //    model — Pharmacy/Blending/Encap/Inspection/Packout + Interest/Quality/
+  //    Warehousing/Supplies — not a flat %. DML = materials/unit + freight-in +
+  //    material loss. Falls back to the manual model only if the engine is absent
+  //    or batch qty is 0. ──
+  const MB = (typeof window!=='undefined' && window.EnovaMasterBid) ? window.EnovaMasterBid : null;
+  const mbBatchQty = Number(proj.batchUnits)>0 ? Number(proj.batchUnits) : cfg.moq;
+  const matLossPct = proj.materialLoss != null ? proj.materialLoss : 0.02;
+  // Blend mass per serving (mg): gummy total wt already includes actives+base, so
+  // gummyWt × pieces/serving; every other form = summed ingredient input mg.
+  const blendMassMgServ = cfg.gummy ? (Number(proj.gummyWt)||0)*(proj.servingSize||1) : actMg;
+  const blendKgPerUnit  = (blendMassMgServ*(proj.servingsPerUnit||1))/1e6;
+  const mbBuild = (q) => (MB && q>0) ? MB.build(MB.MB_DEFAULTS, {
+    form: mbFormFor(proj.dosageForm, cfg.bulk||proj.isBulk),
+    caps_per_serv: proj.servingSize||1, servings: proj.servingsPerUnit||1,
+    dm_unit: materialsCPU, blend_size: blendKgPerUnit, base_qty: 1, loss: matLossPct
+  }, q, null) : null;
+  const mbRes = mbBuild(mbBatchQty);
+  const laborPerUnit = mbRes ? mbRes.labor_per_unit : laborManual;
+  const overheadCPU  = mbRes ? mbRes.oh_per_unit    : (materialsCPU*overheadPct + laborManual*overheadPct);
+  const cogsPerUnit  = mbRes ? mbRes.cost_per_unit  : (materialsCPU + laborManual + overheadCPU);
+  const mbBlends     = mbRes ? mbRes.blends : null;
+  // Freight-in + material-loss per unit (the "landed" delta on top of materials).
+  const dmExtraCPU   = mbRes ? (mbRes.dml/mbBatchQty - materialsCPU) : 0;
 
   // Save COGS breakdown to project for other pages (Quote/Documents later) to consume
   useEffect(() => {
     const breakdown = {
       activeCPU: actCPU, baseCPU, shellCPU, pkgCPU, materialsCPU,
-      laborPerUnit, overheadPct, overheadCPU, cogsPerUnit,
+      dmExtraCPU, laborPerUnit, overheadPct, overheadCPU, cogsPerUnit,
+      source: mbRes ? 'masterbid' : 'manual',
+      mbForm: mbRes ? mbFormFor(proj.dosageForm, cfg.bulk||proj.isBulk) : null,
+      mbBatchQty: mbRes ? mbBatchQty : null, mbBlends,
     };
     if (JSON.stringify(breakdown) !== JSON.stringify(proj.cogsBreakdown)) {
       upd({ cogsBreakdown: breakdown });
     }
-  }, [actCPU, baseCPU, shellCPU, pkgCPU, laborPerUnit, overheadPct]);
+  }, [actCPU, baseCPU, shellCPU, pkgCPU, materialsCPU, laborPerUnit, overheadCPU, cogsPerUnit, mbBatchQty]);
 
   const noMatch = (proj.ingredients||[]).filter(r=>!r.item);
   const noCost  = calcIng.filter(r=>r.item && (!r.fresh || r.fresh.u===0));
@@ -3744,7 +3801,11 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
   // ── Tier pricing preview (realistic margin model) ───────────────────
   const tiers = (cfg.tiers||[]).map((qty,i) => {
     const comm = Math.max(0, BASE_COMM - i*COMM_STEP);
-    return { qty, price: +(cogsPerUnit + FIXED_PROFIT + comm).toFixed(4), comm };
+    // Real per-tier COGS (Master Bid cost scales down with volume); fall back to
+    // the single computed COGS if the engine can't run.
+    const tRes = mbBuild(qty);
+    const tCogs = tRes ? tRes.cost_per_unit : cogsPerUnit;
+    return { qty, cogs: tCogs, price: +(tCogs + FIXED_PROFIT + comm).toFixed(4), comm };
   });
 
   const belowMoq = proj.batchUnits>0 && proj.batchUnits < cfg.moq;
@@ -3885,22 +3946,36 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
         </div>
 
         <div className="panel">
-          <h2>Labor &amp; Overhead</h2>
-          <div className="fr">
-            <div className="ff"><label>Labor $ / Unit</label>
-              <input type="number" step="0.01" min="0"
-                value={laborPerUnit}
-                onChange={e=>upd({laborPerUnit:Number(e.target.value)||0})}/>
-              <span className="fsmall">Default for {proj.dosageForm}: {f$(cfg.laborDefault,2)}</span>
+          <h2>Labor &amp; Overhead
+            <span className={"fbadge "+(mbRes?"ok":"warn")} style={{marginLeft:"auto"}}>
+              {mbRes?"Master Bid model":"Manual fallback (set batch qty)"}</span></h2>
+          {mbRes ? (
+            <>
+              <p className="fsmall" style={{marginBottom:8}}>Computed by the Enova Master Bid engine at <strong>{mbBatchQty.toLocaleString()} units</strong> · <strong>{mbBlends} blend{mbBlends===1?"":"s"}</strong> · form <strong>{mbFormFor(proj.dosageForm, cfg.bulk||proj.isBulk)}</strong>. Validated to the digit against the Master Bid Template (P26132). Labor and overhead scale with quantity — see the tier reference below.</p>
+              <div className="fr">
+                <div className="ff"><label>Direct Labor $ / Unit</label><input className="ro" disabled value={f$(laborPerUnit,4)}/>
+                  <span className="fsmall">Pharmacy + Blending + Encap/Deposit + Inspection + Packout</span></div>
+                <div className="ff"><label>Freight-in + Material Loss $ / Unit</label><input className="ro" disabled value={f$(dmExtraCPU,4)}/>
+                  <span className="fsmall">${MB.MB_DEFAULTS.freight_kg}/kg freight · {(matLossPct*100).toFixed(1)}% loss</span></div>
+                <div className="ff"><label>Mfg Overhead $ / Unit</label><input className="ro" disabled value={f$(overheadCPU,4)}/>
+                  <span className="fsmall">Interest + Quality Docs + Warehousing + Supplies</span></div>
+              </div>
+            </>
+          ) : (
+            <div className="fr">
+              <div className="ff"><label>Labor $ / Unit (fallback)</label>
+                <input type="number" step="0.01" min="0" value={laborManual}
+                  onChange={e=>upd({laborPerUnit:Number(e.target.value)||0})}/>
+                <span className="fsmall">Default for {proj.dosageForm}: {f$(cfg.laborDefault,2)} — set a batch qty to use the Master Bid model</span>
+              </div>
+              <div className="ff"><label>Overhead % (of materials + labor)</label>
+                <input type="number" step="0.01" min="0" max="1" value={overheadPct}
+                  onChange={e=>upd({overheadPct:Number(e.target.value)||0})}/>
+                <span className="fsmall">{(overheadPct*100).toFixed(1)}% — fallback allocation</span>
+              </div>
+              <div className="ff"><label>Overhead $ / Unit (computed)</label><input className="ro" disabled value={f$(overheadCPU,4)}/></div>
             </div>
-            <div className="ff"><label>Overhead % (of materials + labor)</label>
-              <input type="number" step="0.01" min="0" max="1"
-                value={overheadPct}
-                onChange={e=>upd({overheadPct:Number(e.target.value)||0})}/>
-              <span className="fsmall">{(overheadPct*100).toFixed(1)}% — facility, utilities, admin allocation</span>
-            </div>
-            <div className="ff"><label>Overhead $ / Unit (computed)</label><input className="ro" disabled value={f$(overheadCPU,4)}/></div>
-          </div>
+          )}
         </div>
 
         <div className="panel fcf ok">
@@ -3909,9 +3984,10 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
           {cfg.gummy && <div className="line"><span>Gummy base ({proj.gummyType==="sugarFree"?"Sugar-Free":"Sugar"})</span><span>{f$(baseCPU)}</span></div>}
           {cfg.shell && <div className="line"><span>Capsule shells ({totalUPC} × shell)</span><span>{f$(shellCPU)}</span></div>}
           <div className="line"><span>Packaging</span><span>{f$(pkgCPU)}</span></div>
-          <div className="line"><span>Labor</span><span>{f$(laborPerUnit)}</span></div>
-          <div className="line"><span>Overhead ({(overheadPct*100).toFixed(0)}%)</span><span>{f$(overheadCPU)}</span></div>
-          <div className="line total"><span>Total COGS / Unit</span><span>{f$(cogsPerUnit)}</span></div>
+          {mbRes && <div className="line"><span>Freight-in + material loss ({(matLossPct*100).toFixed(1)}%)</span><span>{f$(dmExtraCPU)}</span></div>}
+          <div className="line"><span>Direct labor{mbRes?" (Master Bid)":""}</span><span>{f$(laborPerUnit)}</span></div>
+          <div className="line"><span>Mfg overhead{mbRes?" (Master Bid)":` (${(overheadPct*100).toFixed(0)}%)`}</span><span>{f$(overheadCPU)}</span></div>
+          <div className="line total"><span>Total COGS / Unit{mbRes?` @ ${mbBatchQty.toLocaleString()} units`:""}</span><span>{f$(cogsPerUnit)}</span></div>
         </div>
 
         <div className="panel">
@@ -3921,10 +3997,10 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
           <table className="ftbl">
             <thead><tr><th>Quantity</th><th>COGS</th><th>Sale Price/Unit</th></tr></thead>
             <tbody>
-              {tiers.map(({qty,price,comm},i)=>(
+              {tiers.map(({qty,cogs,price,comm},i)=>(
                 <tr key={qty} style={{background:i===0?"#eef1f4":""}}>
                   <td style={{fontFamily:"var(--mono)"}}>{qty.toLocaleString()}</td>
-                  <td style={{fontFamily:"var(--mono)"}}>{f$(cogsPerUnit)}</td>
+                  <td style={{fontFamily:"var(--mono)"}}>{f$(cogs)}</td>
                   <td style={{fontFamily:"var(--mono)",fontWeight:600}}>{f$(price)}</td>
                 </tr>
               ))}

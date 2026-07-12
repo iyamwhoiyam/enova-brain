@@ -849,7 +849,8 @@ select.pp-edit{text-align:left;}
   padding:9px 16px;font-size:13px;font-weight:700;letter-spacing:.02em;}
 .pp-job-sub{font-size:10.5px;font-weight:600;opacity:.85;}
 .pp-sec-h{background:var(--teal-soft);color:var(--navy-dk);font-size:11px;font-weight:700;
-  text-transform:uppercase;letter-spacing:.05em;padding:6px 16px;border-top:1px solid var(--line);}
+  text-transform:uppercase;letter-spacing:.05em;padding:6px 16px;margin-top:10px;border-top:1px solid var(--line);}
+.pp-job .pp-sec-h:first-of-type{margin-top:0;}
 .pp-tbl{width:100%;border-collapse:collapse;font-size:12px;}
 .pp-tbl th{text-align:left;color:#7c8a96;font-weight:700;font-size:10.5px;text-transform:uppercase;
   letter-spacing:.03em;padding:6px 16px;border-bottom:1px solid var(--line);background:#fafbfc;}
@@ -1987,20 +1988,6 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
             <span className="pp-job-sub">Linked to live MISys inventory</span>
           </div>
 
-          {/* Labor */}
-          <div className="pp-sec-h">Labor</div>
-          <table className="pp-tbl">
-            <thead><tr><th>Operation</th><th>Tech</th><th className="r">$ / unit</th></tr></thead>
-            <tbody>
-              {laborCPU!=null ? (
-                <tr><td>Production labor (blend · fill · pack · QC)</td><td>{p.pm||'—'}</td>
-                  <td className="r mono">{money(laborCPU)}</td></tr>
-              ) : (
-                <tr className="pp-empty"><td colSpan="3">No labor priced yet — populates when a cost is generated.</td></tr>
-              )}
-            </tbody>
-          </table>
-
           {/* Materials */}
           <div className="pp-sec-h">Materials — {matRows.length} ingredient{matRows.length===1?'':'s'}</div>
           <table className="pp-tbl">
@@ -2025,8 +2012,8 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
             </tbody>
           </table>
 
-          {/* Parts (packaging / components) */}
-          <div className="pp-sec-h">Parts — Packaging &amp; Components</div>
+          {/* Packaging Materials */}
+          <div className="pp-sec-h">Packaging Materials</div>
           <table className="pp-tbl">
             <thead><tr><th>Component</th><th>ALT</th><th className="r">MISys unit cost</th><th className="r">On hand</th></tr></thead>
             <tbody>
@@ -2039,6 +2026,20 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
                 </tr>
               )) : (
                 <tr className="pp-empty"><td colSpan="4">No packaging selected yet — populates from the Formulation page.</td></tr>
+              )}
+            </tbody>
+          </table>
+
+          {/* Labor */}
+          <div className="pp-sec-h">Labor</div>
+          <table className="pp-tbl">
+            <thead><tr><th>Operation</th><th>Tech</th><th className="r">$ / unit</th></tr></thead>
+            <tbody>
+              {laborCPU!=null ? (
+                <tr><td>Production labor (blend · fill · pack · QC)</td><td>{p.pm||'—'}</td>
+                  <td className="r mono">{money(laborCPU)}</td></tr>
+              ) : (
+                <tr className="pp-empty"><td colSpan="3">No labor priced yet — populates when a cost is generated.</td></tr>
               )}
             </tbody>
           </table>

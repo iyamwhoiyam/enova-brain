@@ -1122,13 +1122,16 @@ const INV_IX    = Object.fromEntries(INVENTORY.map(i => [i.n, i]));
 // on initial load AND on every future Salesforce sync, so these merges
 // never need to be redone by hand.
 const STAGE_ALIASES = {
-  "Formulating": "Formulation",
+  "Formulating": "Formulation/Sample Development",
+  "Formulation": "Formulation/Sample Development",              // merged column
+  "Sample/Formula Development": "Formulation/Sample Development",// merged column
+  "Sample/Formulation Development": "Formulation/Sample Development",
   "Sample Submitted": "Sample Sent to Customer",
   "Sample sent 3/30": "Sample Sent to Customer",
   "Samples sent to client": "Sample Sent to Customer",
   "Semple Sent": "Sample Sent to Customer",
-  "Sourcing Ingredients": "Formulation",             // retired column — folds into Formulation
-  "Formula Review Requested": "Formulation",        // retired — folds back into Formulation
+  "Sourcing Ingredients": "Formulation/Sample Development",     // retired column — folds in
+  "Formula Review Requested": "Formulation/Sample Development", // retired — folds in
   "BID Review Requested": "BID Process",             // merged into BID Process
   "BID Reviewed": "BID Process",                     // merged into BID Process
   "Tiered Pricing": "BID Process",                   // tiered pricing happens while the bid is being created
@@ -1141,8 +1144,8 @@ function normalizeStage(s) {
 }
 
 const DEFAULT_STAGES = [
-  "Pending Information","Formulation",
-  "Sample/Formula Development","Formula Reviewed",
+  "Pending Information",
+  "Formulation/Sample Development","Formula Reviewed",
   "Sample Sent to Customer",
   "BID Process","BID Sent",
   "MFSO","PO Submitted","In Production","On Hold",
@@ -1276,7 +1279,7 @@ const FORMULATION_DEFAULTS = {
 
 function emptyProject(pn) {
   return { pn, customer:'', product:'', dosageForm:'Capsules', isBulk:false,
-    stage:'Formulation', rep:'', pm:'', dateReceived:new Date().toISOString().slice(0,10),
+    stage:'Formulation/Sample Development', rep:'', pm:'', dateReceived:new Date().toISOString().slice(0,10),
     dateReceivedDisplay: new Date().toLocaleDateString('en-US'),
     revision:1, revCount:1, bidPriced:false, notes:'', status:'', approvals:{},
     formulaLock:null, auditLog:[],
@@ -1603,7 +1606,7 @@ function ImportProjectsModal({ projects, setProjects, onClose }){
           list=list.map(p=>p.pn===match.pn ? {...p, ...patch} : p);
         }else{
           const pn=(rec.pnFile||(rec.itemNo?String(rec.itemNo).split('-')[0]:null)||nextPN(list)).toUpperCase().replace(/[^A-Z0-9]/g,'');
-          const np={...emptyProject(pn), pn, stage:'Formulation',
+          const np={...emptyProject(pn), pn, stage:'Formulation/Sample Development',
             dateReceived:new Date().toISOString().slice(0,10),
             dateReceivedDisplay:new Date().toLocaleDateString('en-US'), ...patch};
           list=[...list, np];
@@ -1691,7 +1694,7 @@ const CH_HEX = {'ch-Inquiry':'#7b8794','ch-Formulating':'#2f8fc4','ch-LabReview'
   'ch-QAHold':'#8e5bb5','ch-Shipping':'#2b7a9e','ch-Completed':'#3a4a57','ch-Cancelled':'#d9534f','ch-default':'#5a6b7a'};
 const stageHex = (s) => CH_HEX[STAGE_COLOR_KEY(s)] || '#5a6b7a';
 const isClosedStage = (s) => /complete|cancel/i.test(s||'');
-const stageProgress = (s) => { if (isClosedStage(s)) return 1; const i=DEFAULT_STAGES.indexOf(s); return i<0?0:(i+1)/DEFAULT_STAGES.length; };
+const stageProgress = (s) => { if (isClosedStage(s)) return 1; const i=DEFAULT_STAGES.indexOf(normalizeStage(s)); return i<0?0:(i+1)/DEFAULT_STAGES.length; };
 const _m2 = (v) => v==null?'—':'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 
 // Convert a preset name into an inclusive ISO {from,to} range (YYYY-MM-DD).
@@ -1797,8 +1800,8 @@ function ProjectTable({ rows, closed, onOpen, noun }){
     const base = [
       {key:'label', label:'Label', options:ENOVA_FORMS, get:p=>p.dosageForm||'',
         cell:p=> p.dosageForm ? <span className="plabel" style={{background:FORM_CLR[p.dosageForm]||'#7b8794'}}>{p.dosageForm}</span> : '—'},
-      {key:'stage', label:'Status', options:DEFAULT_STAGES, get:p=>p.stage||'',
-        cell:p=> <span style={{display:'inline-flex',alignItems:'center',gap:6,whiteSpace:'nowrap'}}><span style={{width:8,height:8,borderRadius:'50%',background:stageHex(p.stage),flexShrink:0}}/>{p.stage||'—'}</span>},
+      {key:'stage', label:'Status', options:DEFAULT_STAGES, get:p=>normalizeStage(p.stage)||'',
+        cell:p=> <span style={{display:'inline-flex',alignItems:'center',gap:6,whiteSpace:'nowrap'}}><span style={{width:8,height:8,borderRadius:'50%',background:stageHex(p.stage),flexShrink:0}}/>{normalizeStage(p.stage)||'—'}</span>},
       {key:'dateReceived', label:'Received', type:'date', get:p=>p.dateReceived||'',
         cell:p=>p.dateReceivedDisplay||p.dateReceived||'—'},
       {key:'pn', label:'Project #', get:p=>p.pn||'', cell:p=><span className="pcell-pn">{p.pn}</span>},
@@ -2150,7 +2153,7 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
             <div className="pp-card-h">Assignment &amp; Schedule</div>
             <EditableField label="Project Mgr" value={p.pm && p.pm!=='All' && p.pm!=='`' ? p.pm : ''} placeholder="Add PM" onSave={onUpdate && (v=>upd({pm:v}))}/>
             <EditableField label="Sales Rep" value={p.rep} placeholder="Add rep" onSave={onUpdate && (v=>upd({rep:v}))}/>
-            <EditableField label="Stage" value={p.stage} options={DEFAULT_STAGES} onSave={onUpdate && (v=>upd({stage:v}))}/>
+            <EditableField label="Stage" value={normalizeStage(p.stage)} options={DEFAULT_STAGES} onSave={onUpdate && (v=>upd({stage:v}))}/>
             <EditableField label="Date Received" value={p.dateReceived||''} type="date"
               format={()=> p.dateReceivedDisplay || p.dateReceived || '—'}
               onSave={onUpdate && (v=>{ let disp=''; try{ disp = v ? new Date(v+'T00:00:00').toLocaleDateString('en-US') : ''; }catch(e){ disp=v; } upd({dateReceived:v, dateReceivedDisplay:disp}); })}/>
@@ -2422,8 +2425,9 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onSendR
     const m = {};
     stages.forEach(s => m[s] = []);
     filtered.forEach(p => {
-      if (m[p.stage]) m[p.stage].push(p);
-      else { m[p.stage] = [p]; }
+      const st = normalizeStage(p.stage);   // group under the canonical (merged) column
+      if (m[st]) m[st].push(p);
+      else { m[st] = [p]; }
     });
     // Sort by manual position (drag-and-drop order). New/unordered cards fall back to date-desc.
     Object.keys(m).forEach(s => {
@@ -4269,7 +4273,7 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
             </label>
             <div className="fbrow">
               <button className="fbtn ok" disabled={!approveChk} onClick={()=>{ lockApprove(); setApproveChk(false); }}>🔒 Lock &amp; Approve</button>
-              <button className="fbtn navy" onClick={()=>{ upd({stage:'Sample/Formula Development'}); logAudit(setProjects, proj.pn, 'Submitted for review', 'Stage → Sample/Formula Development'); }}>Submit for Review (no lock)</button>
+              <button className="fbtn navy" onClick={()=>{ upd({stage:'Formulation/Sample Development'}); logAudit(setProjects, proj.pn, 'Submitted for review', 'Stage → Formulation/Sample Development'); }}>Submit for Review (no lock)</button>
               <span className="fsmall">Approve when the formula is final. "Submit for Review" just moves it to the review stage.</span>
             </div>
           </>)}

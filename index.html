@@ -1125,8 +1125,127 @@ const { useState, useMemo, useRef, useEffect, useCallback } = React;
 
 // ── Shared data ──────────────────────────────────────────────────────────
 const SEED      = JSON.parse(document.getElementById('wip-seed').textContent);
-const INVENTORY = JSON.parse(document.getElementById('inv-data').textContent);
-const INV_IX    = Object.fromEntries(INVENTORY.map(i => [i.n, i]));
+// INVENTORY / INV_IX are the LIVE MISys item master. They start from the embedded
+// snapshot (offline seed) but are REASSIGNABLE (let) so a MISys export can refresh
+// them at runtime via applyInventory(). Everything reads these module bindings by
+// reference, so a reassignment is picked up on the next render.
+let INVENTORY = JSON.parse(document.getElementById('inv-data').textContent);
+let INV_IX    = Object.fromEntries(INVENTORY.map(i => [i.n, i]));
+const INVENTORY_EMBEDDED = INVENTORY.slice();      // pristine bundled seed (for Revert)
+const INVENTORY_SEED_COUNT = INVENTORY.length;
+
+// ════════════════════ MISys inventory import (deterministic, offline) ════════════════════
+// Refreshes the item master (item # · description · category · on-hand · unit cost)
+// straight from a MISys "Item Valuation" workbook export. NO AI. Verified against a
+// real export (MIITEM002_Item_Valuation): cost basis = MISys AVERAGE cost (cAvg);
+// raw materials priced per gram, kg-priced items normalized to $/g; packaging per each.
+// ALT 2-letter code → friendly category. Active = status 0. Never invents a cost.
+const MISYS_CODE_CATEGORY = {
+  BB:'Bulk Bottle', BC:'Bulk Capsule (WIP)', BG:'Bag / Pouch (Bulk)', BL:'Liner',
+  BT:'Bottle / Jar', BX:'Shipper / Box', CA:'Cap / Closure', CL:'Foil Lid', CO:'Cotton',
+  CP:'Capsule Shell', CU:'Cup', DC:'Disc', DS:'Desiccant', EO:'Essential Oil',
+  FG:'Finished Good', IC:'Inner Case / Display', IN:'Insert / Divider', LB:'Label (Roll)',
+  LL:'Label', PB:'Powder Blend (WIP)', PC:'Pouch (Retail)', RL:'Raw Liquid / Excipient',
+  RP:'Raw Ingredient / Powder', SC:'Scoop', SS:'Sealing Sticker', ST:'Stick Pack',
+  TE:'Tamper Seal / Shrink Band', TR:'Tray',
+};
+function misysCategory(itemId){
+  const m = /^([A-Za-z0-9]+)-([A-Za-z]{2})-/.exec(itemId||'');
+  return (m && MISYS_CODE_CATEGORY[m[2].toUpperCase()]) || 'Uncategorized';
+}
+// Normalize MISys average cost to the app's unit convention: raw material $ per GRAM
+// (kg → ÷1000; gm/g/gr/gn already per-gram), packaging/components $ per each.
+function misysNormCost(cAvg, uom){
+  const u = String(uom||'').trim().toLowerCase();
+  const c = Number(cAvg)||0;
+  if (u === 'kg') return c/1000;         // per-kg → per-gram
+  return c;                               // gm/g/gr/gn already $/g; ea already $/each
+}
+// Parse a SheetJS workbook of a MISys export into the app's inventory rows + a diff
+// vs. the current INVENTORY. opts: {includeFinished (type 2), includeDiscontinued (status≠0)}.
+function parseMisysWorkbook(wb, opts){
+  opts = opts || {};
+  if (!wb || !wb.Sheets) throw new Error('Not a readable workbook.');
+  const sheetOf = (names) => { for (const n of names){ const key = wb.SheetNames.find(s=>s.toLowerCase()===n.toLowerCase()); if(key) return wb.Sheets[key]; } return null; };
+  const itemSheet = sheetOf(['MIITEM']);
+  if (!itemSheet) throw new Error('This workbook has no MIITEM sheet — is it a MISys Item Valuation export? Sheets found: '+wb.SheetNames.join(', '));
+  const rows = window.XLSX.utils.sheet_to_json(itemSheet, { header:1, defval:null, blankrows:false });
+  const hdr = (rows[0]||[]).map(x=>String(x||'').trim());
+  const ix = (name) => hdr.indexOf(name);
+  const cId=ix('itemId'), cD=ix('descr'), cU=ix('uOfM'), cT=ix('type'), cS=ix('status'), cAvg=ix('cAvg');
+  if (cId<0 || cAvg<0) throw new Error('MIITEM sheet is missing expected columns (itemId / cAvg).');
+
+  // On-hand qty: sum qStk per itemId from the bin/lot sheet, if present.
+  const onhand = {};
+  const binSheet = sheetOf(['MISLBINQ','Bin Detail']);
+  if (binSheet){
+    const brows = window.XLSX.utils.sheet_to_json(binSheet, { header:1, defval:null, blankrows:false });
+    // find the header row that has itemId/Item # + a qty column
+    let bh=-1; for (let i=0;i<Math.min(brows.length,8);i++){ const rowL=(brows[i]||[]).map(x=>String(x||'').toLowerCase()); if (rowL.some(v=>v==='itemid'||v==='item #')){ bh=i; break; } }
+    if (bh>=0){
+      const bhdr=(brows[bh]||[]).map(x=>String(x||'').trim().toLowerCase());
+      const bId = bhdr.findIndex(v=>v==='itemid'||v==='item #');
+      const bQ  = bhdr.findIndex(v=>v==='qstk'||v==='available stock');
+      if (bId>=0 && bQ>=0) for (let i=bh+1;i<brows.length;i++){ const r=brows[i]||[]; const id=String(r[bId]==null?'':r[bId]).trim(); if(!id) continue; onhand[id]=(onhand[id]||0)+(Number(r[bQ])||0); }
+    }
+  }
+
+  const items=[]; let junk=0, discSkipped=0, finSkipped=0;
+  for (let i=1;i<rows.length;i++){
+    const r = rows[i]||[]; const id = String(r[cId]==null?'':r[cId]).trim();
+    if (!id) continue;
+    const status = String(r[cS]==null?'':r[cS]).trim();
+    const type   = String(r[cT]==null?'':r[cT]).trim();
+    if (status!=='0' && !opts.includeDiscontinued){ discSkipped++; continue; }
+    if (type==='2' && !opts.includeFinished){ finSkipped++; continue; }
+    if (type!=='0' && type!=='2'){ continue; }       // skip phantom/kit/service types (1,3,4)
+    let d = String(r[cD]==null?'':r[cD]).replace(/[\t\r\n]+/g,' ').trim();
+    if (!d || /DO NOT USE/i.test(d)){ junk++; continue; }
+    const uom = String(r[cU]==null?'':r[cU]).trim();
+    const u = Math.round(misysNormCost(r[cAvg], uom)*1e6)/1e6;
+    items.push({ n:id, d:d, c:misysCategory(id), q:Math.round((onhand[id]||0)*10)/10, u:u, s:'average', g:/^ALT/i.test(id), uom:uom||null, itype:type });
+  }
+
+  // Diff vs the inventory currently loaded.
+  const curIx = INV_IX || {};
+  const newIds = new Set(items.map(x=>x.n));
+  const added=[], changed=[]; let costed=0, zero=0;
+  for (const x of items){
+    if (x.u>0) costed++; else zero++;
+    const prev = curIx[x.n];
+    if (!prev){ added.push(x.n); }
+    else if (prev.u>0 && x.u>0 && Math.abs(x.u-prev.u)/prev.u > 0.02){ changed.push({ n:x.n, d:x.d, from:prev.u, to:x.u }); }
+  }
+  const removed = Object.keys(curIx).filter(n=>!newIds.has(n));   // in app now, absent from export
+  const byCat={}; items.forEach(x=>{ byCat[x.c]=(byCat[x.c]||0)+1; });
+  return { items, stats:{ total:items.length, costed, zero, junk, discSkipped, finSkipped,
+    added:added.length, changed:changed.length, removed:removed.length, byCat },
+    diff:{ added, changed, removed } };
+}
+
+// Reassign the live inventory + rebuild the index, persist locally (shared later via
+// Supabase if the table exists), and trigger a re-render. AI-free.
+let _onInventoryChange = null;                 // App registers a re-render bump here
+function applyInventory(items, meta){
+  INVENTORY = items;
+  INV_IX = Object.fromEntries(items.map(i => [i.n, i]));
+  if (meta && meta.persist){
+    try {
+      const m = { ts: meta.ts || nowISO(), count: items.length, source: meta.source||'MISys import', cloud: !!meta.cloud };
+      localStorage.setItem('enova:inventory', JSON.stringify(items));
+      localStorage.setItem('enova:inventoryMeta', JSON.stringify(m));
+    } catch(e){}
+  }
+  if (_onInventoryChange) _onInventoryChange();
+}
+function inventoryMeta(){ try { return JSON.parse(localStorage.getItem('enova:inventoryMeta')||'null'); } catch(e){ return null; } }
+// On startup, re-apply a previously imported inventory (per-browser persistence) so a
+// refresh survives reloads. Falls back silently to the embedded seed.
+(function loadStoredInventory(){
+  try { const raw = localStorage.getItem('enova:inventory'); if(!raw) return;
+    const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length){ INVENTORY = arr; INV_IX = Object.fromEntries(arr.map(i=>[i.n,i])); }
+  } catch(e){}
+})();
 
 // ── Salesforce R&D Status picklist — exact values, used as WIP columns ────
 // STAGE_ALIASES: permanent normalization rules. Applied to every project,
@@ -5548,6 +5667,66 @@ function useSupabaseProjects(email){
   return [projects, setProjects];
 }
 
+/* ══════════════════ SHARED INVENTORY — MISys item master synced to all users ══════════════════
+   Single-row `studio_inventory` table (id='current'): the whole item master is replaced
+   wholesale on import, so one JSONB row + metadata is the right shape (mirrors studio_projects'
+   security — RLS on, authenticated full access). Loads on startup and applies the shared copy
+   if it is newer than the local cache; stays live via realtime so a colleague's import updates
+   everyone; exposes push() the Inventory page calls on Approve. localStorage stays the offline
+   cache — if Supabase is down or the table is missing, the app silently keeps its local/seed
+   inventory. Nothing else in the app changes. */
+function useSharedInventory(email){
+  const [status, setStatus] = useState(null);   // { state:'synced'|'local'|'error', ts, count, source, msg }
+  const selfWrite = useRef(false);
+  useEffect(() => {
+    if (!sb) { setStatus({ state:'local', msg:'Offline — inventory is local to this browser.' }); return; }
+    let ch;
+    (async () => {
+      try {
+        const { data, error } = await sb.from('studio_inventory').select('items,meta,updated_at').eq('id','current').maybeSingle();
+        if (error) { setStatus({ state:'error', msg:error.message }); return; }
+        if (data && Array.isArray(data.items) && data.items.length) {
+          const remoteTs = (data.meta && data.meta.ts) || data.updated_at || '';
+          const local = inventoryMeta();
+          // Apply the shared copy unless this browser already holds a newer import.
+          if (!local || !local.ts || String(remoteTs) > String(local.ts)) {
+            applyInventory(data.items, { persist:true, cloud:true, ts:remoteTs, source:(data.meta&&data.meta.source)||'MISys (shared)' });
+          }
+          setStatus({ state:'synced', ts:remoteTs, count:data.items.length, source:(data.meta&&data.meta.source)||null });
+        } else {
+          setStatus({ state:'synced', count:0 });   // table present but no shared import yet
+        }
+      } catch(e){ setStatus({ state:'error', msg:String((e&&e.message)||e) }); }
+      ch = sb.channel('studio_inventory_rt')
+        .on('postgres_changes', { event:'*', schema:'public', table:'studio_inventory' }, (payload) => {
+          if (selfWrite.current) { selfWrite.current = false; return; }   // ignore our own echo
+          const row = payload.new;
+          if (row && Array.isArray(row.items) && row.items.length) {
+            const remoteTs = (row.meta && row.meta.ts) || row.updated_at || '';
+            applyInventory(row.items, { persist:true, cloud:true, ts:remoteTs, source:(row.meta&&row.meta.source)||'MISys (shared)' });
+            setStatus({ state:'synced', ts:remoteTs, count:row.items.length, source:(row.meta&&row.meta.source)||null });
+          }
+        }).subscribe();
+    })();
+    return () => { if (ch && sb) sb.removeChannel(ch); };
+  }, []);
+
+  // Push the just-approved import to the shared table so every user gets it.
+  const push = useCallback((items, meta) => {
+    if (!sb) return Promise.resolve({ ok:false, reason:'not signed in / offline' });
+    selfWrite.current = true;
+    const row = { id:'current', items, meta:(meta||{}), updated_by: email||null, updated_at: new Date().toISOString() };
+    return sb.from('studio_inventory').upsert(row, { onConflict:'id' })
+      .then(({error}) => {
+        if (error) { selfWrite.current = false; return { ok:false, reason:error.message }; }
+        setStatus({ state:'synced', ts:(meta&&meta.ts)||row.updated_at, count:items.length, source:(meta&&meta.source)||null });
+        return { ok:true };
+      });
+  }, [email]);
+
+  return { push, status };
+}
+
 /* ══════════════════ NOTIFICATIONS — in-app alerts (shared, realtime) ══════════════════ */
 // Enova people you can route a project to for review (name → login email).
 const ENOVA_PEOPLE = [
@@ -5699,6 +5878,183 @@ function Root(){
   return <App session={session}/>;
 }
 
+/* ══════════════════ INVENTORY PAGE — live MISys item master + import/sync ══════════════════
+   The item master (ingredients · packaging · production items, each with its MISys item #
+   and average cost) refreshed straight from a MISys "Item Valuation" workbook export.
+   Deterministic + offline (SheetJS), no AI. Cost basis = MISys average cost; raw materials
+   $/g (kg auto-normalized), packaging $/each; zero-cost items flagged, never invented.
+   Approve & Replace swaps the working inventory for every page and persists per-browser. */
+function InventoryPage({ onToggleNav, onCloudPush, cloudStatus }){
+  const [parsed, setParsed] = useState(null);      // { items, stats, diff }
+  const [wb, setWb] = useState(null);
+  const [fname, setFname] = useState('');
+  const [opts, setOpts] = useState({ includeFinished:false, includeDiscontinued:false });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [q, setQ] = useState('');
+  const [tick, setTick] = useState(0);             // force re-read of INVENTORY/meta after apply
+  const [pushing, setPushing] = useState(false);
+  const [pushMsg, setPushMsg] = useState(null);    // { ok, text } result of the last cloud push
+  const fileRef = useRef(null);
+  const meta = inventoryMeta();
+
+  const runParse = (workbook, o) => {
+    try { setErr(''); setParsed(parseMisysWorkbook(workbook, o)); }
+    catch(e){ setErr(e.message||String(e)); setParsed(null); }
+  };
+  const onFile = async (f) => {
+    if(!f) return;
+    setBusy(true); setErr(''); setParsed(null);
+    try {
+      if(!window.XLSX) throw new Error('Spreadsheet reader not loaded.');
+      const workbook = window.XLSX.read(await f.arrayBuffer(), { type:'array' });
+      setWb(workbook); setFname(f.name);
+      runParse(workbook, opts);
+    } catch(e){ setErr(e.message||String(e)); }
+    setBusy(false);
+  };
+  const toggleOpt = (k) => { const o={...opts,[k]:!opts[k]}; setOpts(o); if(wb) runParse(wb,o); };
+
+  const approve = async () => {
+    if(!parsed) return;
+    const clean = parsed.items.map(x=>({ n:x.n, d:x.d, c:x.c, q:x.q, u:x.u, s:x.s, g:x.g }));
+    const ts = nowISO();
+    applyInventory(clean, { persist:true, source:fname, ts });   // local + browser cache immediately
+    setParsed(null); setWb(null); if(fileRef.current) fileRef.current.value='';
+    setTick(t=>t+1); setPushMsg(null);
+    if (onCloudPush){                                            // then share with every Enova user
+      setPushing(true);
+      const r = await onCloudPush(clean, { ts, source:fname, count:clean.length });
+      setPushing(false);
+      setPushMsg(r && r.ok
+        ? { ok:true,  text:'Shared with all Enova users — every dashboard now uses this item master.' }
+        : { ok:false, text:'Saved to this browser. Cloud sync unavailable'+(r&&r.reason?` (${r.reason})`:'')+' — others won’t see it until this succeeds.' });
+    }
+    setFname('');
+  };
+  const revert = () => {
+    if (typeof window!=='undefined' && window.confirm && !window.confirm('Revert to the bundled inventory snapshot and discard the imported one?')) return;
+    try { localStorage.removeItem('enova:inventory'); localStorage.removeItem('enova:inventoryMeta'); } catch(e){}
+    applyInventory(INVENTORY_EMBEDDED.slice(), { persist:false });
+    setTick(t=>t+1);
+  };
+
+  const view = useMemo(()=>{
+    const lq=q.trim().toLowerCase();
+    const pool = lq ? INVENTORY.filter(i=>[i.n,i.d,i.c].some(v=>String(v||'').toLowerCase().includes(lq))) : INVENTORY;
+    return pool.slice(0,300);
+  }, [q, tick]);
+  const catCount = useMemo(()=>{ const m={}; INVENTORY.forEach(i=>{m[i.c]=(m[i.c]||0)+1;}); return Object.keys(m).length; }, [tick]);
+  const st = parsed && parsed.stats;
+
+  return (
+    <div className="app-page" style={{background:'var(--paper)'}}>
+      <div className="gen-top">
+        <button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+        <div className="gen-title">Inventory</div>
+        <span className="fsmall" style={{marginLeft:'auto',whiteSpace:'nowrap'}}>{INVENTORY.length.toLocaleString()} SKUs · {INVENTORY.filter(i=>i.u>0).length.toLocaleString()} costed</span>
+      </div>
+      <div className="fp-content">
+
+        <div className="panel navy">
+          <h2>MISys Inventory Sync <span className="fbadge ai" style={{marginLeft:'auto'}}>Deterministic — no AI · costs trace to MISys</span></h2>
+          <p className="fsmall" style={{marginBottom:8}}>
+            Source: {meta
+              ? <><strong>MISys export</strong> — {Number(meta.count).toLocaleString()} items, imported {fmtTs(meta.ts)}{meta.source?` · ${meta.source}`:''}</>
+              : <><strong>Bundled snapshot</strong> — {INVENTORY_SEED_COUNT.toLocaleString()} items (no import yet)</>}.
+            &nbsp;Cost basis is MISys <strong>average cost</strong>; raw materials $/gram (kg auto-normalized to $/g), packaging $/each. Zero-cost items are flagged, never invented.
+          </p>
+          <div className="fsmall" style={{marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
+            <span style={{width:8,height:8,borderRadius:'50%',display:'inline-block',
+              background: !cloudStatus ? '#c9a227' : cloudStatus.state==='synced' ? '#5cb85c' : cloudStatus.state==='error' ? '#d9534f' : '#c9a227'}}/>
+            <span>{!cloudStatus ? 'Connecting to shared inventory…'
+              : cloudStatus.state==='synced'
+                ? (cloudStatus.count ? <><strong>Shared across all Enova users</strong> — {Number(cloudStatus.count).toLocaleString()} items{cloudStatus.ts?`, updated ${fmtTs(cloudStatus.ts)}`:''}{meta&&meta.cloud?' (this dashboard is on the shared copy)':''}</>
+                                     : <><strong>Shared inventory connected</strong> — no team import yet. Import below to publish one for everyone.</>)
+              : cloudStatus.state==='error' ? <>Shared sync unavailable{cloudStatus.msg?` (${cloudStatus.msg})`:''} — imports save to this browser only.</>
+              : <>{cloudStatus.msg||'Local only — not signed in.'}</>}</span>
+          </div>
+          <div className="fr" style={{alignItems:'center'}}>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{fontSize:12}} disabled={busy||pushing}
+              onChange={e=>e.target.files[0]&&onFile(e.target.files[0])}/>
+            <span className="fbadge neutral">MISys Item Valuation (.xlsx)</span>
+            {meta && <button className="fbtn sec sm" style={{marginLeft:'auto'}} onClick={revert}>Revert to bundled snapshot</button>}
+          </div>
+          {busy && <div className="falert info" style={{marginTop:8}}>⏳ Reading workbook…</div>}
+          {pushing && <div className="falert info" style={{marginTop:8}}>⏳ Publishing to the shared inventory…</div>}
+          {pushMsg && <div className={"falert "+(pushMsg.ok?'ok':'warn')} style={{marginTop:8}}>{pushMsg.ok?'✓ ':'⚠ '}{pushMsg.text}</div>}
+          {err && <div className="falert err" style={{marginTop:8}}><strong>Error:</strong> {err}</div>}
+          {!parsed && !busy && !err && <p className="fsmall" style={{marginTop:8,color:'var(--muted)'}}>Upload the MISys <strong>MIITEM Item Valuation</strong> export (.xlsx). The app reads the item master (item #, description, average cost, on-hand from the bin sheet) and shows a full review before anything changes.</p>}
+        </div>
+
+        {parsed && (
+          <div className="panel">
+            <h2>Review Import — {fname}</h2>
+            <div className="fr" style={{gap:16,flexWrap:'wrap',marginBottom:8}}>
+              <label className="fsmall" style={{display:'flex',alignItems:'center',gap:6}}>
+                <input type="checkbox" checked={opts.includeFinished} onChange={()=>toggleOpt('includeFinished')}/> Include finished goods &amp; WIP (type 2)</label>
+              <label className="fsmall" style={{display:'flex',alignItems:'center',gap:6}}>
+                <input type="checkbox" checked={opts.includeDiscontinued} onChange={()=>toggleOpt('includeDiscontinued')}/> Include discontinued (inactive)</label>
+            </div>
+            <div className="fts">
+              <div><span className="ftl">Items to import</span><span className="ftv">{st.total.toLocaleString()}</span></div>
+              <div><span className="ftl">With cost</span><span className="ftv">{st.costed.toLocaleString()}</span></div>
+              <div><span className="ftl">Zero-cost (flagged)</span><span className="ftv">{st.zero.toLocaleString()}</span></div>
+              <div><span className="ftl">New vs current</span><span className="ftv">{st.added.toLocaleString()}</span></div>
+              <div><span className="ftl">Cost changes</span><span className="ftv">{st.changed.toLocaleString()}</span></div>
+              <div><span className="ftl">In app, not in export</span><span className="ftv">{st.removed.toLocaleString()}</span></div>
+            </div>
+            {st.removed>0 && <div className="falert warn" style={{marginTop:8}}>{st.removed} item(s) currently loaded are not in this export (newer than the export, or discontinued). Replacing will drop them from lookups. Examples: {parsed.diff.removed.slice(0,6).join(', ')}{st.removed>6?' …':''}</div>}
+            {st.changed>0 && (
+              <div style={{marginTop:8}}>
+                <p className="fsmall" style={{margin:'0 0 4px'}}><strong>Sample cost changes</strong> (current → MISys):</p>
+                <table className="ftbl"><thead><tr><th>Item #</th><th>Description</th><th>Current $</th><th>MISys $</th><th>Δ</th></tr></thead>
+                  <tbody>{parsed.diff.changed.slice(0,10).map(c=>(
+                    <tr key={c.n}><td className="fsmall" style={{fontFamily:'var(--mono)'}}>{c.n}</td><td className="fsmall">{c.d}</td>
+                      <td className="fsmall" style={{fontFamily:'var(--mono)'}}>{f$(c.from,5)}</td>
+                      <td className="fsmall" style={{fontFamily:'var(--mono)'}}>{f$(c.to,5)}</td>
+                      <td className="fsmall" style={{fontFamily:'var(--mono)',color:c.to>c.from?'#c0392b':'#2e7d32'}}>{(((c.to-c.from)/c.from)*100).toFixed(1)}%</td></tr>
+                  ))}</tbody></table>
+              </div>
+            )}
+            <p className="fsmall" style={{margin:'8px 0 4px'}}><strong>By category:</strong> {Object.entries(st.byCat).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([c,n])=>`${c} (${n})`).join(' · ')}</p>
+            <div className="fbrow" style={{marginTop:8}}>
+              <button className="fbtn teal" onClick={approve} disabled={pushing}>✓ Approve &amp; Publish Inventory ({st.total.toLocaleString()} items)</button>
+              <button className="fbtn sec" onClick={()=>{setParsed(null);setWb(null);if(fileRef.current)fileRef.current.value='';}} disabled={pushing}>Cancel</button>
+              <span className="fsmall">Replaces the working inventory for every page (Formulation costs, packaging, documents) and <strong>publishes it to every signed-in Enova user</strong> via Supabase.</span>
+            </div>
+          </div>
+        )}
+
+        <div className="panel">
+          <h2>Item Master <span className="fbadge neutral" style={{marginLeft:'auto'}}>{INVENTORY.length.toLocaleString()} items · {catCount} categories</span></h2>
+          <div className="fr" style={{alignItems:'center',marginBottom:6}}>
+            <div className="ff" style={{flex:2}}><label>Search item #, description, or category</label>
+              <input value={q} onChange={e=>setQ(e.target.value)} placeholder="e.g. ashwagandha, ALT-BT, bottle, capsule shell…"/></div>
+          </div>
+          <table className="ftbl">
+            <thead><tr><th>Item #</th><th>Description</th><th>Category</th><th>On-hand</th><th>Unit $</th></tr></thead>
+            <tbody>
+              {view.map(i=>(
+                <tr key={i.n}>
+                  <td className="fsmall" style={{fontFamily:'var(--mono)'}}>{i.n}</td>
+                  <td className="fsmall">{i.d}</td>
+                  <td className="fsmall">{i.c}</td>
+                  <td className="fsmall" style={{fontFamily:'var(--mono)'}}>{i.q!=null?fN(i.q,0):'—'}</td>
+                  <td className="fsmall" style={{fontFamily:'var(--mono)'}}>{i.u>0?f$(i.u,5):<span className="fbadge bad">No Cost</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {view.length>=300 && <p className="fsmall" style={{marginTop:6}}>Showing the first 300 matches — refine the search to narrow.</p>}
+          {view.length===0 && <p className="fsmall" style={{marginTop:6}}>No items match “{q}”.</p>}
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 function App({ session }) {
   const email = (session && session.user && session.user.email) || null;
   // Attribute every audit entry to the signed-in Enova user (module-level actor,
@@ -5708,6 +6064,7 @@ function App({ session }) {
   const [collapsed, setCollapsed] = useState(false);
   const toggleNav = () => setCollapsed(c => !c);
   const [projects, setProjects] = useSupabaseProjects(email);
+  const sharedInv = useSharedInventory(email);                // MISys item master shared across users
   const [formulationPn, setFormulationPn] = useState(null);   // project to focus on the Formulation page
   const [pendingGen, setPendingGen] = useState(null);         // one-shot: auto-start the generator for this pn
   const [openPn, setOpenPn] = useState(null);                 // one-shot: open a project's full page (from an alert)
@@ -5735,6 +6092,10 @@ function App({ session }) {
     setNav('formulation');
   };
 
+  // Re-render the app when the live MISys inventory is refreshed via applyInventory().
+  const [, setInvVer] = useState(0);
+  useEffect(() => { _onInventoryChange = () => setInvVer(v => v + 1); return () => { _onInventoryChange = null; }; }, []);
+
   const NAV_ITEMS = [
     { id:'wip',         label:'WIP Board',   icon:'📋', ready:true },
     { id:'projects',    label:'Projects',    icon:'🗃', ready:true },
@@ -5742,6 +6103,7 @@ function App({ session }) {
     { id:'generate',    label:'Generate',    icon:'⚙️', ready:true },
     { id:'quote',       label:'Quote',       icon:'💰', ready:true },
     { id:'documents',   label:'Documents',   icon:'📄', ready:true },
+    { id:'inventory',   label:'Inventory',   icon:'📦', ready:true },
     { id:'labels',      label:'Label Review',icon:'🏷', ready:false },
     { id:'approvals',   label:'Approvals',   icon:'✅', ready:false },
   ];
@@ -5785,6 +6147,7 @@ function App({ session }) {
         {nav === 'generate' && <GeneratePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}
         {nav === 'quote' && <QuotePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}
         {nav === 'documents' && <DocumentsPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}
+        {nav === 'inventory' && <InventoryPage onToggleNav={toggleNav} onCloudPush={sharedInv.push} cloudStatus={sharedInv.status} />}
       </div>
     </div>
   );

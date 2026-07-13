@@ -521,6 +521,17 @@ table.ptbl tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--teal);}
 .dfilt-fld input{font-family:var(--sans);font-size:11.5px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;flex:1;}
 .dfilt-submit{align-self:stretch;background:var(--teal);border-color:var(--teal);color:#fff;margin-top:1px;}
 .tbl-empty{text-align:center;padding:40px;color:#8794a0;font-size:13px;}
+/* Documents page — flow map + document cards */
+.doc-flow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;font-size:12px;}
+.doc-flow-step{padding:5px 12px;border-radius:14px;border:1px solid var(--line);background:#fff;color:#7c8a96;font-weight:600;}
+.doc-flow-step.done{background:#e5f4ee;border-color:var(--teal);color:var(--teal);}
+.doc-flow-step.active{background:var(--navy);border-color:var(--navy);color:#fff;}
+.doc-flow-arr{color:#b9c4cd;font-weight:700;}
+.doc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-top:6px;}
+.doc-card{border:1px solid var(--line);border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:#fff;}
+.doc-card.locked{opacity:.55;background:var(--paper);}
+.doc-card-h{font-weight:700;color:var(--navy);font-size:13px;}
+.doc-card-d{font-size:11px;color:#7c8a96;line-height:1.45;flex:1;}
 
 /* ── Project detail modal ── */
 .pd-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;margin:4px 0 12px;}
@@ -1275,6 +1286,7 @@ const FORMULATION_DEFAULTS = {
   containerType:null, unitsPerContainer:null, materialLoss:0.02,
   gummyType:'sugar', gummyWt:4500, ingredients:[], pkg:{}, shellItem:null, baseItems:{},
   laborPerUnit:null, overheadPct:0.15, cogsBreakdown:null, attachments:[],
+  mfsoSigned:null,
 };
 
 function emptyProject(pn) {
@@ -1436,6 +1448,168 @@ function validateProject(p){
   const cb = p.cogsBreakdown;
   if (!cb || !(cb.cogsPerUnit>0)) warnings.push('No costed COGS yet.');
   return { errors, warnings, ok: errors.length===0 };
+}
+
+/* ══════════════ PRODUCTION DOCUMENTS (MFSO gate → SO / MO / BOM / MMR) ══════════════
+   Process order (per Enova): Quote/Bid → MFSO (customer signs) → PRODUCTION. A signed
+   MFSO authorizes production; only then are SO/MO/BOM/MMR generated. Every document is
+   built from the project's captured formula + approved cost snapshot + manual tier
+   pricing — nothing is invented. Printable HTML (window.open + print). */
+function docEsc(s){ return String(s==null?'':s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function printDoc(html){ if(typeof window==='undefined'||!window.open){ return; } const w=window.open('','_blank'); if(w){ w.document.write(html); w.document.close(); w.focus(); setTimeout(()=>w.print(),250); } }
+function docStyle(){ return `<style>body{font:12px Arial,Helvetica,sans-serif;color:#1c2b3a;margin:36px;}
+  h1{font-size:18px;margin:0 0 2px;color:#1B3A5C;} h2{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:#1D7A6B;border-bottom:1px solid #ccd;padding-bottom:3px;margin:18px 0 8px;}
+  .sub{color:#667;font-size:11px;margin-bottom:14px;} table{width:100%;border-collapse:collapse;font-size:11px;margin-top:4px;}
+  th,td{border:1px solid #dde;padding:5px 7px;text-align:left;} th{background:#eef4f2;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;font-size:12px;} .grid div{padding:2px 0;} .k{color:#667;}
+  .tot{display:flex;justify-content:space-between;max-width:360px;padding:3px 0;} .tot.g{font-weight:bold;border-top:1px solid #999;margin-top:4px;padding-top:6px;}
+  .sig{margin-top:40px;display:flex;gap:48px;} .sig div{flex:1;border-top:1px solid #333;padding-top:5px;font-size:11px;color:#555;}
+  .appr{margin-top:16px;padding:8px 12px;background:#fbf0dd;border:1px solid #d98a1f;border-radius:4px;font-size:11px;color:#8a5a12;}
+  .r{text-align:right;} .muted{color:#999;} .stamp{display:inline-block;padding:2px 8px;border-radius:3px;font-weight:bold;font-size:11px;}
+  .stamp.ok{background:#e5f4ee;color:#1D7A6B;border:1px solid #1D7A6B;} .stamp.wait{background:#fdf1e3;color:#a5620f;border:1px solid #d98a1f;}</style>`; }
+
+// Resolve each ingredient against MISys; compute per-serving (with overage) + per-batch.
+function docIngredientRows(p){
+  const ov = p.overage!=null ? p.overage : 0;
+  const spu = Number(p.servingsPerUnit)||1;
+  const qty = Number(p.batchUnits)||0;
+  return (p.ingredients||[]).map(r=>{
+    const it=(r.item&&((typeof INV_IX!=='undefined'&&INV_IX[r.item.n])||r.item))||(r.importedAlt&&typeof INV_IX!=='undefined'&&INV_IX[r.importedAlt])||null;
+    const pot=r.potencyPct>0?r.potencyPct/100:1;
+    const mgPS=(Number(r.inputMg||0)*(1+ov))/pot;
+    const u=it&&it.u!=null?it.u:null;
+    const mgBatch=mgPS*spu*qty;
+    return { name:r.importedName||(it&&it.d)||'—', alt:r.importedAlt||(it&&it.n)||null,
+      labelMg:Number(r.inputMg||0), mgPS, u, kgBatch:mgBatch/1e6, onHand: it&&it.q!=null?it.q:null };
+  });
+}
+// Packaging components (container/closure/label/… + capsule shell) with batch quantities.
+function docPackagingRows(p){
+  const cb=p.cogsBreakdown||{};
+  const container = cb.container || p.containerType || (typeof defaultContainerFor!=='undefined' ? defaultContainerFor(p.dosageForm,p.isBulk) : 'Bottle');
+  const ct = (typeof CONTAINER_TYPES!=='undefined' && CONTAINER_TYPES[container]) || null;
+  const qty = Number(p.batchUnits)||0;
+  const pieces = cb.piecesPerContainer!=null ? cb.piecesPerContainer : ((p.servingSize||1)*(p.servingsPerUnit||1));
+  const rows=[];
+  const shellCfg = (typeof FORM_CFG!=='undefined' && FORM_CFG[p.dosageForm]) || {};
+  if (shellCfg.shell && p.shellItem){ const f=(typeof INV_IX!=='undefined'&&INV_IX[p.shellItem.n])||p.shellItem; rows.push({ name:'Capsule shell — '+((f&&f.d)||p.shellItem.n||'—'), alt:(f&&f.n)||null, qtyEach:pieces*qty, uom:'shells', u:f&&f.u!=null?f.u:null }); }
+  ((ct&&ct.pkg)||[]).forEach(slot=>{ const sel=(p.pkg||{})[slot.k]; if(!sel) return; const f=(typeof INV_IX!=='undefined'&&INV_IX[sel.n])||sel; rows.push({ name:slot.l+' — '+((f&&f.d)||sel.n||'—'), alt:(f&&f.n)||null, qtyEach:qty, uom:'ea', u:f&&f.u!=null?f.u:null }); });
+  return rows;
+}
+function docBlendKgBatch(p){
+  const spu=Number(p.servingsPerUnit)||1, qty=Number(p.batchUnits)||0;
+  if ((typeof FORM_CFG!=='undefined'&&(FORM_CFG[p.dosageForm]||{}).gummy)) return ((Number(p.gummyWt)||0)*(p.servingSize||1)*spu*qty)/1e6;
+  const rows=docIngredientRows(p); return rows.reduce((s,r)=>s+r.kgBatch,0);
+}
+function docHeader(p, title, statusHtml){
+  return `<!doctype html><meta charset=utf8><title>${docEsc(title)} ${docEsc(p.pn)}</title>${docStyle()}
+   <h1>${docEsc(title)}</h1>
+   <div class=sub>Enova Science · ${docEsc(p.pn)} · Rev V${docEsc(p.revision||1)} · ${docEsc(cleanCustomer(p.customer))}${statusHtml?' · '+statusHtml:''}</div>`;
+}
+
+function buildMFSO(p){
+  const rows=docIngredientRows(p);
+  const comp=rows.map(r=>`<tr><td>${docEsc(r.name)}</td><td>${docEsc(r.alt||'—')}</td><td class=r>${r.labelMg}</td><td class=r>${r.mgPS.toFixed(2)}</td><td>mg</td></tr>`).join('');
+  const sell=projUnitPrice(p); const qty=Number(p.batchUnits)||0;
+  const tiers=Array.isArray(p.tierPricing)?p.tierPricing:[];
+  const tierRows=tiers.map(t=>`<tr><td>${(Number(t.units)||0).toLocaleString()}</td><td class=r>${t.price!=null?'$'+Number(t.price).toFixed(2):'—'}</td></tr>`).join('')||'<tr><td colspan=2 class=muted>No tiers entered — tier pricing is manual.</td></tr>';
+  const fl=p.formulaLock||{}; const sig=p.mfsoSigned||{};
+  const stamp = sig.signed ? '<span class="stamp ok">SIGNED</span>' : '<span class="stamp wait">FOR CUSTOMER SIGNATURE</span>';
+  return docHeader(p,'Master Formula Sign-Off (MFSO)', stamp)+`
+   <h2>Customer &amp; Product</h2>
+   <div class=grid>
+     <div><span class=k>Customer:</span> ${docEsc(cleanCustomer(p.customer))}</div>
+     <div><span class=k>Product:</span> ${docEsc(p.product||'—')}</div>
+     <div><span class=k>Dosage form:</span> ${docEsc(p.dosageForm||'—')}</div>
+     <div><span class=k>Container:</span> ${docEsc((p.cogsBreakdown&&p.cogsBreakdown.container)||p.containerType||'—')}</div>
+     <div><span class=k>Serving size:</span> ${docEsc(p.servingSize||'—')}</div>
+     <div><span class=k>Servings / unit:</span> ${docEsc(p.servingsPerUnit||'—')}</div>
+     <div><span class=k>Sales Rep:</span> ${docEsc(p.rep||'—')}</div>
+     <div><span class=k>Formula approved by:</span> ${docEsc(fl.byName||fl.by||'— (not yet approved)')}</div>
+   </div>
+   <h2>Master Formula — Composition per Serving</h2>
+   <table><thead><tr><th>Ingredient</th><th>MISys ALT</th><th class=r>Label Claim (mg)</th><th class=r>Input (mg, w/ OA)</th><th>UOM</th></tr></thead><tbody>${comp||'<tr><td colspan=5 class=muted>No formula captured.</td></tr>'}</tbody></table>
+   <h2>Packaging</h2><p>${docEsc(p.quotePackaging||'—')}</p>
+   <h2>Approved Tier Pricing (manual)</h2>
+   <table><thead><tr><th>Number of Units</th><th class=r>Sale Price / Unit</th></tr></thead><tbody>${tierRows}</tbody></table>
+   <h2>Order Terms</h2>
+   <div class=grid><div><span class=k>Order quantity:</span> ${qty?qty.toLocaleString():'—'}</div><div><span class=k>Sale price / unit:</span> ${sell!=null?'$'+sell.toFixed(4):'—'}</div><div><span class=k>Payment:</span> 50% deposit, balance prior to shipment</div><div><span class=k>Lead time:</span> ~8 weeks from deposit + approved artwork</div></div>
+   <div class=appr><b>This Master Formula Sign-Off must be signed by the customer before production begins.</b> A signed MFSO authorizes Enova Science to proceed to the production documents (SO, MO, BOM, MMR) and moves the project into production. Formula and pricing are final upon signature. Costs trace to MISys / the Master Bid model; tier pricing is manual.</div>
+   <div class=sig><div>Enova Science — approver signature / date</div><div>Customer — authorized signature / date</div></div>`;
+}
+function buildSO(p){
+  const sell=projUnitPrice(p); const qty=Number(p.batchUnits)||0;
+  const ext=(sell!=null&&qty)?sell*qty:null; const sig=p.mfsoSigned||{};
+  return docHeader(p,'Sales Order (SO)', '<span class="stamp ok">MFSO SIGNED '+(sig.ts?docEsc(fmtTs(sig.ts)):'')+'</span>')+`
+   <h2>Customer</h2>
+   <div class=grid><div><span class=k>Customer:</span> ${docEsc(cleanCustomer(p.customer))}</div><div><span class=k>Sales Rep:</span> ${docEsc(p.rep||'—')}</div>
+   <div><span class=k>Item #:</span> ${docEsc(p.pn)}</div><div><span class=k>Product:</span> ${docEsc(p.product||'—')}</div></div>
+   <h2>Order</h2>
+   <table><thead><tr><th>Item</th><th class=r>Qty (units)</th><th class=r>Unit Price</th><th class=r>Extended</th></tr></thead>
+   <tbody><tr><td>${docEsc(p.product||p.pn)} — ${docEsc(p.dosageForm||'')}, ${docEsc((p.cogsBreakdown&&p.cogsBreakdown.container)||p.containerType||'')}</td>
+   <td class=r>${qty?qty.toLocaleString():'—'}</td><td class=r>${sell!=null?'$'+sell.toFixed(4):'—'}</td><td class=r>${ext!=null?_m2(ext):'—'}</td></tr></tbody></table>
+   <div class=tot g><span>Order total</span><span>${ext!=null?_m2(ext):'—'}</span></div>
+   <h2>Terms</h2>
+   <div class=grid><div><span class=k>Payment:</span> 50% deposit, balance prior to shipment</div><div><span class=k>Lead time:</span> ~8 weeks from deposit + approved artwork</div>
+   <div><span class=k>MFSO signed:</span> ${sig.signed?('Yes — '+docEsc(sig.byName||sig.by||'')):'—'}</div><div><span class=k>Customer PO #:</span> ______________</div></div>
+   <div class=appr>Generated from a signed MFSO. Tier pricing is manual; totals trace to the approved quote.</div>
+   <div class=sig><div>Enova Science — signature / date</div><div>Customer — signature / date</div></div>`;
+}
+function buildMO(p){
+  const qty=Number(p.batchUnits)||0; const blendKg=docBlendKgBatch(p); const cb=p.cogsBreakdown||{};
+  const pieces=cb.piecesPerContainer!=null?cb.piecesPerContainer:((p.servingSize||1)*(p.servingsPerUnit||1));
+  return docHeader(p,'Manufacturing Order (MO)', '<span class="stamp ok">AUTHORIZED — MFSO SIGNED</span>')+`
+   <h2>Production Summary</h2>
+   <div class=grid>
+     <div><span class=k>Product:</span> ${docEsc(p.product||'—')}</div><div><span class=k>Item #:</span> ${docEsc(p.pn)} · Rev V${docEsc(p.revision||1)}</div>
+     <div><span class=k>Dosage form:</span> ${docEsc(p.dosageForm||'—')}</div><div><span class=k>Container:</span> ${docEsc(cb.container||p.containerType||'—')}</div>
+     <div><span class=k>Batch quantity:</span> ${qty?qty.toLocaleString()+' units':'—'}</div><div><span class=k>Pieces / container:</span> ${pieces}</div>
+     <div><span class=k>Total blend:</span> ${blendKg>0?blendKg.toFixed(3)+' kg':'—'}</div><div><span class=k>Master Bid form:</span> ${docEsc(cb.mbForm||'—')}</div>
+     <div><span class=k>PM:</span> ${docEsc(p.pm||'—')}</div><div><span class=k>Target completion:</span> ~8 weeks from deposit</div>
+   </div>
+   <div class=appr>Manufacturing Order authorized by a signed MFSO. Build to the released Master Manufacturing Record (MMR) and Bill of Materials (BOM). Reconcile yield on completion.</div>
+   <div class=sig><div>Production — signature / date</div><div>QA release — signature / date</div></div>`;
+}
+function buildBOM(p){
+  const ing=docIngredientRows(p); const pkg=docPackagingRows(p); const qty=Number(p.batchUnits)||0;
+  const ingRows=ing.map(r=>`<tr><td>${docEsc(r.name)}</td><td>${docEsc(r.alt||'—')}</td><td class=r>${r.mgPS.toFixed(2)} mg</td><td class=r>${r.kgBatch>0?r.kgBatch.toFixed(4)+' kg':'—'}</td><td class=r>${r.onHand!=null?Number(r.onHand).toLocaleString():'—'}</td></tr>`).join('')||'<tr><td colspan=5 class=muted>No formula captured.</td></tr>';
+  const pkgRows=pkg.map(r=>`<tr><td>${docEsc(r.name)}</td><td>${docEsc(r.alt||'—')}</td><td class=r>${r.qtyEach?r.qtyEach.toLocaleString():'—'} ${docEsc(r.uom)}</td></tr>`).join('')||'<tr><td colspan=3 class=muted>No packaging selected.</td></tr>';
+  const gummyNote = (typeof FORM_CFG!=='undefined'&&(FORM_CFG[p.dosageForm]||{}).gummy) ? '<p class="muted">Gummy base blend components are managed on the Formulation Gummy Base panel and are included in total blend weight.</p>' : '';
+  return docHeader(p,'Bill of Materials (BOM)', '<span class="stamp ok">MFSO SIGNED</span>')+`
+   <h2>Raw Materials — batch of ${qty?qty.toLocaleString():'—'} units</h2>
+   <table><thead><tr><th>Ingredient</th><th>MISys ALT</th><th class=r>Input / serving</th><th class=r>Qty / batch</th><th class=r>MISys on-hand</th></tr></thead><tbody>${ingRows}</tbody></table>
+   ${gummyNote}
+   <h2>Packaging Components</h2>
+   <table><thead><tr><th>Component</th><th>MISys ALT</th><th class=r>Qty / batch</th></tr></thead><tbody>${pkgRows}</tbody></table>
+   <div class=appr>All components trace to MISys (ALT codes). Quantities are for the full batch and do not include process overage beyond the formula's ${((p.overage||0)*100).toFixed(1)}% ingredient overage.</div>`;
+}
+function buildMMR(p){
+  const ing=docIngredientRows(p); const qty=Number(p.batchUnits)||0; const blendKg=docBlendKgBatch(p);
+  const totalMg = ing.reduce((s,r)=>s+r.mgPS,0);
+  const rows=ing.map(r=>`<tr><td>${docEsc(r.name)}</td><td>${docEsc(r.alt||'—')}</td><td class=r>${r.mgPS.toFixed(2)}</td><td class=r>${totalMg>0?(r.mgPS/totalMg*100).toFixed(2)+'%':'—'}</td><td class=r>${r.kgBatch>0?r.kgBatch.toFixed(4):'—'}</td><td></td></tr>`).join('')||'<tr><td colspan=6 class=muted>No formula captured.</td></tr>';
+  return docHeader(p,'Master Manufacturing Record (MMR)', '<span class="stamp ok">RELEASED — MFSO SIGNED</span>')+`
+   <h2>Batch Header</h2>
+   <div class=grid>
+     <div><span class=k>Product:</span> ${docEsc(p.product||'—')}</div><div><span class=k>Item #:</span> ${docEsc(p.pn)} · Rev V${docEsc(p.revision||1)}</div>
+     <div><span class=k>Blend name:</span> ${docEsc((p.product||p.pn)+' Blend')}</div><div><span class=k>Dosage form:</span> ${docEsc(p.dosageForm||'—')}</div>
+     <div><span class=k>Batch size:</span> ${qty?qty.toLocaleString()+' units':'—'}</div><div><span class=k>Total blend:</span> ${blendKg>0?blendKg.toFixed(3)+' kg':'—'}</div>
+     <div><span class=k>Lot #:</span> ______________</div><div><span class=k>Mfg date:</span> ______________</div>
+   </div>
+   <h2>Master Formula (per serving)</h2>
+   <table><thead><tr><th>Ingredient</th><th>MISys ALT</th><th class=r>mg/serving</th><th class=r>% of blend</th><th class=r>kg / batch</th><th>Lot # used</th></tr></thead><tbody>${rows}</tbody></table>
+   <h2>Manufacturing Steps</h2>
+   <table><thead><tr><th style="width:32px">#</th><th>Instruction</th><th style="width:120px">Performed by / date</th><th style="width:90px">Verified</th></tr></thead>
+   <tbody>
+     <tr><td>1</td><td>Dispense and verify each raw material against this MMR and the BOM (ALT code, lot #, weight).</td><td></td><td></td></tr>
+     <tr><td>2</td><td>Blend per SOP to uniformity; record blend time and equipment ID.</td><td></td><td></td></tr>
+     <tr><td>3</td><td>Fill / encapsulate / deposit to target unit weight; record in-process weight checks.</td><td></td><td></td></tr>
+     <tr><td>4</td><td>Package into ${docEsc((p.cogsBreakdown&&p.cogsBreakdown.container)||p.containerType||'container')} per the BOM; apply label and lot/date code.</td><td></td><td></td></tr>
+     <tr><td>5</td><td>Reconcile yield (theoretical vs actual) and route to QA for release.</td><td></td><td></td></tr>
+   </tbody></table>
+   <h2>Yield Reconciliation</h2>
+   <div class=grid><div><span class=k>Theoretical yield:</span> ${qty?qty.toLocaleString()+' units':'—'}</div><div><span class=k>Actual yield:</span> ______________</div><div><span class=k>% yield:</span> ______________</div><div><span class=k>Deviation #:</span> ______________</div></div>
+   <div class=appr>Master Manufacturing Record — GMP batch record template. Complete every field during production; QA must release before shipment. Formula traces to the approved Master Formula Sign-Off.</div>
+   <div class=sig><div>Compounder — signature / date</div><div>QA release — signature / date</div></div>`;
 }
 
 // Shared helper: read a browser File object into base64 (used by both the WIP
@@ -4589,6 +4763,123 @@ function QuotePage({ projects, setProjects, onToggleNav }){
   );
 }
 
+/* ══════════════════ DOCUMENTS PAGE — MFSO gate → production documents ══════════════════
+   Enova process order: Quote/Bid → MFSO (customer signs) → PRODUCTION. A signed MFSO is
+   the gate: only after the customer signs the Master Formula Sign-Off does the project go
+   into production and the production documents (SO, MO, BOM, MMR) become available. Every
+   document is generated from the project's captured formula + approved cost snapshot +
+   manual tier pricing — nothing is invented. */
+function DocumentsPage({ projects, setProjects, onToggleNav }){
+  const [pn, setPn] = useState(null);          // opens BLANK — recall a project
+  const [confirmSign, setConfirmSign] = useState(false);
+  const proj = projects.find(p => p.pn === pn) || null;
+  const signed = !!(proj && proj.mfsoSigned && proj.mfsoSigned.signed);
+  const locked = proj ? isLocked(proj) : false;
+
+  const signMFSO = () => {
+    setProjects(prev => prev.map(x => {
+      if (x.pn !== pn) return x;
+      const sig = { signed:true, by:CURRENT_ACTOR.email, byName:CURRENT_ACTOR.name, ts:nowISO() };
+      return withAudit({ ...x, mfsoSigned:sig, stage:'In Production' }, 'MFSO signed by customer', 'Authorized → In Production');
+    }));
+    setConfirmSign(false);
+  };
+  const unsignMFSO = () => {
+    if (typeof window!=='undefined' && window.confirm && !window.confirm('Revert the MFSO signature for '+pn+'? This takes the project back out of the signed/production state.')) return;
+    setProjects(prev => prev.map(x => x.pn===pn
+      ? withAudit({ ...x, mfsoSigned:{ ...(x.mfsoSigned||{}), signed:false, revokedBy:CURRENT_ACTOR.email, revokedTs:nowISO() } }, 'MFSO signature reverted', '')
+      : x));
+  };
+
+  if (!proj) {
+    return (
+      <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+        <div className="gen-top"><button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button><div className="gen-title">Documents</div></div>
+        <div className="gen-body">
+          <div className="panel">
+            <h2>Recall a Project</h2>
+            <ProjectPicker projects={projects} activePn={null} onSelect={(x)=>setPn(x)}/>
+            <p className="fsmall" style={{marginTop:10}}>Nothing is loaded. Search a project above to work its documents. The <strong>MFSO</strong> is the gate — a customer-signed Master Formula Sign-Off is required before the production documents (SO, MO, BOM, MMR) unlock.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const readiness = validateProject(proj);
+  const PRODUCTION_DOCS = [
+    {key:'SO',  label:'Sales Order (SO)',                 desc:'Customer order — quantity, unit price, extended total, terms.', build:buildSO},
+    {key:'MO',  label:'Manufacturing Order (MO)',         desc:'Production authorization — batch qty, blend size, form/container.', build:buildMO},
+    {key:'BOM', label:'Bill of Materials (BOM)',          desc:'Every raw material + packaging component with per-batch quantities (MISys ALT codes).', build:buildBOM},
+    {key:'MMR', label:'Master Manufacturing Record (MMR)',desc:'GMP master batch record — formula, steps, in-process checks, yield reconciliation.', build:buildMMR},
+  ];
+
+  return (
+    <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+      <div className="gen-top">
+        <button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+        <div className="gen-title">Documents</div>
+        <select className="gen-proj" value={pn||''} onChange={e=>{setPn(e.target.value); setConfirmSign(false);}}>
+          {projects.map(p => <option key={p.pn} value={p.pn}>{p.pn} — {cleanCustomer(p.customer)} — {(p.product||'').slice(0,40)}</option>)}
+        </select>
+      </div>
+
+      <div className="gen-body">
+        {/* Document flow map */}
+        <div className="doc-flow">
+          <span className="doc-flow-step done">Quote / Bid</span><span className="doc-flow-arr">→</span>
+          <span className={"doc-flow-step "+(signed?"done":"active")}>MFSO {signed?"✓ signed":"(gate)"}</span><span className="doc-flow-arr">→</span>
+          <span className={"doc-flow-step "+(signed?"active":"")}>Production: SO · MO · BOM · MMR</span>
+        </div>
+
+        {/* MFSO — the gate */}
+        <div className={"panel "+(signed?"fcf ok":"")}>
+          <h2>MFSO — Master Formula Sign-Off
+            <span className={"fbadge "+(signed?"ok":"warn")} style={{marginLeft:"auto"}}>{signed?"🔒 Signed — in production":"Awaiting customer signature"}</span></h2>
+          <p className="fsmall">The customer signs the MFSO based on the quote/bid. <strong>A signed MFSO authorizes production</strong> and unlocks the documents below; the project moves to <strong>In Production</strong>.</p>
+
+          {!locked && <div className="falert warn" style={{marginBottom:8}}>The formula is not yet <strong>approved &amp; locked</strong> on the Formulation page. Approve it first so the MFSO reflects a frozen formula and cost.</div>}
+          {readiness.errors.length>0 && <div className="falert err" style={{marginBottom:8}}>Data readiness: {readiness.errors.join(' ')}</div>}
+
+          <div className="fbrow">
+            <button className="fbtn navy" onClick={()=>printDoc(buildMFSO(proj))}>🖨 Generate / Print MFSO</button>
+            {!signed && (<>
+              <label className="fsmall" style={{display:"flex",alignItems:"center",gap:6}}>
+                <input type="checkbox" checked={confirmSign} onChange={e=>setConfirmSign(e.target.checked)}/>
+                I confirm the customer has signed the MFSO for {proj.pn}.
+              </label>
+              <button className="fbtn ok" disabled={!confirmSign} onClick={signMFSO}>✅ Mark MFSO Signed → Production</button>
+            </>)}
+          </div>
+          {signed && (
+            <div className="fbrow" style={{marginTop:8}}>
+              <span className="fsmall">Signed recorded by <strong>{(proj.mfsoSigned.byName)||proj.mfsoSigned.by}</strong> on {fmtTs(proj.mfsoSigned.ts)}.</span>
+              <button className="fbtn sec sm" onClick={unsignMFSO}>Revert signature</button>
+            </div>
+          )}
+        </div>
+
+        {/* Production documents — locked until MFSO signed */}
+        <div className="panel" style={{position:"relative"}}>
+          <h2>Production Documents
+            <span className={"fbadge "+(signed?"ok":"neutral")} style={{marginLeft:"auto"}}>{signed?"Unlocked":"Locked until MFSO signed"}</span></h2>
+          {!signed && <div className="falert info">🔒 Sign the MFSO above to unlock the Sales Order, Manufacturing Order, Bill of Materials, and Master Manufacturing Record.</div>}
+          <div className="doc-grid">
+            {PRODUCTION_DOCS.map(d => (
+              <div className={"doc-card"+(signed?"":" locked")} key={d.key}>
+                <div className="doc-card-h">{d.label}</div>
+                <div className="doc-card-d">{d.desc}</div>
+                <button className="fbtn teal sm" disabled={!signed} onClick={()=>printDoc(d.build(proj))}>🖨 Generate {d.key}</button>
+              </div>
+            ))}
+          </div>
+          <p className="fsmall" style={{marginTop:10}}>Every document is generated from this project's captured formula, approved cost snapshot, and manual tier pricing. Nothing is invented; all raw materials trace to MISys ALT codes.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ══════════════════ GENERATE PIPELINE — request → formula → quote → MFSO ══════════════════
    Progress checklist #8. A single guided flow that walks an approved project from the
    customer request through the live formula, into a tiered quote, and out as an MFSO draft.
@@ -4641,48 +4932,16 @@ function GeneratePage({ projects, setProjects, onToggleNav }){
   const removeTier = (i) => writeTiers(tiers.filter((_, j) => j !== i));
 
   // ── MFSO printable document ───────────────────────────────────────────
-  const printMFSO = () => {
-    if (!proj) return;
-    const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-    const bom = rows.map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.alt || '—')}</td>`
-      + `<td style="text-align:right">${(r.mgPS).toFixed(2)}</td>`
-      + `<td style="text-align:right">${r.u != null ? '$' + r.u.toFixed(4) : '—'}</td></tr>`).join('');
-    const doc = `<!doctype html><meta charset=utf8><title>MFSO ${esc(proj.pn)}</title>
-      <style>body{font:12px Arial,sans-serif;color:#1c2b3a;margin:36px;}
-      h1{font-size:18px;margin:0 0 2px;color:#155c3d;} h2{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#2f8fc4;border-bottom:1px solid #ccc;padding-bottom:3px;margin:18px 0 8px;}
-      table{width:100%;border-collapse:collapse;font-size:11px;} th,td{border:1px solid #dde;padding:5px 7px;text-align:left;} th{background:#eef4f2;}
-      .grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;font-size:12px;} .grid div{padding:2px 0;} .k{color:#667;}
-      .tot{display:flex;justify-content:space-between;max-width:320px;padding:3px 0;} .tot.g{font-weight:bold;border-top:1px solid #999;margin-top:4px;padding-top:6px;}
-      .sig{margin-top:40px;display:flex;gap:48px;} .sig div{flex:1;border-top:1px solid #333;padding-top:5px;font-size:11px;color:#555;}
-      .appr{margin-top:16px;padding:8px 12px;background:#fbf0dd;border:1px solid #d98a1f;border-radius:4px;font-size:11px;color:#8a5a12;}</style>
-      <h1>Manufacturing / Fill &amp; Sales Order (MFSO)</h1>
-      <div style="color:#667;font-size:11px;margin-bottom:14px">Enova Science &middot; ${esc(proj.pn)} &middot; Rev V${esc(proj.revision || 1)} &middot; DRAFT — requires approval</div>
-      <h2>Customer &amp; Product</h2>
-      <div class="grid">
-        <div><span class="k">Customer:</span> ${esc(cleanCustomer(proj.customer))}</div>
-        <div><span class="k">Product:</span> ${esc(proj.product || '—')}</div>
-        <div><span class="k">Dosage form:</span> ${esc(proj.dosageForm || '—')}${proj.isBulk ? ' · Bulk' : ''}</div>
-        <div><span class="k">Serving / Servings:</span> ${esc(proj.servingSize || '—')} · ${esc(proj.servingsPerUnit || '—')}</div>
-        <div><span class="k">Batch quantity:</span> ${qty ? qty.toLocaleString() : '—'}</div>
-        <div><span class="k">PM / Rep:</span> ${esc(proj.pm || '—')} / ${esc(proj.rep || '—')}</div>
-      </div>
-      <h2>Bill of Materials — ${rows.length} ingredient${rows.length === 1 ? '' : 's'}</h2>
-      <table><thead><tr><th>Ingredient</th><th>MISys ALT</th><th style="text-align:right">mg / serving</th><th style="text-align:right">MISys unit cost</th></tr></thead><tbody>${bom || '<tr><td colspan=4>No formula captured.</td></tr>'}</tbody></table>
-      <h2>Cost &amp; Price</h2>
-      <div class="tot"><span>Materials / unit</span><span>${money(materialsCPU)}</span></div>
-      <div class="tot"><span>Labor / unit</span><span>${money(laborCPU)}</span></div>
-      <div class="tot"><span>Overhead / unit</span><span>${money(ovhCPU)}</span></div>
-      <div class="tot g"><span>COGS / unit</span><span>${money(cogs)}</span></div>
-      <div class="tot"><span>Sell / unit (manual)</span><span>${money(sell)}</span></div>
-      <div class="tot"><span>Batch qty</span><span>${qty ? qty.toLocaleString() : '—'}</span></div>
-      <div class="tot g"><span>Extended revenue</span><span>${ext(sell)}</span></div>
-      <div class="appr"><b>Approval required.</b> This MFSO is a system-generated draft. An Enova employee must review and approve every line before it is signed, saved to the database, or sent to the customer. Tier pricing is manual; all costs trace to MISys / the Master Bid model.</div>
-      <div class="sig"><div>Enova Approver — signature / date</div><div>Customer — signature / date</div></div>`;
-    const w = window.open('', '_blank');
-    if (w) { w.document.write(doc); w.document.close(); w.focus(); setTimeout(() => w.print(), 250); }
-  };
+  // MFSO = Master Formula Sign-Off (the customer-signed gate). Shared builder so the
+  // Generate pipeline and the Documents page produce the identical document.
+  const printMFSO = () => { if (proj) printDoc(buildMFSO(proj)); };
 
-  const markSignedMFSO = () => { upd({ stage: 'MFSO' }); logAudit(setProjects, pn, 'MFSO signed', 'Stage → MFSO'); };
+  // Signing the MFSO authorizes production (Enova process: signed MFSO → In Production).
+  const markSignedMFSO = () => {
+    setProjects(prev => prev.map(x => x.pn===pn
+      ? withAudit({ ...x, mfsoSigned:{ signed:true, by:CURRENT_ACTOR.email, byName:CURRENT_ACTOR.name, ts:nowISO() }, stage:'In Production' }, 'MFSO signed by customer', 'Authorized → In Production')
+      : x));
+  };
 
   if (!proj) {
     return (
@@ -5119,7 +5378,7 @@ function App({ session }) {
     { id:'formulation', label:'Formulation', icon:'🧪', ready:true },
     { id:'generate',    label:'Generate',    icon:'⚙️', ready:true },
     { id:'quote',       label:'Quote',       icon:'💰', ready:true },
-    { id:'documents',   label:'Documents',   icon:'📄', ready:false },
+    { id:'documents',   label:'Documents',   icon:'📄', ready:true },
     { id:'labels',      label:'Label Review',icon:'🏷', ready:false },
     { id:'approvals',   label:'Approvals',   icon:'✅', ready:false },
   ];
@@ -5162,6 +5421,7 @@ function App({ session }) {
         {nav === 'formulation' && <FormulationPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} targetPn={formulationPn} autoGenPn={pendingGen} onGenConsumed={()=>setPendingGen(null)} />}
         {nav === 'generate' && <GeneratePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}
         {nav === 'quote' && <QuotePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}
+        {nav === 'documents' && <DocumentsPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}
       </div>
     </div>
   );

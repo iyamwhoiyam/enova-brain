@@ -4208,14 +4208,10 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
   // starts a new formulation. (Arriving via a project page's "Formulate" button
   // still focuses that project — see the targetPn effect below.)
   const [activePn, setActivePn] = useState(null);
-  const [approveChk, setApproveChk] = useState(false);   // Enova-employee approval gate for Lock & Approve
   // When the user arrives via a project page's "Formulate" button, focus that project.
   useEffect(() => { if (targetPn) setActivePn(targetPn); }, [targetPn]);
 
   const proj = activePn ? projects.find(p => p.pn === activePn) : null;
-  const cfg  = FORM_CFG[proj && proj.dosageForm] || FORM_CFG.Capsules;
-
-  const upd = (patch) => setProjects(prev => prev.map(p => p.pn === proj.pn ? { ...p, ...patch } : p));
 
   const newFormulation = () => {
     const pn = nextPN(projects);
@@ -4224,27 +4220,49 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
     setActivePn(pn);
   };
 
-  if (!proj) {
-    return (
-      <div className="app-page" style={{background:'var(--paper)'}}>
-        <div className="fp-topbar">
-          <button className="sb-toggle" style={{position:'static',marginRight:10}} onClick={onToggleNav}
-            title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
-          <h1>Formulation</h1>
-          <span className="fp-meta" style={{marginLeft:'auto'}}>{INVENTORY.length.toLocaleString()} SKUs</span>
+  // Thin wrapper: the shell + project picker are always mounted with a STABLE
+  // hook order. The actual formula editor (with all its cost hooks) is a separate
+  // component that only mounts once a project is loaded — so no hook ever runs
+  // conditionally, and switching projects remounts a clean editor (key=pn). This
+  // eliminates the "rendered more hooks than previous render" white-screen crash
+  // that happened when hooks lived after the old `if (!proj) return`.
+  return (
+    <div className="app-page" style={{background:'var(--paper)'}}>
+      <div className="fp-topbar">
+        <button className="sb-toggle" style={{position:'static',marginRight:10}} onClick={onToggleNav}
+          title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+        <h1>Formulation</h1>
+        <span className="fp-meta" style={{marginLeft:'auto'}}>
+          {proj ? <>{proj.pn} · {proj.stage} · {INVENTORY.length.toLocaleString()} SKUs
+            {proj.cogsBreakdown && <span style={{marginLeft:10,color:'var(--ok)'}}> ✓ auto-saved</span>}</>
+            : `${INVENTORY.length.toLocaleString()} SKUs`}
+        </span>
+      </div>
+      <div className="fp-content">
+        <div className="panel">
+          <h2>Select or Create Project</h2>
+          <ProjectPicker projects={projects} activePn={activePn} onSelect={setActivePn} onNew={newFormulation}/>
         </div>
-        <div className="fp-content">
-          <div className="panel">
-            <h2>Select or Create Project</h2>
-            <ProjectPicker projects={projects} activePn={null} onSelect={setActivePn} onNew={newFormulation}/>
-          </div>
+        {!proj ? (
           <div className="panel">
             <p className="fsmall" style={{margin:0}}>Nothing is loaded yet. Click <strong>+ New Formulation</strong> to start a formula from scratch or a customer request, or use the search above to recall an existing project. The board and inventory stay untouched until you choose one.</p>
           </div>
-        </div>
+        ) : (
+          <FormulationEditor key={proj.pn} proj={proj} projects={projects}
+            setProjects={setProjects} autoGenPn={autoGenPn} onGenConsumed={onGenConsumed}/>
+        )}
       </div>
-    );
-  }
+    </div>
+  );
+}
+
+/* ── FormulationEditor: only mounts when a project is loaded, so every hook
+   below runs unconditionally and in a stable order. Remounts (key=pn) when the
+   selected project changes, resetting the approval checkbox cleanly. ── */
+function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsumed }) {
+  const [approveChk, setApproveChk] = useState(false);   // Enova-employee approval gate for Lock & Approve
+  const cfg = FORM_CFG[proj.dosageForm] || FORM_CFG.Capsules;
+  const upd = (patch) => setProjects(prev => prev.map(p => p.pn === proj.pn ? { ...p, ...patch } : p));
 
   const totalUPC = (proj.servingSize||1) * (proj.servingsPerUnit||1);   // computed pieces/container
   // ── Pack-out (container) layer — independent of dose form ──
@@ -4453,23 +4471,9 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
   const belowMoq = proj.batchUnits>0 && proj.batchUnits < cfg.moq;
 
   return (
-    <div className="app-page" style={{background:'var(--paper)'}}>
-      <div className="fp-topbar">
-        <button className="sb-toggle" style={{position:'static',marginRight:10}} onClick={onToggleNav}
-          title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
-        <h1>Formulation</h1>
-        <span className="fp-meta" style={{marginLeft:'auto'}}>{proj.pn} · {proj.stage} · {INVENTORY.length.toLocaleString()} SKUs
-          {proj.cogsBreakdown && <span style={{marginLeft:10,color:'var(--ok)'}}>✓ auto-saved</span>}</span>
-      </div>
-      <div className="fp-content">
-
+    <>
         {locked && <div className="falert ok" style={{display:"flex",alignItems:"center",gap:10}}>
           🔒 <span><strong>Approved &amp; locked</strong> by {lock.byName||lock.by} on {fmtTs(lock.ts)}. The formula and cost build are frozen. Use <strong>Unlock to edit</strong> in the Review, Approval &amp; Lock panel below to make changes.</span></div>}
-
-        <div className="panel">
-          <h2>Select or Create Project</h2>
-          <ProjectPicker projects={projects} activePn={activePn} onSelect={setActivePn} onNew={newFormulation}/>
-        </div>
 
         <FIntakePanel onApply={handleIntakeApply} attachments={proj.attachments}
           autoTrigger={!!autoGenPn}
@@ -4706,8 +4710,7 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
           </>)}
         </div>
 
-      </div>
-    </div>
+    </>
   );
 }
 

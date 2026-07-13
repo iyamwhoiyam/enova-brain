@@ -3834,6 +3834,148 @@ DOSING: Convert to mg/serving exactly as written (g x1000, mcg/1000). Do not mod
 Return ONLY raw JSON:
 {"customerName":string|null,"productName":string|null,"dosageForm":string|null,"isBulk":boolean,"gummyType":"sugar"|"sugarFree"|null,"gummyWeightMg":number|null,"servingSize":number|null,"servingsPerUnit":number|null,"batchQuantity":number|null,"ingredients":[{"name":string,"mgPerServing":number,"rawUnitAsWritten":string}],"packagingDescription":string|null,"tierPricing":[{"qty":number,"pricePerUnit":number}],"productDescription":string|null,"formulationNotes":string|null}`;
 
+// ══════════════════════════════════════════════════════════════════════════
+// OFFLINE deterministic extractor — AI-INDEPENDENT.
+// Returns the EXACT same shape callClaudeF() returns, using no network, no AI,
+// no cost — pure regex/heuristics in the browser. Follows the same rules as the
+// AI prompt: extract ONLY what is written, never invent an ingredient, skip the
+// gummy base/process ingredients for gummies. It is deliberately CONSERVATIVE on
+// anything cost-critical: potency defaults to 100% (any stated % is noted for
+// manual review, never auto-applied, so "3% rosavins" can't blow up a cost);
+// IU / CFU doses are captured as 0 mg with a note (IU→mg is ambiguous); batch
+// quantity and tier PRICES are never guessed (tier pricing is always manual).
+// Every result is still reviewed in the intake panel before Apply.
+// ══════════════════════════════════════════════════════════════════════════
+function localExtractF(rawText){
+  const text = String(rawText||"").replace(/\r/g,"");
+  const lines = text.split("\n").map(l=>l.trim());
+  const joined = text.toLowerCase();
+  const notes = [];
+
+  // Gummy base/process ingredients the manufacturing system adds automatically
+  // (identical list to the AI prompt) — skipped ONLY for gummy forms.
+  const GUMMY_SKIP = /\b(sugar|pectin|corn syrup|tapioca syrup|citric acid|sodium citrate|water|mct oil|master ?coat|sunflower lecithin|lecithin|coloring|colou?r|flavou?r|glycerin|glycerine)\b/i;
+
+  // ── Dosage form + bulk + gummy type ──
+  let dosageForm=null, gummyType=null;
+  const bulkHit = /\bbulk\b|no packaging|loose powder|in bulk/.test(joined);
+  const sfHit   = /sugar[\s-]?free/.test(joined);
+  const isGummy = /gumm(y|ies)/.test(joined);
+  if (isGummy){ dosageForm = bulkHit ? "Gummies - Bulk" : "Gummies - Retail"; gummyType = sfHit ? "sugarFree" : "sugar"; }
+  else if (/\bcapsule|\bcaps\b|\bvcaps?\b|\bveg ?cap/.test(joined)) dosageForm="Capsules";
+  else if (/\btablet|\bcaplet\b/.test(joined)) dosageForm="Tablets";
+  else if (/stick ?pack|\bsachet/.test(joined)) dosageForm="Stickpacks";
+  else if (/\btincture|liquid shot|\bsyrup\b|\bliquid\b|\bfl oz\b|\bdropper\b/.test(joined)) dosageForm="Liquid";
+  else if (/\bpowder\b|\bscoop\b/.test(joined)) dosageForm="Powder";
+  // Explicit "Dosage Form (per Salesforce): X" overrides the guess.
+  const dfx = text.match(/dosage form[^:\n]*:\s*([A-Za-z \-\/]+)/i);
+  if (dfx){ const df=dfx[1].toLowerCase();
+    if(/gumm/.test(df)) dosageForm = /bulk/.test(df)?"Gummies - Bulk":"Gummies - Retail";
+    else if(/capsule/.test(df)) dosageForm="Capsules";
+    else if(/tablet|caplet/.test(df)) dosageForm="Tablets";
+    else if(/stick|sachet/.test(df)) dosageForm="Stickpacks";
+    else if(/liquid|tincture|shot/.test(df)) dosageForm="Liquid";
+    else if(/powder/.test(df)) dosageForm="Powder";
+  }
+  const isBulk = !!bulkHit;
+
+  // ── Ingredient lines ──
+  // The dose is the LAST mass/activity token on the line; a "%" is treated as a
+  // potency/standardization descriptor (noted, never used as the dose).
+  const UNIT_RE = /([\d][\d,]*\.?\d*)\s*(mcg|µg|ug|mg|grams?|gm\b|g\b|iu|billion cfu|billion|cfu)\b/ig;
+  const SKIP_LINE = /^(client\b|customer\b|company\b|product\b|dosage form|total weight|net wt|net weight|powder sachet|serving size|servings? per|monthly|moq\b|minimum|quantity\b|qty\b|packaging\b|please\b|we are|we would|our\b|provide\b|label\b|certif|organic,|non-gmo|gluten|vegan\b|note[:s]|notes?\b)/i;
+  const ingredients=[]; const pctNotes=[];
+  for (let line of lines){
+    if (!line) continue;
+    line = line.replace(/^project description\s*[:\-]\s*/i,"");   // an ingredient may ride on this label line
+    if (!line) continue;
+    if (SKIP_LINE.test(line)) continue;
+    UNIT_RE.lastIndex=0; let m, last=null;
+    while((m=UNIT_RE.exec(line))!==null){ last=m; }
+    if(!last){
+      // ingredient explicitly stated with an N/A dose (e.g. "Matcha ... - N/A")
+      if(/\bn\/?a\b/i.test(line)){
+        let nm = line.replace(/^[\s\-\*••]+/,"").split(/[\.·]{2,}|\s[-–]\s|:\s|\s{2,}/)[0].replace(/[\.\-–:\s]+$/,"").trim();
+        if(nm && nm.length>=2 && /[a-z]/i.test(nm) && !(isGummy&&GUMMY_SKIP.test(nm))){
+          ingredients.push({name:nm, mgPerServing:0, rawUnitAsWritten:"N/A"});
+          notes.push(`"${nm}" listed as N/A — enter its amount manually.`);
+        }
+      }
+      continue;
+    }
+    let cut = line.indexOf(last[0]);
+    let namePart = line.slice(0, cut);
+    namePart = namePart.replace(/[\.·•]{2,}.*$/,"");        // strip dotted leader tail
+    namePart = namePart.replace(/^[\s\-\*••]+/,"");    // strip leading bullet (keep leading digits e.g. 5-HTP)
+    // a trailing standalone potency percent → captured for a NOTE only
+    let potPct=null;
+    const potOut = namePart.match(/(?:^|\s)(\d{1,3}(?:\.\d+)?)\s*%\s*(?:tm)?\s*$/i);
+    if(potOut){ potPct=parseFloat(potOut[1]); namePart=namePart.slice(0,potOut.index); }
+    let name = namePart.replace(/[\.\-–:\s]+$/,"").replace(/\s{2,}/g," ").trim();
+    if(!name || name.length<2 || !/[a-z]/i.test(name)) continue;
+    if(isGummy && GUMMY_SKIP.test(name)) continue;          // gummy base handled by the system
+    let num = parseFloat(last[1].replace(/,/g,"")); const unit=last[2].toLowerCase();
+    let mg;
+    if(/^(mcg|µg|ug)/.test(unit)) mg=num/1000;
+    else if(/^mg/.test(unit)) mg=num;
+    else if(/^(g|gm|gram)/.test(unit)) mg=num*1000;
+    else if(/iu/.test(unit)){ mg=0; notes.push(`"${name}" listed as ${num} IU — convert IU→mg mass manually before costing.`); }
+    else if(/cfu|billion/.test(unit)){ mg=0; notes.push(`"${name}" listed as ${last[1]} ${unit} (probiotic activity) — set the strain-blend mg weight manually.`); }
+    else mg=num;
+    ingredients.push({name, mgPerServing:mg, rawUnitAsWritten:`${last[1]} ${last[2]}`});
+    if(potPct!=null && potPct>0 && potPct<100) pctNotes.push(`${name} (${potPct}%)`);
+    if(ingredients.length>=200) break;
+  }
+  if(pctNotes.length) notes.push("Potency review — these were listed with a % (assay/standardization). Potency defaulted to 100%; set each row's potency manually if the % is the assay: "+pctNotes.join(", ")+".");
+
+  // ── Metadata (best-effort; every field is reviewed before Apply) ──
+  const grab = (re)=>{ const g=text.match(re); return g?g[1].trim():null; };
+  let customerName = grab(/(?:customer name|client name|company|client|customer)\s*[:\-]\s*([^\n<]+)/i);
+  if(customerName) customerName = customerName.replace(/\s*<[^>]*>/g,"").replace(/[\.,;]\s*$/,"").trim().slice(0,80) || null;
+  let productName = grab(/(?:product name|product)\s*[:\-]\s*([^\n]+)/i);
+  if(productName) productName = productName.replace(/[\.,;]\s*$/,"").trim().slice(0,120) || null;
+  let productDescription = grab(/project description\s*[:\-]\s*([^\n]+)/i);
+
+  let servingSize=null, servingsPerUnit=null;
+  const ss = text.match(/serving size\s*[:\-]?\s*(\d+(?:\.\d+)?)/i)
+          || text.match(/(\d+)\s*(?:capsules?|caps|tablets?|gummies|gummy|stick ?packs?|sticks?|scoops?)\s*(?:per|\/)\s*serving/i);
+  if(ss) servingSize = parseFloat(ss[1])||null;
+  const spu = text.match(/(\d+)\s*(?:count|ct)\b/i)
+           || text.match(/(\d+)\s*(?:servings?|sticks?|gummies|capsules?|tablets?|caps)\s*(?:per|\/|in)\s*(?:bottle|box|bag|jar|container|unit|pouch|canister|tub)/i)
+           || text.match(/(?:servings?|units?)\s*(?:per|\/)\s*(?:bottle|box|unit|container)\s*[:\-]?\s*(\d+)/i);
+  if(spu) servingsPerUnit = parseFloat(spu[1])||null;
+
+  let gummyWeightMg=null;
+  if(isGummy){
+    const gw = text.match(/(?:total weight per (?:gummy|piece)|gummy weight|weight per gummy)\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg|g|grams?)/i)
+            || text.match(/(\d+(?:\.\d+)?)\s*(mg|g)\s*(?:\/|per)\s*gummy/i);
+    if(gw){ const n=parseFloat(gw[1]); gummyWeightMg = /^g/i.test(gw[2])?n*1000:n; }
+  }
+
+  let packagingDescription=null;
+  const pkgLine = lines.find(l=>/\b(bottle|jar|pouch|box|bag|sachet|tincture|canister|tub|blister|dropper|stick ?pack)\b/i.test(l) && l.length<160);
+  if(pkgLine) packagingDescription = pkgLine.replace(/^[\s\-\*••]+/,"").trim().slice(0,160);
+
+  return {
+    customerName: customerName||null,
+    productName: productName||null,
+    dosageForm: dosageForm||null,
+    isBulk: isBulk,
+    gummyType: gummyType||null,
+    gummyWeightMg: gummyWeightMg||null,
+    servingSize: servingSize,
+    servingsPerUnit: servingsPerUnit,
+    batchQuantity: null,               // never auto-guessed — cost-critical, set manually
+    ingredients: ingredients,
+    packagingDescription: packagingDescription||null,
+    tierPricing: [],                   // prices are ALWAYS manual — never parsed
+    productDescription: productDescription||null,
+    formulationNotes: notes.length ? notes.join("\n")
+      : (ingredients.length ? null
+         : "No dosed ingredients detected. Paste the ingredient list one per line (e.g. \"Vitamin C .... 500 mg\"), upload a .txt/.docx/.xlsx, or switch to AI extraction for a PDF/image.")
+  };
+}
+
 const toB64F = f => new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=()=>rej(new Error("Read failed"));r.readAsDataURL(f);});
 function xlsxTxtF(buf){
   const wb=window.XLSX.read(buf,{type:"array",cellDates:true});
@@ -3920,6 +4062,7 @@ async function attachmentToBlocks(att) {
 function FIntakePanel({onApply, attachments, autoTrigger, autoText, onAutoDone}) {
   const [status,setStatus]=useState("idle");
   const [err,setErr]=useState("");
+  const [warn,setWarn]=useState("");        // soft banner shown alongside a successful result
   const [ext,setExt]=useState(null);
   const [matches,setMatches]=useState([]);
   const [mode,setMode]=useState("upload");
@@ -3930,37 +4073,59 @@ function FIntakePanel({onApply, attachments, autoTrigger, autoText, onAutoDone})
   const [showAI,setShowAI]=useState(false);
   const [proxyUrl,setProxyUrl]=useState(()=>rd('enova:aiProxyUrl'));
   const [apiKey,setApiKey]=useState(()=>rd('enova:anthropicKey'));
+  // Extraction engine: 'offline' = deterministic in-browser parser (no AI, no cost,
+  // no network); 'ai' = the extraction proxy/API. Default OFFLINE so intake works
+  // with zero setup and never depends on API credits. Persisted per browser.
+  const [engine,setEngine]=useState(()=>rd('enova:extractEngine')==='ai'?'ai':'offline');
+  const pickEngine=(e)=>{setEngine(e);try{localStorage.setItem('enova:extractEngine',e);}catch(_){}};
+  const aiErrShort=(e)=>(e&&e.message||String(e)).replace(/^Extraction API error \d+:?\s*/,'').slice(0,110);
   const configured = !!(rd('enova:aiProxyUrl')||rd('enova:anthropicKey'));
   const saveAI=()=>{try{localStorage.setItem('enova:aiProxyUrl',proxyUrl.trim());localStorage.setItem('enova:anthropicKey',apiKey.trim());}catch(e){}setShowAI(false);};
 
-  const reset=()=>{setStatus("idle");setErr("");setExt(null);setMatches([]);setActiveAttId(null);};
+  const reset=()=>{setStatus("idle");setErr("");setWarn("");setExt(null);setMatches([]);setActiveAttId(null);};
 
-  const process = async (blocks) => {
-    setStatus("extracting");
-    const json = await callClaudeF(blocks);
+  // Shared: turn an extraction result object into ext + matched-SKU rows.
+  const applyResult=(json)=>{
     setExt(json);
     const ings = Array.isArray(json.ingredients)?json.ingredients:[];
     setMatches(ings.map(i=>({name:i.name,mg:i.mgPerServing,unit:i.rawUnitAsWritten,match:bestGuessF(i.name)})));
     setStatus("done");
+  };
+  const process      = async (blocks) => { setStatus("extracting"); applyResult(await callClaudeF(blocks)); };  // AI path
+  const processLocal = (text) => { applyResult(localExtractF(text||"")); };                                    // offline path
+
+  // Read a File to plain text with NO AI (offline engine + AI fallback both use this).
+  const fileToTextF = async (f, extn) => {
+    if(extn==="docx"){ if(!window.mammoth) throw new Error("Document reader not loaded."); return (await window.mammoth.extractRawText({arrayBuffer:await f.arrayBuffer()})).value; }
+    if(["xlsx","xls"].includes(extn)){ if(!window.XLSX) throw new Error("Spreadsheet reader not loaded."); return xlsxTxtF(await f.arrayBuffer()); }
+    if(["txt","csv"].includes(extn)){ return await f.text(); }
+    return null;
   };
 
   const handleFile = async f => {
     reset();
     try {
       const extn = f.name.split(".").pop().toLowerCase();
+      const isText = ["docx","xlsx","xls","txt","csv"].includes(extn);
+      const isDoc  = ["pdf","png","jpg","jpeg","gif","webp"].includes(extn);
+      if(engine==='offline'){
+        if(isText){ setStatus("reading"); processLocal(await fileToTextF(f,extn)); return; }
+        if(isDoc){ setStatus("error"); setErr("The offline parser can't read PDFs or images. Paste the text (Describe Product), upload a .txt/.docx/.xlsx, or switch the engine to AI."); return; }
+        throw new Error(`Unsupported: .${extn}`);
+      }
       setStatus("reading");
+      if(isText){
+        const t = await fileToTextF(f,extn);
+        try { await process([{type:"text",text:F_EXTRACTION_PROMPT+"\n\n--- FILE: "+f.name+" ---\n"+String(t).slice(0,12000)}]); }
+        catch(e){ processLocal(t); setWarn("AI unavailable ("+aiErrShort(e)+") — parsed "+f.name+" with the offline engine instead. Verify the results."); }
+        return;
+      }
       let blocks;
       if(extn==="pdf"){
         blocks=[{type:"document",source:{type:"base64",media_type:"application/pdf",data:await toB64F(f)}},{type:"text",text:F_EXTRACTION_PROMPT}];
       } else if(["png","jpg","jpeg","gif","webp"].includes(extn)){
         const mt=extn==="jpg"?"image/jpeg":`image/${extn}`;
         blocks=[{type:"image",source:{type:"base64",media_type:mt,data:await toB64F(f)}},{type:"text",text:F_EXTRACTION_PROMPT}];
-      } else if(extn==="docx"){
-        const result=await window.mammoth.extractRawText({arrayBuffer:await f.arrayBuffer()});
-        blocks=[{type:"text",text:F_EXTRACTION_PROMPT+"\n\n--- DOCUMENT ---\n"+result.value.slice(0,12000)}];
-      } else if(["xlsx","xls"].includes(extn)){
-        if(!window.XLSX) throw new Error("SheetJS not loaded.");
-        blocks=[{type:"text",text:F_EXTRACTION_PROMPT+"\n\n--- EXCEL: "+f.name+" ---\n"+xlsxTxtF(await f.arrayBuffer())}];
       } else throw new Error(`Unsupported: .${extn}`);
       await process(blocks);
     } catch(e){setStatus("error");setErr(e.message||String(e));}
@@ -3969,8 +4134,13 @@ function FIntakePanel({onApply, attachments, autoTrigger, autoText, onAutoDone})
   // Run extraction on an explicit request string (used by Describe + the auto-generate button).
   const runExtractText = async (text) => {
     reset(); setMode("describe"); setDesc(text);
+    if(engine==='offline'){ processLocal(text); return; }
     try { await process([{type:"text",text:F_EXTRACTION_PROMPT+"\n\n--- CUSTOMER REQUEST ---\n"+text}]); }
-    catch(e){setStatus("error");setErr(e.message||String(e));}
+    catch(e){
+      // A dead / credit-limited API must never block intake — fall back to offline.
+      try { processLocal(text); setWarn("AI unavailable ("+aiErrShort(e)+") — parsed offline instead. Verify the results."); }
+      catch(e2){ setStatus("error"); setErr(e.message||String(e)); }
+    }
   };
   const handleDescribe = async () => {
     if(!desc.trim()){setErr("Enter a description first.");return;}
@@ -3988,9 +4158,19 @@ function FIntakePanel({onApply, attachments, autoTrigger, autoText, onAutoDone})
   const handleAnalyzeAttachment = async att => {
     reset(); setActiveAttId(att.id);
     try {
+      const e = att.ext;
+      const isText = ["docx","xlsx","xls","txt","csv"].includes(e);
+      if(engine==='offline'){
+        if(!isText){ setStatus("error"); setErr("The offline parser can't read PDFs or images. Switch the engine to AI for "+att.name+", or paste its text."); return; }
+        setStatus("reading");
+        let t="";
+        if(e==="docx"){ if(!window.mammoth) throw new Error("Document reader not loaded."); t=(await window.mammoth.extractRawText({arrayBuffer:b64ToArrayBuffer(att.dataB64)})).value; }
+        else if(["xlsx","xls"].includes(e)){ if(!window.XLSX) throw new Error("Spreadsheet reader not loaded."); t=xlsxTxtF(b64ToArrayBuffer(att.dataB64)); }
+        else { t=decodeURIComponent(escape(atob(att.dataB64))); }
+        processLocal(t); return;
+      }
       setStatus("reading");
-      const blocks = await attachmentToBlocks(att);
-      await process(blocks);
+      await process(await attachmentToBlocks(att));
     } catch(e){setStatus("error");setErr(e.message||String(e));}
   };
 
@@ -4002,7 +4182,7 @@ function FIntakePanel({onApply, attachments, autoTrigger, autoText, onAutoDone})
   return (
     <div className="panel navy">
       <h2>Customer Request Intake <span className="fbadge ai" style={{marginLeft:"auto"}}>Extraction only — never invents ingredients</span></h2>
-      <div className="fr" style={{marginBottom:8,alignItems:"center"}}>
+      <div className="fr" style={{marginBottom:8,alignItems:"center",flexWrap:"wrap",gap:6}}>
         <button className={`fbtn sm ${mode==="upload"?"navy":"sec"}`} onClick={()=>setMode("upload")}>📎 Upload Document</button>
         <button className={`fbtn sm ${mode==="describe"?"navy":"sec"}`} onClick={()=>setMode("describe")}>✏️ Describe Product</button>
         {hasAttachments && (
@@ -4010,13 +4190,24 @@ function FIntakePanel({onApply, attachments, autoTrigger, autoText, onAutoDone})
             📎 From WIP Board ({attachments.length})
           </button>
         )}
-        <span style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
-          <span className="fsmall" style={{display:"flex",alignItems:"center",gap:5}}>
+        <span style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6}}>
+          <span className="fsmall" style={{fontWeight:600,color:"#dfe8ee"}}>Engine</span>
+          <div style={{display:"inline-flex",border:"1px solid #43617a",borderRadius:5,overflow:"hidden"}}>
+            <button className={`fbtn sm ${engine==="offline"?"teal":"sec"}`} style={{borderRadius:0,margin:0}}
+              title="Deterministic in-browser parser — no AI, no network, no cost" onClick={()=>pickEngine("offline")}>⚡ Offline</button>
+            <button className={`fbtn sm ${engine==="ai"?"navy":"sec"}`} style={{borderRadius:0,margin:0}}
+              title="AI extraction via your proxy — best for messy PDFs / images" onClick={()=>pickEngine("ai")}>✨ AI</button>
+          </div>
+          {engine==="ai" && <span className="fsmall" style={{display:"flex",alignItems:"center",gap:5}}>
             <span style={{width:8,height:8,borderRadius:"50%",background:configured?"#5cb85c":"#d9534f",display:"inline-block"}}/>
-            {configured?"AI connected":"AI not configured"}
-          </span>
-          <button className="fbtn sm sec" onClick={()=>setShowAI(s=>!s)}>⚙ AI Settings</button>
+            {configured?"connected":"not configured"}</span>}
+          {engine==="ai" && <button className="fbtn sm sec" onClick={()=>setShowAI(s=>!s)}>⚙ AI Settings</button>}
         </span>
+      </div>
+      <div className="fsmall" style={{marginBottom:8,color:"#c4d3dd"}}>
+        {engine==="offline"
+          ? <>⚡ <strong>Offline parser</strong> — reads pasted/typed text and .txt / .docx / .xlsx entirely in your browser. No API, no cost, works with zero setup. For PDFs or images, switch to AI.</>
+          : <>✨ <strong>AI extraction</strong> — sends the request to your extraction proxy; best for messy PDFs and images. Falls back to the offline parser automatically if the API is unavailable.</>}
       </div>
       {showAI && (
         <div className="falert info" style={{marginBottom:8}}>
@@ -4029,15 +4220,16 @@ function FIntakePanel({onApply, attachments, autoTrigger, autoText, onAutoDone})
             <button className="fbtn sec sm" onClick={()=>setShowAI(false)}>Cancel</button></div>
         </div>
       )}
-      {!configured && !showAI && (
-        <div className="falert warn" style={{marginBottom:8}}>AI extraction isn't connected yet. Click <strong>⚙ AI Settings</strong> to add your proxy URL or key before uploading a request.</div>
+      {engine==="ai" && !configured && !showAI && (
+        <div className="falert warn" style={{marginBottom:8}}>AI engine selected but no proxy/key is set. Click <strong>⚙ AI Settings</strong> to connect it, or switch to the <strong>⚡ Offline</strong> engine — no setup needed.</div>
       )}
       {mode==="upload" && (
         <div className="fr" style={{alignItems:"center"}}>
-          <input ref={ref} type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.docx,.xlsx,.xls" style={{fontSize:12}}
+          <input ref={ref} type="file"
+            accept={engine==="offline"?".txt,.csv,.docx,.xlsx,.xls":".pdf,.png,.jpg,.jpeg,.webp,.docx,.xlsx,.xls,.txt,.csv"} style={{fontSize:12}}
             onChange={e=>e.target.files[0]&&handleFile(e.target.files[0])}
             disabled={["reading","extracting"].includes(status)}/>
-          <span className="fbadge neutral">PDF · IMG · DOCX · XLSX</span>
+          <span className="fbadge neutral">{engine==="offline"?"TXT · CSV · DOCX · XLSX":"PDF · IMG · DOCX · XLSX · TXT"}</span>
         </div>
       )}
       {mode==="describe" && (
@@ -4072,7 +4264,11 @@ function FIntakePanel({onApply, attachments, autoTrigger, autoText, onAutoDone})
       {status==="error" && <div className="falert err" style={{marginTop:8}}><strong>Error:</strong> {err}</div>}
       {status==="done" && ext && (
         <div style={{marginTop:12}}>
-          <div className="falert ai">✓ Extracted exactly what was requested — no ingredients added. Verify each SKU match before applying.</div>
+          {warn && <div className="falert warn" style={{marginBottom:8}}>⚠ {warn}</div>}
+          <div className="falert ai" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <span className={"fbadge "+((engine==="offline"||!!warn)?"neutral":"ai")}>{(engine==="offline"||!!warn)?"⚡ Offline parse":"✨ AI parse"}</span>
+            <span>✓ Extracted exactly what was written — no ingredients added. Verify each SKU match before applying.</span>
+          </div>
           <div className="fr">
             {[["Customer",ext.customerName],["Product",ext.productName],["Form",ext.dosageForm],
               ["Serving Size",ext.servingSize],["Servings/Unit",ext.servingsPerUnit],["Batch Qty",ext.batchQuantity]

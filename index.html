@@ -1568,7 +1568,7 @@ function buildMFSO(p){
   const pieceW=mfsoPieceWord(p.dosageForm);
   const pieces=cb.piecesPerContainer!=null?cb.piecesPerContainer:((p.servingSize||1)*(p.servingsPerUnit||1));
   const container=cb.container||p.containerType||'—';
-  const isCount=/capsule|tablet|gummy|stick/i.test(String(p.dosageForm||''));
+  const isCount=/capsule|tablet|gumm|stick/i.test(String(p.dosageForm||''));
   const fill=(v)=> (v!=null&&v!=='') ? docEsc(v) : '<span class="fill">&nbsp;</span>';
   const pkgName=(key)=>{ const sel=(p.pkg||{})[key]; if(!sel) return null; const f=(typeof INV_IX!=='undefined'&&INV_IX[sel.n])||sel; return (f&&f.d)||sel.n||null; };
   const shellName=(()=>{ if(!p.shellItem) return null; const f=(typeof INV_IX!=='undefined'&&INV_IX[p.shellItem.n])||p.shellItem; return (f&&f.d)||p.shellItem.n||null; })();
@@ -1578,9 +1578,16 @@ function buildMFSO(p){
     || '<tr><td colspan=4 class=muted>No formula captured.</td></tr>';
 
   const pkgRow=(label,val,alwaysNa)=>`<tr><td style="width:38%">${label}</td><td class="${val?'':'yh'}">${val?docEsc(val):(alwaysNa?'n/a':'<span class="fill">&nbsp;</span>')}</td></tr>`;
+  // Container-agnostic: the primary container comes from whatever slot THIS container
+  // type uses (bottle/jar/tub → container, bulk → bag, stick pack → foil, pouch → pouch);
+  // Capsule Shells is n/a unless it's a capsule; a catch-all appends any selected
+  // component not covered by the standard rows so nothing a project selected is dropped.
+  const isCap=/capsule/i.test(String(p.dosageForm||''));
+  const mapped=new Set(['container','bag','foil','pouch','closure','label','scoop','desiccant','tamper','display','shipper']);
+  const extraPkg=Object.keys(p.pkg||{}).filter(k=>!mapped.has(k)).map(k=>{ const nm=pkgName(k); return nm?pkgRow(k, nm):''; }).join('');
   const packaging=[
-    pkgRow('Capsule Shells', shellName),
-    pkgRow('Container', pkgName('container')||pkgName('bag')),
+    pkgRow('Capsule Shells', shellName, !isCap),
+    pkgRow('Container', pkgName('container')||pkgName('bag')||pkgName('foil')||pkgName('pouch')),
     pkgRow('Closure', pkgName('closure')),
     pkgRow('Label', pkgName('label')),
     pkgRow('Scoop', pkgName('scoop')),
@@ -1590,6 +1597,7 @@ function buildMFSO(p){
     pkgRow('Master Case Divider (if glass)', null, true),
     pkgRow('Master Case Shipper (plain paperboard)', pkgName('shipper')),
     pkgRow('Outer Case Label', 'CLIENT; PRODUCT NAME; LOT#; BEST BY; QTY'),
+    extraPkg,
   ].join('');
 
   const feeTiers = (Array.isArray(p.tierPricing)&&p.tierPricing.length ? p.tierPricing

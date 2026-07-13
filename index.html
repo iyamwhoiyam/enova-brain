@@ -1466,7 +1466,11 @@ function docStyle(){ return `<style>body{font:12px Arial,Helvetica,sans-serif;co
   .sig{margin-top:40px;display:flex;gap:48px;} .sig div{flex:1;border-top:1px solid #333;padding-top:5px;font-size:11px;color:#555;}
   .appr{margin-top:16px;padding:8px 12px;background:#fbf0dd;border:1px solid #d98a1f;border-radius:4px;font-size:11px;color:#8a5a12;}
   .r{text-align:right;} .muted{color:#999;} .stamp{display:inline-block;padding:2px 8px;border-radius:3px;font-weight:bold;font-size:11px;}
-  .stamp.ok{background:#e5f4ee;color:#1D7A6B;border:1px solid #1D7A6B;} .stamp.wait{background:#fdf1e3;color:#a5620f;border:1px solid #d98a1f;}</style>`; }
+  .stamp.ok{background:#e5f4ee;color:#1D7A6B;border:1px solid #1D7A6B;} .stamp.wait{background:#fdf1e3;color:#a5620f;border:1px solid #d98a1f;}
+  .addr{color:#667;font-size:10.5px;margin:0 0 10px;} .sechd{background:#1B3A5C;color:#fff;font-weight:bold;font-size:11px;padding:5px 9px;margin:18px 0 6px;letter-spacing:.03em;}
+  .subhd{font-weight:bold;font-size:11px;color:#1B3A5C;margin:10px 0 4px;} .fill{display:inline-block;min-width:160px;border-bottom:1px solid #999;}
+  td.yh{background:#fffbe8;} .legal{font-size:9px;color:#555;line-height:1.5;white-space:pre-line;margin:6px 0;} .note2{font-size:10px;color:#555;white-space:pre-line;margin:4px 0;}
+  .inst{font-size:10.5px;color:#8a5a12;background:#fbf0dd;border:1px solid #e6c583;padding:6px 10px;border-radius:4px;margin:10px 0;}</style>`; }
 
 // Resolve each ingredient against MISys; compute per-serving (with overage) + per-batch.
 function docIngredientRows(p){
@@ -1507,35 +1511,187 @@ function docHeader(p, title, statusHtml){
    <div class=sub>Enova Science · ${docEsc(p.pn)} · Rev V${docEsc(p.revision||1)} · ${docEsc(cleanCustomer(p.customer))}${statusHtml?' · '+statusHtml:''}</div>`;
 }
 
+// ── Verbatim standard blocks from the real Enova MFSO template (do not paraphrase) ──
+const MFSO_MICRO = [
+  ['Total Plate Count','≤ 10,000','cfu/g','AOAC 990.12'],
+  ['Total Mold Count','≤ 1,000','cfu/g','AOAC 2014.05'],
+  ['Total Yeast Count','≤ 1,000','cfu/g','AOAC 2014.05'],
+  ['Total Coliform Count','≤ 100','cfu/g','AOAC 991.14'],
+  ['Escherichia coli','Negative','in 10 g','AOAC-RI 050601 or AOAC 991.14'],
+  ['Salmonella spp','Negative','in 10 g','AOAC 020502 or AOAC 2014.01'],
+  ['Staphylococcus aureus','Negative','in 10 g','AOAC-RI 100503 or AOAC 2003.07'],
+];
+const MFSO_POTENCY = [['Vitamin A',172.16],['Vitamin B1',120.43],['Vitamin B2',120.43],['Vitamin B3',120.43],['Vitamin B5',217.20],['Vitamin B6',322.48],['Biotin',293.44],['Folate',171.18],['Vitamin B12',217.20],['Vitamin C',107.90],['Vitamin D',473.39],['Vitamin E',185.04],['Sodium',38.28],['Potassium',38.28],['Magnesium',38.28],['Copper',51.46],['Calcium',38.28],['Zinc',51.46],['Iron',51.46],['Phosphorous',38.28],['Iodine',229.06],['Selenium',95.31],['Manganese',51.46],['Chromium',95.31],['Molybdenum',95.31],['Caffeine',142.01],['Protein',32.71]];
+const MFSO_REGULATORY = [
+  ['FDA (Food Facility Registration)','Yes','—','Provided upon request'],
+  ['cGMP Facility Certification','Yes','—','Provided upon request'],
+  ['NSF Product Certification','No','Starting at $5,000 annually','TBD'],
+  ['NSF Sport Certification','No','Starting at $5,000 annually','TBD'],
+  ['Non-GMO Certification','No','Starting at $500 annually','TBD'],
+  ['Gluten Free Certification','No','Starting at $500 annually','TBD'],
+  ['Organic Certification','No','Starting at $500 annually','TBD'],
+  ['Kosher Certification','No','$500 every production','TBD'],
+  ['Halal Certification','No','Starting at $500 annually','TBD'],
+  ['Supplement Fact Panel','Yes','—','Provided upon request'],
+  ['Allergen Statement','Yes','—','Provided upon request'],
+  ['Trademark License','Yes','—','3 - 5 days'],
+  ['Certificate of Free Sale','No','$138','30 days'],
+  ['Certificate of Origin','No','$138','5 days'],
+  ['Barcode','No','$30','1 day'],
+];
+const MFSO_OPTIONAL = [
+  ['Modern FDA Compliant NLEA (Calories, Fats, Carbs, Sugars…etc.). Testing results applied on second run; first run uses input calculations on nutritionals.','DY-NLEA','$2,103.00'],
+  ['Heavy Metal Testing Analysis (As, Cd, Hg, Pb) (Prop 65) — required if you have over 10 employees and sell product in the State of California.','DY- HEAVY METAL','$261.00'],
+  ['2-Year Accelerated & Real-Time Stability Testing (microbial only). Potency additional per label claim. Must use a 1-year BB date on product until results are reported.','37-2','$2,000.00'],
+  ['Big 9 Allergens, Limited Tree Nut (includes Gluten Testing).','DY-Allergen','$2,521.00'],
+  ['Gluten Testing.','127','$105.00'],
+  ['GMO Detection by Qualitative PCR.','DY-GMO','$515.00'],
+  ['Pesticide Analysis.','DY-Pesticides','$504.72'],
+];
+function mfsoPieceWord(form){
+  const f=String(form||'');
+  if(/capsule/i.test(f)) return 'Capsule(s)';
+  if(/tablet/i.test(f)) return 'Tablet(s)';
+  if(/gummy|gummies/i.test(f)) return 'Gummy(ies)';
+  if(/stick/i.test(f)) return 'Stick Pack(s)';
+  if(/liquid|tincture/i.test(f)) return 'mL';
+  if(/powder/i.test(f)) return 'Serving(s)';
+  return 'Unit(s)';
+}
+
+// Faithful, complete 8-section Master Formula Sign-Off (matches the Enova MFSO template).
+// Customer-facing: NO internal MISys ALT codes or unit costs. Yellow (customer-completed)
+// fields render as blank fill lines. Regulatory / micro / legal blocks are verbatim.
 function buildMFSO(p){
   const rows=docIngredientRows(p);
-  const comp=rows.map(r=>`<tr><td>${docEsc(r.name)}</td><td>${docEsc(r.alt||'—')}</td><td class=r>${r.labelMg}</td><td class=r>${r.mgPS.toFixed(2)}</td><td>mg</td></tr>`).join('');
-  const sell=projUnitPrice(p); const qty=Number(p.batchUnits)||0;
-  const tiers=Array.isArray(p.tierPricing)?p.tierPricing:[];
-  const tierRows=tiers.map(t=>`<tr><td>${(Number(t.units)||0).toLocaleString()}</td><td class=r>${t.price!=null?'$'+Number(t.price).toFixed(2):'—'}</td></tr>`).join('')||'<tr><td colspan=2 class=muted>No tiers entered — tier pricing is manual.</td></tr>';
-  const fl=p.formulaLock||{}; const sig=p.mfsoSigned||{};
-  const stamp = sig.signed ? '<span class="stamp ok">SIGNED</span>' : '<span class="stamp wait">FOR CUSTOMER SIGNATURE</span>';
-  return docHeader(p,'Master Formula Sign-Off (MFSO)', stamp)+`
-   <h2>Customer &amp; Product</h2>
+  const cb=p.cogsBreakdown||{}; const sig=p.mfsoSigned||{};
+  const pieceW=mfsoPieceWord(p.dosageForm);
+  const pieces=cb.piecesPerContainer!=null?cb.piecesPerContainer:((p.servingSize||1)*(p.servingsPerUnit||1));
+  const container=cb.container||p.containerType||'—';
+  const isCount=/capsule|tablet|gummy|stick/i.test(String(p.dosageForm||''));
+  const fill=(v)=> (v!=null&&v!=='') ? docEsc(v) : '<span class="fill">&nbsp;</span>';
+  const pkgName=(key)=>{ const sel=(p.pkg||{})[key]; if(!sel) return null; const f=(typeof INV_IX!=='undefined'&&INV_IX[sel.n])||sel; return (f&&f.d)||sel.n||null; };
+  const shellName=(()=>{ if(!p.shellItem) return null; const f=(typeof INV_IX!=='undefined'&&INV_IX[p.shellItem.n])||p.shellItem; return (f&&f.d)||p.shellItem.n||null; })();
+  const today=(()=>{ try{ return new Date().toLocaleDateString('en-US'); }catch(e){ return ''; } })();
+
+  const comp=rows.map(r=>`<tr><td>${docEsc(r.name)}</td><td class=r>${r.mgPS.toFixed(2)}</td><td class=r>${r.labelMg||''}</td><td>mg</td></tr>`).join('')
+    || '<tr><td colspan=4 class=muted>No formula captured.</td></tr>';
+
+  const pkgRow=(label,val,alwaysNa)=>`<tr><td style="width:38%">${label}</td><td class="${val?'':'yh'}">${val?docEsc(val):(alwaysNa?'n/a':'<span class="fill">&nbsp;</span>')}</td></tr>`;
+  const packaging=[
+    pkgRow('Capsule Shells', shellName),
+    pkgRow('Container', pkgName('container')||pkgName('bag')),
+    pkgRow('Closure', pkgName('closure')),
+    pkgRow('Label', pkgName('label')),
+    pkgRow('Scoop', pkgName('scoop')),
+    pkgRow('Desiccant', pkgName('desiccant')),
+    pkgRow('TE Neckband', pkgName('tamper')),
+    pkgRow('Display Box', pkgName('display')),
+    pkgRow('Master Case Divider (if glass)', null, true),
+    pkgRow('Master Case Shipper (plain paperboard)', pkgName('shipper')),
+    pkgRow('Outer Case Label', 'CLIENT; PRODUCT NAME; LOT#; BEST BY; QTY'),
+  ].join('');
+
+  const feeTiers = (Array.isArray(p.tierPricing)&&p.tierPricing.length ? p.tierPricing
+    : (((typeof FORM_CFG!=='undefined'&&(FORM_CFG[p.dosageForm]||{}).tiers)||[]).map(u=>({units:u,price:null}))));
+  const feeRows = feeTiers.map(t=>`<tr><td class=r>${(Number(t.units)||0).toLocaleString()}</td><td>units</td><td class="r ${t.price!=null?'':'yh'}">${t.price!=null?'$'+Number(t.price).toFixed(2):'<span class="fill">&nbsp;</span>'}</td></tr>`).join('')
+    || '<tr><td colspan=3 class=muted>Tier pricing is manual — none entered.</td></tr>';
+
+  const micro=MFSO_MICRO.map(m=>`<tr><td>${docEsc(m[0])}</td><td>${docEsc(m[1])}</td><td>${docEsc(m[2])}</td><td>${docEsc(m[3])}</td></tr>`).join('');
+  const potency=MFSO_POTENCY.map(m=>`<tr><td>${docEsc(m[0])}</td><td class=r>$${m[1].toFixed(2)}</td><td class=yh><span class="fill">&nbsp;</span></td></tr>`).join('');
+  const reg=MFSO_REGULATORY.map(m=>`<tr><td>${docEsc(m[0])}</td><td>${docEsc(m[1])}</td><td>${docEsc(m[2])}</td><td>${docEsc(m[3])}</td><td class=yh><span class="fill">&nbsp;</span></td></tr>`).join('');
+  const opt=MFSO_OPTIONAL.map(m=>`<tr><td>${docEsc(m[0])}</td><td>${docEsc(m[1])}</td><td class=r>${docEsc(m[2])}</td><td class=yh><span class="fill">&nbsp;</span></td></tr>`).join('');
+
+  return `<!doctype html><meta charset=utf8><title>MFSO ${docEsc(p.pn)}</title>${docStyle()}
+   <h1>ENOVA SCIENCE</h1>
+   <div class=addr>4740 S Cleveland Ave, Fort Myers, FL 33907</div>
+   <div class=sub><b>MASTER FORMULA SIGN OFF APPROVAL</b> · ${docEsc(p.pn)} · Rev V${docEsc(p.revision||1)} · ${sig.signed?'<span class="stamp ok">SIGNED</span>':'<span class="stamp wait">FOR CUSTOMER SIGNATURE</span>'}</div>
    <div class=grid>
      <div><span class=k>Customer:</span> ${docEsc(cleanCustomer(p.customer))}</div>
-     <div><span class=k>Product:</span> ${docEsc(p.product||'—')}</div>
-     <div><span class=k>Dosage form:</span> ${docEsc(p.dosageForm||'—')}</div>
-     <div><span class=k>Container:</span> ${docEsc((p.cogsBreakdown&&p.cogsBreakdown.container)||p.containerType||'—')}</div>
-     <div><span class=k>Serving size:</span> ${docEsc(p.servingSize||'—')}</div>
-     <div><span class=k>Servings / unit:</span> ${docEsc(p.servingsPerUnit||'—')}</div>
+     <div><span class=k>Date:</span> ${docEsc(p.quoteDate||today)}</div>
+     <div><span class=k>Product Name:</span> ${docEsc(p.product||'—')}</div>
+     <div><span class=k>Enova Item #:</span> ${docEsc(p.pn)}</div>
+     <div><span class=k>Revision #:</span> ${docEsc(p.revision||1)}</div>
      <div><span class=k>Sales Rep:</span> ${docEsc(p.rep||'—')}</div>
-     <div><span class=k>Formula approved by:</span> ${docEsc(fl.byName||fl.by||'— (not yet approved)')}</div>
    </div>
-   <h2>Master Formula — Composition per Serving</h2>
-   <table><thead><tr><th>Ingredient</th><th>MISys ALT</th><th class=r>Label Claim (mg)</th><th class=r>Input (mg, w/ OA)</th><th>UOM</th></tr></thead><tbody>${comp||'<tr><td colspan=5 class=muted>No formula captured.</td></tr>'}</tbody></table>
-   <h2>Packaging</h2><p>${docEsc(p.quotePackaging||'—')}</p>
-   <h2>Approved Tier Pricing (manual)</h2>
-   <table><thead><tr><th>Number of Units</th><th class=r>Sale Price / Unit</th></tr></thead><tbody>${tierRows}</tbody></table>
-   <h2>Order Terms</h2>
-   <div class=grid><div><span class=k>Order quantity:</span> ${qty?qty.toLocaleString():'—'}</div><div><span class=k>Sale price / unit:</span> ${sell!=null?'$'+sell.toFixed(4):'—'}</div><div><span class=k>Payment:</span> 50% deposit, balance prior to shipment</div><div><span class=k>Lead time:</span> ~8 weeks from deposit + approved artwork</div></div>
-   <div class=appr><b>This Master Formula Sign-Off must be signed by the customer before production begins.</b> A signed MFSO authorizes Enova Science to proceed to the production documents (SO, MO, BOM, MMR) and moves the project into production. Formula and pricing are final upon signature. Costs trace to MISys / the Master Bid model; tier pricing is manual.</div>
-   <div class=sig><div>Enova Science — approver signature / date</div><div>Customer — authorized signature / date</div></div>`;
+   <div class=inst>Instructions: Please review and complete all fields highlighted (blank) and return to Enova Science at your earliest convenience.</div>
+
+   <div class=sechd>SECTION 1. PRODUCT SPECIFICATION</div>
+   <div class=subhd>1.1. Composition (per serving)</div>
+   <table><thead><tr><th>Ingredient</th><th class=r>Input, mg</th><th class=r>Label Claim (if applicable)</th><th>UOM</th></tr></thead><tbody>${comp}</tbody></table>
+   <div class=note2>Other Ingredients: ${fill(p.quoteOtherIngredients)}
+This Formula is the proprietary property of Enova Science. This Flavor System is the proprietary property of Enova Science.</div>
+   <div class=subhd>1.2. General Specification</div>
+   <table><tbody>
+     <tr><td style="width:38%">Appearance</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
+     <tr><td>Color</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
+     <tr><td>Aroma</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
+     <tr><td>Flavor</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
+     <tr><td>Serving Size</td><td>${docEsc(p.servingSize||'—')} ${pieceW}</td></tr>
+     <tr><td>Servings / Unit</td><td>${docEsc(p.servingsPerUnit||'—')}</td></tr>
+     <tr><td>Total UoM</td><td>${pieces} ${pieceW}</td></tr>
+     <tr><td>Weight Variance</td><td>+ 5%</td></tr>
+     ${isCount?`<tr><td>Count Variance</td><td>+ 1 ${pieceW.replace(/\(s\)|\(ies\)/,'')}</td></tr>`:''}
+   </tbody></table>
+
+   <div class=sechd>SECTION 2. PACKAGING SPECIFICATIONS</div>
+   <table><tbody>${packaging}</tbody></table>
+   <table style="margin-top:6px"><tbody>
+     <tr><td style="width:38%">Date Code — MFG Date Format</td><td>MFG MM/YYYY <span class=yh>[ Yes / No ]</span></td></tr>
+     <tr><td>EXP Date Format</td><td>EXP MM/YYYY <span class=yh>[ Yes / No ]</span></td></tr>
+     <tr><td>EXP Date Years</td><td><span class=yh>[ 1 year&nbsp;&nbsp; 2 years&nbsp;&nbsp; 3 years&nbsp;&nbsp; Other: ______ ]</span></td></tr>
+   </tbody></table>
+   <div class=legal>*If an Expiration Date is required by the brand or retail store a Stability Study must be started.</div>
+   <div class=legal>All Printed Materials and/or Components require 10% overage;
+Email: RD@enovascience.com Inbound list prior to delivery to Enova Science.
+Ship to: 4740 S. Cleveland Ave Fort Myers Florida 33907
+All Printed Material must be reviewed by Enova Science before printing to ensure Label-Formula accuracy.</div>
+   <div class=legal>Label Review or suggested label information: The label information panel (the panel) is provided to the brand owner for the sole use of the brand owner and shall not be publicly disseminated. The information contained in the panel is presented on an 'as-is' basis, with no representations or warranties expressed or implied, and shall be considered an opinion only, with no guarantee of completeness, possibility of error, or omission. Enova Science shall not be held liable for losses incurred from the use of the information in the panel and is not responsible for copy and claims on label. Label review with suggested edits will be submitted to the client and will include a mandatory requirement that a label revision number is placed on the label in a specified location. Enova Science recommends that brand owners have all labels and label claims reviewed by a 3rd party FDA Compliance consultant or attorney prior to printing.</div>
+   <div class=legal>Client to determine merchant processor packaging requirements including but not limited to QR Codes and UPC barcodes. All QR and UPC codes must be included with the label graphics before the time of review.</div>
+   <div class=legal>Customer supplied materials: Production run will not be scheduled until all materials needed are received. If the customer changes the specification of the Product (Raw Materials or Components) after PO is accepted, or production is delayed due to materials not being delivered in time and/or in unusable condition, Enova Science reserves the right to charge up to $5,000 plus cost of materials affected by the change. Enova Science requires 10% overage on all customer-supplied material (Labels, Components and Raw Materials). Production quantities are theoretical and the final production yield will complete the sales orders; industry-standard overages are +/- 10%. Enova Science reserves the right to reject any customer-supplied components if they do not comply with internal specification and compliance.</div>
+
+   <div class=sechd>SECTION 3. PALLETIZATION SPECIFICATIONS</div>
+   <table><tbody>
+     <tr><td style="width:38%">Units / Case</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
+     <tr><td>Cases / Layer</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
+     <tr><td>No. Layers High</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
+     <tr><td>Total Cases / Pallet</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
+     <tr><td>Total Units / Pallet</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
+     <tr><td>Pallet Specs (size, braces)</td><td>CORNERS / WRAPPED</td></tr>
+     <tr><td>Special Instructions</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
+   </tbody></table>
+   <div class=legal>Master Case and Pallet Specifications are suggestions made by Enova Science. If the Client has a specific request, please advise. Keep bottle tightly closed. Store between 21°C - 29°C (70° - 89°F) away from sunlight. Shipment of Finished Goods: Shipping arrangements must be made within 36 hours after receipt of notification of release. Enova Science reserves the right to charge up to $100 per pallet per day should shipping arrangements not be made within the aforementioned time period unless otherwise agreed upon.</div>
+
+   <div class=sechd>SECTION 4. MICROBIOLOGICAL SPECIFICATIONS</div>
+   <table><thead><tr><th>Analyte</th><th>Specifications</th><th>Unit of Measure</th><th>Method</th></tr></thead><tbody>${micro}</tbody></table>
+
+   <div class=sechd>SECTION 5. CHEMICAL SPECIFICATIONS</div>
+   <div class=note2>Label Claim Potency Testing. Potency claims are tested at the frequency indicated. Prices are good for thirty (30) days from the date listed on page one and are subject to change without notice.</div>
+   <table><thead><tr><th>Name</th><th class=r>Cost</th><th>Testing Frequency</th></tr></thead><tbody>${potency}</tbody></table>
+
+   <div class=sechd>SECTION 6. REGULATORY COMPLIANCE AND DOCUMENTATION</div>
+   <table><thead><tr><th>Certification</th><th>Included in Quote</th><th>Additional Charge</th><th>Timeline</th><th>Customer Choice (YES/NO)</th></tr></thead><tbody>${reg}</tbody></table>
+
+   <div class=sechd>SECTION 7. OPTIONAL COMPLIANCE TESTING</div>
+   <div class=legal>Per cGMP Regulation Guidelines the brand owner is responsible for ALL label claims. All label claims (including the Shelf Life/Best By Date term) need to be validated by a third party upon development of the product. Cost below does not include the cost of the product and/or shipping to the testing laboratory. Pay terms for all compliance testing is pre-paid.</div>
+   <table><thead><tr><th>Description</th><th>Item #</th><th class=r>Cost</th><th>Type YES or NO</th></tr></thead><tbody>${opt}
+     <tr><td>Additional Testing Required by Client (specify):</td><td colspan=3 class=yh><span class="fill">&nbsp;</span></td></tr></tbody></table>
+   <div class=legal>This product may not be in compliance with California Proposition 65. If the brand owner has 10 or more employees, the following warning label must be on every package sold/shipped to California. Enova Science assumes no liability for brand compliance. Testing is always recommended.</div>
+
+   <div class=sechd>SECTION 8. FEES</div>
+   <table><thead><tr><th class=r>Price / MOQ</th><th></th><th class=r>Sale Price / Unit</th></tr></thead><tbody>${feeRows}</tbody></table>
+   <div class=note2>Pay Terms: 50% Deposit, Remaining 50% Due on Completion Prior to Shipping. *Quote Valid for 30 days.</div>
+   <div class=note2>Additional Fees per PO:
+• Certificate of Analysis ($120 per lot)
+• Potency Testing on Label Claims
+• Shipping Cost, FOB Fort Myers (does not include the cost of pallets at $25 per pallet)
+• Cost of additional printed material not listed in Section 2 Packaging Specifications</div>
+   <div class=legal>These statements have not been evaluated by the Food and Drug Administration. This product is not intended to diagnose, treat, cure, or prevent any disease.</div>
+   <div class=legal>Recommended Additional Label Disclaimer if glass containers are used: "Inspect Bottle for cracks or breaks prior to consuming".</div>
+   <div class=legal>FOR GOOD AND VALUABLE CONSIDERATION (the receipt and sufficiency of which is hereby irrevocably acknowledged) the undersigned hereby indemnifies and holds harmless Enova Science and its affiliates from and against any and all claims, demands, actions, suits, losses, costs, charges, expenses, damages and liabilities whatsoever which the customer may pay, sustain, suffer or incur by reason of or in connection with: 1. Any label claims including but not limited to the label facts claims that do not meet FDA/FTC/DSHEA requirements, made by the client for PRODUCT herein; 2. Any expiration dating and/or potency that cannot be supported by ICH (International Council for Harmonization) guidelines for product dating test requirements; 3. Any finished product Microbial Certificate of Analysis, potency, heavy metals, pesticides, herbicides, residual solvents, and/or lead testing levels (per Proposition 65 regulations) and any/all resulting claims, lawsuits, or recalls. Without limiting the generality of the foregoing, all costs and expenses (including legal expenses) incurred in connection with any such loss or damage.</div>
+   <div class=legal>Enova Science reserves the right to reject purchase orders prior to acceptance. This document will be considered fully executed upon the submission of the initial purchase order of the product to which it relates.</div>
+
+   <div class=sig><div>Enova Science — Printed Name / Signature / Date</div><div>Customer — Printed Name / Signature / Date</div></div>`;
 }
 function buildSO(p){
   const sell=projUnitPrice(p); const qty=Number(p.batchUnits)||0;

@@ -1496,7 +1496,8 @@ function buildAuditWorkbook(p){
   const mfRows = (p.ingredients||[]).map(r=>{
     const it = (r.item && ((typeof INV_IX!=='undefined'&&INV_IX[r.item.n])||r.item)) || (r.importedAlt && typeof INV_IX!=='undefined' && INV_IX[r.importedAlt]) || null;
     const pot = r.potencyPct>0 ? r.potencyPct/100 : 1;
-    const mgPS = (Number(r.inputMg||0)*(1+ov))/pot;
+    const rov = (r.overage!=null ? r.overage : ov);
+    const mgPS = (Number(r.inputMg||0)*(1+rov))/pot;
     const u = it && it.u!=null ? it.u : null;
     const cps = u!=null ? (mgPS/1000)*u : null;
     return [ r.importedName||(it&&it.d)||'—', r.importedAlt||(it&&it.n)||'', +mgPS.toFixed(3),
@@ -1634,7 +1635,8 @@ function docIngredientRows(p){
   return (p.ingredients||[]).map(r=>{
     const it=(r.item&&((typeof INV_IX!=='undefined'&&INV_IX[r.item.n])||r.item))||(r.importedAlt&&typeof INV_IX!=='undefined'&&INV_IX[r.importedAlt])||null;
     const pot=r.potencyPct>0?r.potencyPct/100:1;
-    const mgPS=(Number(r.inputMg||0)*(1+ov))/pot;
+    const rov=(r.overage!=null?r.overage:ov);
+    const mgPS=(Number(r.inputMg||0)*(1+rov))/pot;
     const u=it&&it.u!=null?it.u:null;
     const mgBatch=mgPS*spu*qty;
     return { name:r.importedName||(it&&it.d)||'—', alt:r.importedAlt||(it&&it.n)||null,
@@ -4211,6 +4213,26 @@ Return ONLY raw JSON:
 // quantity and tier PRICES are never guessed (tier pricing is always manual).
 // Every result is still reviewed in the intake panel before Apply.
 // ══════════════════════════════════════════════════════════════════════════
+// Parse a clean ingredient NAME out of any raw line — strips dosage / potency /
+// assay noise (60mg, 72mg, (20%), AOAC 967.22, trailing bare numbers, "* 1.5")
+// while KEEPING meaningful qualifiers like "(as Ascorbic Acid)", "(1:1)",
+// "(Organic)". Idempotent — safe on names the parser already cleaned. The
+// generator uses this so the Ingredient column shows the ingredient only, never
+// the raw request text, from any input format (typed, xlsx, csv, docx, AI).
+function cleanIngName(raw){
+  let s = String(raw==null?'':raw).replace(/\r/g,'').trim();
+  s = s.replace(/^project description\s*[:\-]\s*/i,'');            // stray label prefix
+  s = s.replace(/^[\s\-\*•·]+/,'');                                // leading bullets (keep leading digits, e.g. 5-HTP)
+  s = s.replace(/[\.·•]{2,}.*$/,'');                               // dotted-leader tail
+  s = s.replace(/\b(?:aoac|hplc|uplc|usp|ep|uv\/vis|uv|vis|icp-ms|icp|gc-ms|gc|ms|fcc|elisa|titration|gravimetric|assay|test method|method)\b[^)]*$/i,''); // trailing assay method + its numbers
+  s = s.replace(/\(\s*\d[\d.]*\s*%\s*(?:tm|rr)?\s*\)/ig,'');       // (20%) style — NOT (as X)/(1:1)
+  s = s.replace(/(?:^|\s)(?:\d[\d,]*\.?\d*)\s*(?:mcg|µg|ug|mg|milligrams?|grams?|gm|kg|g|iu|billion\s*cfu|billion|cfu)\b/ig,' '); // mass/activity tokens
+  s = s.replace(/(?:^|\s)\d[\d.,]*\s*%\s*(?:tm)?(?=\s|$)/ig,' ');  // bare standalone percents
+  s = s.replace(/\(\s*\)/g,'');                                    // empty parens left behind
+  s = s.replace(/(?:[\s*×xX,;]+\d[\d.,]*%?)+\s*$/,'');             // trailing run of bare numbers / "* 1.5" (never crosses parens like "(1:1)")
+  s = s.replace(/\s{2,}/g,' ').replace(/[\s\(\-–:;,]+$/,'').replace(/^\s+/,'').trim();
+  return s;
+}
 function localExtractF(rawText){
   const text = String(rawText||"").replace(/\r/g,"");
   const lines = text.split("\n").map(l=>l.trim());
@@ -4278,7 +4300,7 @@ function localExtractF(rawText){
     let potPct=null;
     const potOut = namePart.match(/(?:^|\s)(\d{1,3}(?:\.\d+)?)\s*%\s*(?:tm)?\s*$/i);
     if(potOut){ potPct=parseFloat(potOut[1]); namePart=namePart.slice(0,potOut.index); }
-    let name = namePart.replace(/[\.\-–:\s]+$/,"").replace(/\s{2,}/g," ").trim();
+    let name = cleanIngName(namePart);
     if(!name || name.length<2 || !/[a-z]/i.test(name)) continue;
     if(isGummy && GUMMY_SKIP.test(name)) continue;          // gummy base handled by the system
     let num = parseFloat(last[1].replace(/,/g,"")); const unit=last[2].toLowerCase();
@@ -4289,8 +4311,11 @@ function localExtractF(rawText){
     else if(/iu/.test(unit)){ mg=0; notes.push(`"${name}" listed as ${num} IU — convert IU→mg mass manually before costing.`); }
     else if(/cfu|billion/.test(unit)){ mg=0; notes.push(`"${name}" listed as ${last[1]} ${unit} (probiotic activity) — set the strain-blend mg weight manually.`); }
     else mg=num;
-    ingredients.push({name, mgPerServing:mg, rawUnitAsWritten:`${last[1]} ${last[2]}`});
-    if(potPct!=null && potPct>0 && potPct<100) pctNotes.push(`${name} (${potPct}%)`);
+    // A trailing standalone % is a potency/standardization — SEED the (editable)
+    // potency column with it so the generator fills it; the Enova user reviews & edits.
+    const seedPot = (potPct!=null && potPct>0 && potPct<=100) ? potPct : null;
+    ingredients.push({name, mgPerServing:mg, rawUnitAsWritten:`${last[1]} ${last[2]}`, potencyPct:seedPot});
+    if(seedPot!=null && seedPot<100) pctNotes.push(`${name} (${potPct}%)`);
     if(ingredients.length>=200) break;
   }
   if(pctNotes.length) notes.push("Potency review — these were listed with a % (assay/standardization). Potency defaulted to 100%; set each row's potency manually if the % is the assay: "+pctNotes.join(", ")+".");
@@ -4455,7 +4480,17 @@ function FIntakePanel({onApply, attachments, autoTrigger, autoText, onAutoDone})
   const applyResult=(json)=>{
     setExt(json);
     const ings = Array.isArray(json.ingredients)?json.ingredients:[];
-    setMatches(ings.map(i=>({name:i.name,mg:i.mgPerServing,unit:i.rawUnitAsWritten,match:bestGuessF(i.name)})));
+    // Seed the editable review grid: a CLEAN ingredient name (parsed from any input),
+    // mg/serving, potency (detected % or 100), and a form-default overage. Every
+    // field is generator-filled and user-editable before Apply.
+    const fov = (FORM_CFG[json.dosageForm]||{}).overage;
+    const seedOv = fov!=null ? fov : 0.03;
+    setMatches(ings.map(i=>{
+      const nm = cleanIngName(i.name);
+      return { name:nm, mg:i.mgPerServing,
+        potencyPct: (Number(i.potencyPct)>0 && Number(i.potencyPct)<=100) ? Number(i.potencyPct) : 100,
+        overage: seedOv, unit:i.rawUnitAsWritten, match:bestGuessF(nm) };
+    }));
     setStatus("done");
   };
   const process      = async (blocks) => { setStatus("extracting"); applyResult(await callClaudeF(blocks)); };  // AI path
@@ -4542,6 +4577,7 @@ function FIntakePanel({onApply, attachments, autoTrigger, autoText, onAutoDone})
   };
 
   const updateMatch=(idx,item)=>setMatches(prev=>prev.map((m,i)=>i===idx?{...m,match:{item,conf:1}}:m));
+  const updateMatchField=(idx,field,value)=>setMatches(prev=>prev.map((m,i)=>i===idx?{...m,[field]:value}:m));
   const apply=()=>{onApply(ext,matches);reset();if(ref.current)ref.current.value="";setDesc("");};
 
   const hasAttachments = attachments && attachments.length > 0;
@@ -4645,13 +4681,21 @@ function FIntakePanel({onApply, attachments, autoTrigger, autoText, onAutoDone})
             ].map(([l,v])=><div className="ff" key={l}><label>{l}</label><input className="ro" disabled value={v??"—"}/></div>)}
           </div>
           {ext.formulationNotes && <div className="falert warn">{ext.formulationNotes}</div>}
+          <p className="fsmall" style={{margin:"8px 0 4px"}}>The generator fills every field below — <strong>Ingredient, mg/serving, Potency %, Overage %</strong> and the SKU match. Every cell is editable; adjust anything before you Apply.</p>
           <table className="ftbl">
-            <thead><tr><th>As Written</th><th>mg/serving</th><th>Matched SKU</th><th>Confidence</th></tr></thead>
+            <thead><tr><th style={{width:"27%"}}>Ingredient</th><th>mg/serving</th><th>Potency %</th><th>Overage %</th><th>Matched SKU</th><th>Confidence</th></tr></thead>
             <tbody>
               {matches.map((m,i)=>(
                 <tr key={i} className={!m.match?"f-missing":m.match.conf<.45?"f-flagged":"f-ai"}>
-                  <td className="fsmall">{m.name}</td>
-                  <td className="fsmall" style={{fontFamily:"var(--mono)"}}>{m.mg!=null?fN(m.mg,2):"?"}</td>
+                  <td><input className="fcell" style={{width:"100%",textAlign:"left"}} value={m.name||""}
+                    placeholder="Ingredient name" onChange={e=>updateMatchField(i,"name",e.target.value)}/></td>
+                  <td><input className="fcell" type="number" min="0" step="any" value={m.mg==null?"":m.mg}
+                    onChange={e=>updateMatchField(i,"mg",e.target.value===""?null:(Number(e.target.value)||0))}/></td>
+                  <td><input className="fcell" type="number" min="0" max="100" step="0.5" value={m.potencyPct==null?100:m.potencyPct}
+                    onChange={e=>updateMatchField(i,"potencyPct",Number(e.target.value)||0)}/></td>
+                  <td><input className="fcell" type="number" min="0" step="0.5"
+                    value={m.overage==null?"":+(m.overage*100).toFixed(2)}
+                    onChange={e=>updateMatchField(i,"overage",e.target.value===""?null:(Number(e.target.value)||0)/100)}/></td>
                   <td>
                     <FPkgSearch val={m.match?m.match.item:null} cat={null} onSelect={item=>updateMatch(i,item)}/>
                     {m.match && <div className="fsmall">{m.match.item.n}</div>}
@@ -4853,7 +4897,8 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
     if (!row.item) return { ...row, mgPS:0, cPS:0, fresh:null };
     const fresh = INV_IX[row.item.n];
     const pot = row.potencyPct>0 ? row.potencyPct/100 : 1;
-    const mgPS = (row.inputMg*(1+(proj.overage||0)))/pot;
+    const rov = (row.overage!=null ? row.overage : (proj.overage||0));   // per-ingredient overage; defaults to the project/form overage
+    const mgPS = (row.inputMg*(1+rov))/pot;
     const cPS = (mgPS/1000)*(fresh?fresh.u:0);
     return { ...row, item: fresh||row.item, mgPS, cPS, fresh };
   }), [proj.ingredients, proj.overage]);
@@ -4997,8 +5042,15 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
   const handleIntakeApply = (ext, matches) => {
     // Never overwrite an approved/locked formula without an explicit unlock.
     if (locked) { if (typeof window!=='undefined' && window.alert) window.alert('This formula is approved & locked. Unlock it first to replace the formula.'); return; }
-    const rows = matches.map(m => ({ id:Math.random(), item:m.match?m.match.item:null,
-      inputMg:m.mg||0, potencyPct:100, aiSuggested:true, importedName:m.name }));
+    const rows = matches.map(m => {
+      const r = { id:Math.random(), item:m.match?m.match.item:null,
+        inputMg:Number(m.mg)||0,
+        potencyPct:(Number(m.potencyPct)>0?Number(m.potencyPct):100),
+        aiSuggested:true, importedName:cleanIngName(m.name) };
+      // carry a per-ingredient overage override only if it differs from nothing
+      if (m.overage!=null && isFinite(Number(m.overage))) r.overage = Number(m.overage);
+      return r;
+    });
     // Guard: don't silently overwrite an existing formula.
     if (rows.length && (proj.ingredients||[]).length &&
         typeof window!=='undefined' && window.confirm &&
@@ -5118,7 +5170,9 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
               <input disabled={locked} type="number" min="0" value={proj.unitsPerContainer ?? totalUPC}
                 onChange={e=>upd({unitsPerContainer:Number(e.target.value)||0})}/>
               <span className="fsmall">{proj.unitsPerContainer!=null&&proj.unitsPerContainer!==totalUPC?`override · derived ${totalUPC}`:`= serving size × servings/unit`}</span></div>
-            <div className="ff"><label>Overage %</label><input disabled={locked} type="number" step=".005" value={proj.overage ?? cfg.overage} onChange={e=>upd({overage:Number(e.target.value)||0})}/></div>
+            <div className="ff"><label>Default Overage %</label><input disabled={locked} type="number" step="0.5" min="0"
+              title="Applied to any ingredient without its own overage override (see the Overage % column in the table below)."
+              value={+(((proj.overage ?? cfg.overage)||0)*100).toFixed(2)} onChange={e=>upd({overage:(Number(e.target.value)||0)/100})}/></div>
             <div className="ff"><label>Batch Units</label><input disabled={locked} type="number" min="0" value={proj.batchUnits ?? 0} onChange={e=>upd({batchUnits:Number(e.target.value)||0})}/></div>
             <div className="ff"><label>MOQ</label><input className="ro" disabled value={cfg.moq.toLocaleString()}/></div>
             {cfg.gummy && (
@@ -5145,7 +5199,7 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
           {noCost.length>0 && <div className="falert err">{noCost.length} ingredient(s) at $0.00 — COGS understated, needs manual pricing.</div>}
           <table className="ftbl">
             <thead>
-              <tr><th style={{width:"33%"}}>Ingredient</th><th>Input mg</th><th>Potency %</th><th>mg/serving</th><th>Cost/serving</th><th>Cost/unit ({proj.servingsPerUnit} serv)</th><th>Status</th><th></th></tr>
+              <tr><th style={{width:"30%"}}>Ingredient</th><th>Input mg</th><th>Potency %</th><th>Overage %</th><th>mg/serving</th><th>Cost/serving</th><th>Cost/unit ({proj.servingsPerUnit} serv)</th><th>Status</th><th></th></tr>
             </thead>
             <tbody>
               {calcIng.map(row => {
@@ -5160,6 +5214,10 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
                     </td>
                     <td><input disabled={locked} className="fcell" type="number" min="0" value={row.inputMg} onChange={e=>mutIng(row.id,{inputMg:Number(e.target.value)||0})}/></td>
                     <td><input disabled={locked} className="fcell" type="number" min="0" max="100" value={row.potencyPct} onChange={e=>mutIng(row.id,{potencyPct:Number(e.target.value)||0})}/></td>
+                    <td><input disabled={locked} className="fcell" type="number" min="0" step="0.5"
+                      title={row.overage!=null?"Per-ingredient overage override":"Default (from form) — edit to override for this ingredient only"}
+                      value={row.overage!=null ? +(row.overage*100).toFixed(2) : +(((proj.overage)||0)*100).toFixed(2)}
+                      onChange={e=>{const v=e.target.value; mutIng(row.id,{overage: v===''?undefined:(Number(v)||0)/100});}}/></td>
                     <td className="fsmall" style={{fontFamily:"var(--mono)"}}>{fN(row.mgPS,2)}</td>
                     <td className="fsmall" style={{fontFamily:"var(--mono)"}}>{f$(row.cPS,5)}</td>
                     <td className="fsmall" style={{fontFamily:"var(--mono)",fontWeight:600}}>{f$(cost_unit,4)}</td>
@@ -5686,7 +5744,8 @@ function GeneratePage({ projects, setProjects, onToggleNav }){
     return (proj.ingredients || []).map(r => {
       const it = (r.item && (INV_IX[r.item.n] || r.item)) || (r.importedAlt && INV_IX[r.importedAlt]) || null;
       const pot = r.potencyPct > 0 ? r.potencyPct / 100 : 1;
-      const mgPS = (Number(r.inputMg || 0) * (1 + ov)) / pot;
+      const rov = (r.overage != null ? r.overage : ov);
+      const mgPS = (Number(r.inputMg || 0) * (1 + rov)) / pot;
       const u = it && it.u != null ? it.u : null;
       return { name: r.importedName || (it && it.d) || '—', alt: r.importedAlt || (it && it.n) || null,
                mgPS, u, onHand: it && it.q != null ? it.q : null, cPS: u != null ? (mgPS / 1000) * u : 0, matched: !!it };

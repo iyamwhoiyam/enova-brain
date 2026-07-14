@@ -77,6 +77,16 @@
 </script>
 <script id="enova-calc-engine">
 /*
+ * ⚠ NOT WIRED INTO THE LIVE APP — DO NOT USE FOR COSTING AS-IS. ⚠
+ * The React dashboard costs formulas through FormulationEditor + window.EnovaMasterBid
+ * (the Master Bid engine), NOT through this module. `EnovaCalc.buildQuote/computeTier`
+ * are unreferenced by the app. Two reasons it must not be wired in without changes:
+ *   (1) it hard-codes a flat 5% ingredient overage (OVERAGE = 1.05) — the live path uses
+ *       per-ingredient editable overage; and (2) it has NO bulk unit-of-measure handling
+ *       (bulk orders are priced per piece, spreading case packaging — see docBatchBasis).
+ * The numeric compliance checks below (D3 UL, Vitamin E IU→mg, capsule fill) are kept for
+ * possible future reuse. If you ever revive quoting here, fix overage + bulk first.
+ *
  * Enova Formulation & Quote — Calculation Engine (JavaScript mirror)
  * =================================================================
  * A behavioral mirror of scripts/calc_engine.py, built on decimal.js so its
@@ -1515,7 +1525,9 @@ const isLocked = (p) => !!(p && p.formulaLock && p.formulaLock.locked);
 // layout from the project's captured formula + the (approved) cost snapshot.
 function buildAuditWorkbook(p){
   const cb = p.cogsBreakdown || {};
-  const spu = Number(p.servingsPerUnit)||1;
+  // Servings per COSTING UNIT — bulk-aware (retail = servings/unit; bulk = 1/servingSize) so the
+  // Master Formula "Cost/unit" column matches the Batch Cost Build / COGS-per-unit exactly.
+  const spu = docBatchBasis(p).servPerUnit;
   const ov = p.overage!=null ? p.overage : 0;
   const num = (x)=> x==null||x==='' ? '' : Number(x);
   const mfHead = ['Ingredient','MISys ALT','Input mg/serving','Potency %','$/g (MISys)','Cost/serving','Cost/unit'];
@@ -1677,18 +1689,35 @@ function docStyle(){ return `<style>body{font:12px Arial,Helvetica,sans-serif;co
   td.yh{background:#fffbe8;} .legal{font-size:9px;color:#555;line-height:1.5;white-space:pre-line;margin:6px 0;} .note2{font-size:10px;color:#555;white-space:pre-line;margin:4px 0;}
   .inst{font-size:10.5px;color:#8a5a12;background:#fbf0dd;border:1px solid #e6c583;padding:6px 10px;border-radius:4px;margin:10px 0;}</style>`; }
 
+// Canonical, BULK-AWARE batch basis. Matches the costing unit captured in cogsBreakdown:
+// retail unit = finished container (piecesPerContainer = servingSize × servings/unit); bulk
+// unit = ONE piece (piecesPerContainer = 1). Ingredient MASS scales with SERVINGS; gummy/base/
+// shell mass with PIECES. Returns both batch totals so BOM/MMR/MO and the workbook all agree —
+// no 60× bulk overcount.
+function docBatchBasis(p){
+  const cb = p.cogsBreakdown || {};
+  const ss = Number(p.servingSize)||1;
+  const batch = Number(p.batchUnits)||0;
+  const totalUPC = ss*(Number(p.servingsPerUnit)||1);
+  const bulk = cb.isBulk!=null ? !!cb.isBulk
+    : !!(p.isBulk || (typeof CONTAINER_TYPES!=='undefined' && CONTAINER_TYPES[p.containerType] && CONTAINER_TYPES[p.containerType].bulk));
+  const ppc = cb.piecesPerContainer!=null ? Number(cb.piecesPerContainer)
+    : (bulk ? 1 : (Number(p.unitsPerContainer)>0 ? Number(p.unitsPerContainer) : totalUPC));
+  const servPerUnit = ss>0 ? ppc/ss : (Number(p.servingsPerUnit)||1);
+  return { piecesPerContainer:ppc, servPerUnit, batchUnits:batch, isBulk:bulk,
+    pieces:ppc*batch, servings:servPerUnit*batch };
+}
 // Resolve each ingredient against MISys; compute per-serving (with overage) + per-batch.
 function docIngredientRows(p){
   const ov = p.overage!=null ? p.overage : 0;
-  const spu = Number(p.servingsPerUnit)||1;
-  const qty = Number(p.batchUnits)||0;
+  const basis = docBatchBasis(p);              // bulk-aware total SERVINGS in the batch
   return (p.ingredients||[]).map(r=>{
     const it=(r.item&&((typeof INV_IX!=='undefined'&&INV_IX[r.item.n])||r.item))||(r.importedAlt&&typeof INV_IX!=='undefined'&&INV_IX[r.importedAlt])||null;
     const pot=r.potencyPct>0?r.potencyPct/100:1;
     const rov=(r.overage!=null?r.overage:ov);
     const mgPS=(Number(r.inputMg||0)*(1+rov))/pot;
     const u=it&&it.u!=null?it.u:null;
-    const mgBatch=mgPS*spu*qty;
+    const mgBatch=mgPS*basis.servings;
     return { name:r.importedName||(it&&it.d)||'—', alt:r.importedAlt||(it&&it.n)||null,
       labelMg:Number(r.inputMg||0), mgPS, u, kgBatch:mgBatch/1e6, onHand: it&&it.q!=null?it.q:null };
   });
@@ -1698,17 +1727,29 @@ function docPackagingRows(p){
   const cb=p.cogsBreakdown||{};
   const container = cb.container || p.containerType || (typeof defaultContainerFor!=='undefined' ? defaultContainerFor(p.dosageForm,p.isBulk) : 'Bottle');
   const ct = (typeof CONTAINER_TYPES!=='undefined' && CONTAINER_TYPES[container]) || null;
-  const qty = Number(p.batchUnits)||0;
-  const pieces = cb.piecesPerContainer!=null ? cb.piecesPerContainer : ((p.servingSize||1)*(p.servingsPerUnit||1));
+  const basis = docBatchBasis(p);
+  const qty = Number(p.batchUnits)||0;                       // finished sellable units in the batch
+  const casePack = Number(p.unitsPerCase)>0 ? Number(p.unitsPerCase) : (Number(cb.casePack)>0 ? Number(cb.casePack) : 1);
   const rows=[];
   const shellCfg = (typeof FORM_CFG!=='undefined' && FORM_CFG[p.dosageForm]) || {};
-  if (shellCfg.shell && p.shellItem){ const f=(typeof INV_IX!=='undefined'&&INV_IX[p.shellItem.n])||p.shellItem; rows.push({ name:'Capsule shell — '+((f&&f.d)||p.shellItem.n||'—'), alt:(f&&f.n)||null, qtyEach:pieces*qty, uom:'shells', u:f&&f.u!=null?f.u:null }); }
-  ((ct&&ct.pkg)||[]).forEach(slot=>{ const sel=(p.pkg||{})[slot.k]; if(!sel) return; const f=(typeof INV_IX!=='undefined'&&INV_IX[sel.n])||sel; rows.push({ name:slot.l+' — '+((f&&f.d)||sel.n||'—'), alt:(f&&f.n)||null, qtyEach:qty, uom:'ea', u:f&&f.u!=null?f.u:null }); });
+  // Capsule shells: one per PIECE (bulk-aware total pieces in the batch).
+  if (shellCfg.shell && p.shellItem){ const f=(typeof INV_IX!=='undefined'&&INV_IX[p.shellItem.n])||p.shellItem; rows.push({ name:'Capsule shell — '+((f&&f.d)||p.shellItem.n||'—'), alt:(f&&f.n)||null, qtyEach:basis.pieces, uom:'shells', u:f&&f.u!=null?f.u:null }); }
+  ((ct&&ct.pkg)||[]).forEach(slot=>{
+    const sel=(p.pkg||{})[slot.k]; if(!sel) return;
+    const f=(typeof INV_IX!=='undefined'&&INV_IX[sel.n])||sel;
+    // The master shipper and a retail display/inner box each hold a full case of finished units
+    // (and for a BULK order EVERY packaging item is shared across a master case), so the batch
+    // needs ceil(units ÷ case pack) of them — not one per unit. All other slots are one per unit.
+    const perCase = basis.isBulk || slot.k==='shipper' || slot.k==='display';
+    const qtyEach = perCase ? (qty>0 ? Math.max(1, Math.ceil(qty/(casePack||1))) : 0) : qty;
+    rows.push({ name:slot.l+' — '+((f&&f.d)||sel.n||'—'), alt:(f&&f.n)||null, qtyEach, uom:perCase?'cases':'ea', u:f&&f.u!=null?f.u:null });
+  });
   return rows;
 }
 function docBlendKgBatch(p){
-  const spu=Number(p.servingsPerUnit)||1, qty=Number(p.batchUnits)||0;
-  if ((typeof FORM_CFG!=='undefined'&&(FORM_CFG[p.dosageForm]||{}).gummy)) return ((Number(p.gummyWt)||0)*(p.servingSize||1)*spu*qty)/1e6;
+  const basis=docBatchBasis(p);
+  // Gummy total weight already includes actives+base per PIECE → scale by total PIECES in batch.
+  if ((typeof FORM_CFG!=='undefined'&&(FORM_CFG[p.dosageForm]||{}).gummy)) return ((Number(p.gummyWt)||0)*basis.pieces)/1e6;
   const rows=docIngredientRows(p); return rows.reduce((s,r)=>s+r.kgBatch,0);
 }
 // Gummy base/process/coating as doc rows (ALT + per-batch qty) so BOM/MMR list the
@@ -3962,6 +4003,28 @@ function estimatePackFillCC(proj, pieces){
   if (/liquid/i.test(form))        return ((Number(proj.servingSize)||1) * spu) * 1.12;           // mL/serving × servings
   return pieces * 1.0;
 }
+// Sellable "each" noun for a dose form — used when a BULK order is priced per piece
+// (a bulk gummy order's unit is one gummy, not a 60-count bottle).
+function unitNounFor(form){
+  const f = String(form||'');
+  if (/gumm/i.test(f)) return 'Gummy';
+  if (/capsule/i.test(f)) return 'Capsule';
+  if (/tablet/i.test(f)) return 'Tablet';
+  if (/stick/i.test(f)) return 'Stick Pack';
+  if (/liquid|tincture/i.test(f)) return 'mL';
+  if (/powder/i.test(f)) return 'Serving';
+  return 'Unit';
+}
+// Estimate how many pieces fit in a master case from the shipper's W×H×D (inches) and the
+// piece volume (~1 g/cc) at ~55% packing efficiency. Transparent geometry — NOT an invented
+// fixed count; it seeds an EDITABLE field the Enova user confirms. Null if it can't be sized.
+function estimateCasePack(shipperDesc, pieceWtMg){
+  const m = /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i.exec(String(shipperDesc||''));
+  if (!m || !(Number(pieceWtMg)>0)) return null;
+  const pieceCc = Math.max(0.4, Number(pieceWtMg)/1000);
+  const cc = (+m[1])*(+m[2])*(+m[3]) * 16.387;   // in³ → cc
+  return Math.max(1, Math.round((cc * 0.55) / pieceCc));
+}
 function pkgPool(cat){ return (typeof INVENTORY!=='undefined'?INVENTORY:[]).filter(i => i.c===cat && i.u>0); }
 function pkgIsContainerSlot(slot){ return slot.k==='container' || slot.k==='bag' || slot.k==='foil'; }
 function pkgPickContainer(pool, targetCC, proj){
@@ -4932,8 +4995,12 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
   const ctInfo = CONTAINER_TYPES[container] || CONTAINER_TYPES['Bottle'];
   const isBulkPack = ctInfo.bulk || cfg.bulk || !!proj.isBulk;
   const pkgSlots = ctInfo.pkg || [];
-  // Units (dose pieces) per finished container: editable override, else computed.
-  const piecesPerContainer = Number(proj.unitsPerContainer)>0 ? Number(proj.unitsPerContainer) : totalUPC;
+  // The COSTING UNIT. For a packaged order it's the finished container (N pieces per bottle/etc.).
+  // For a BULK order the sellable unit is ONE piece (a bulk gummy order is priced per gummy), so
+  // the costing unit is 1 piece and everything below is per-piece.
+  const unitNoun = isBulkPack ? unitNounFor(proj.dosageForm) : 'Unit';
+  const piecesPerContainer = isBulkPack ? 1
+    : (Number(proj.unitsPerContainer)>0 ? Number(proj.unitsPerContainer) : totalUPC);
   // Effective servings/container consistent with the (possibly overridden) piece
   // count — keeps Master Bid pieces & stick counts correct when the user types a
   // non-derived units/container (e.g. a 90ct bottle or an N-stick box).
@@ -4956,7 +5023,10 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
 
   const actMg  = calcIng.reduce((s,r)=>s+r.mgPS,0);
   const actCPS = calcIng.reduce((s,r)=>s+r.cPS,0);
-  const actCPU = actCPS * (proj.servingsPerUnit||1);
+  // Actives per costing unit = per-serving cost × servings in that unit. mbServings =
+  // piecesPerContainer/servingSize, so this is consistent with base/shell for BOTH retail
+  // (= servingsPerUnit) and bulk (per-piece), and correct when units/container is overridden.
+  const actCPU = actCPS * mbServings;
 
   // ── Gummy base cost ──────────────────────────────────────────────────
   // Gummy base cost/gummy from the SAME shared helper the panel + documents use, so the
@@ -4969,12 +5039,32 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
   // Shell count follows the (possibly overridden) pieces per container.
   const shellFresh = cfg.shell && proj.shellItem ? INV_IX[proj.shellItem.n] : null;
   const shellCPU = shellFresh ? shellFresh.u * piecesPerContainer : 0;
-  const pkgCPU = pkgSlots.reduce((s,slot)=>{
-    const sel = (proj.pkg||{})[slot.k];
-    if (!sel) return s;
-    const f = INV_IX[sel.n];
-    return s + (f?f.u:0);
-  }, 0);
+  // Split packaging into PER-UNIT slots and PER-CASE slots. A master shipper (and a retail
+  // display / inner box) holds MANY finished units, so charging its full cost to EVERY unit
+  // overstates COGS — its cost is spread across the master-case pack. Per-unit slots (bottle,
+  // closure, label, desiccant, tamper, scoop, bag, foil) are one-per-unit. For a BULK order the
+  // sellable unit is ONE piece, so EVERY packaging slot is a shared per-case cost.
+  const isPerCasePkgSlot = (k) => isBulkPack || k==='shipper' || k==='display';
+  let pkgPerUnit = 0, pkgPerCase = 0;
+  pkgSlots.forEach(slot=>{
+    const sel = (proj.pkg||{})[slot.k]; if (!sel) return;
+    const f = INV_IX[sel.n]; const u = f?f.u:0;
+    if (isPerCasePkgSlot(slot.k)) pkgPerCase += u; else pkgPerUnit += u;
+  });
+  const pkgRaw = pkgPerUnit + pkgPerCase;   // total packaging spend per master case (display/debug)
+  // Master-case pack = finished units per master shipper. EDITABLE (proj.unitsPerCase); its
+  // default is a transparent geometry estimate from the shipper's stated W×H×D and the finished
+  // unit's fill volume, which the Enova user confirms. Bulk gummy keeps its per-gummy estimate.
+  const shipperSel  = (proj.pkg||{}).shipper;
+  const shipperDesc = shipperSel ? ((INV_IX[shipperSel.n]||shipperSel).d || '') : '';
+  const casePackEst = isBulkPack
+    ? (cfg.gummy ? estimateCasePack(shipperDesc, Number(proj.gummyWt)||0) : null)
+    : estimateCasePack(shipperDesc, estimatePackFillCC(proj, piecesPerContainer)*1000);
+  const casePack = Number(proj.unitsPerCase)>0 ? Number(proj.unitsPerCase)
+    : (isBulkPack ? (casePackEst||1000) : (casePackEst||12));
+  // BULK: pkgPerUnit is 0, so this reduces to pkgPerCase/casePack (all packaging spread per piece).
+  // RETAIL: per-unit slots at full cost + per-case slots (shipper/display) spread across the case.
+  const pkgCPU = pkgPerUnit + pkgPerCase/(casePack||1);
 
   const blendCPU = actCPU + baseCPU;
   const materialsCPU = blendCPU + shellCPU + pkgCPU;   // Direct Materials / unit (not landed)
@@ -5019,6 +5109,8 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
     source: mbRes ? 'masterbid' : 'manual',
     mbForm: mbRes ? mbFormFor(proj.dosageForm, container) : null,
     container, piecesPerContainer,
+    isBulk: isBulkPack, unitNoun, casePack,
+    pkgPerUnitCPU: pkgPerUnit, pkgCaseTotal: pkgPerCase,
     mbBatchQty: mbRes ? mbBatchQty : null, mbBlends,
   };
   // Save COGS breakdown for other pages — but NEVER overwrite an approved (locked)
@@ -5028,7 +5120,7 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
     if (JSON.stringify(liveBreakdown) !== JSON.stringify(proj.cogsBreakdown)) {
       upd({ cogsBreakdown: liveBreakdown });
     }
-  }, [actCPU, baseCPU, shellCPU, pkgCPU, materialsCPU, laborPerUnit, overheadCPU, cogsPerUnit, mbBatchQty, container, piecesPerContainer, locked]);
+  }, [actCPU, baseCPU, shellCPU, pkgCPU, materialsCPU, laborPerUnit, overheadCPU, cogsPerUnit, mbBatchQty, container, piecesPerContainer, casePack, locked]);
 
   // Lock & approve: freeze the current cost build + formula signature under the
   // signing Enova employee. Unlock reopens editing. Both are audited.
@@ -5220,10 +5312,26 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
           <div className="fr">
             <div className="ff"><label>Serving Size ({cfg.uom})</label><input disabled={locked} type="number" min="0" value={proj.servingSize ?? 1} onChange={e=>upd({servingSize:Number(e.target.value)||0})}/></div>
             <div className="ff"><label>Servings / Unit</label><input disabled={locked} type="number" min="0" value={proj.servingsPerUnit ?? 30} onChange={e=>upd({servingsPerUnit:Number(e.target.value)||0})}/></div>
-            <div className="ff"><label>{ctInfo.label}</label>
-              <input disabled={locked} type="number" min="0" value={proj.unitsPerContainer ?? totalUPC}
-                onChange={e=>upd({unitsPerContainer:Number(e.target.value)||0})}/>
-              <span className="fsmall">{proj.unitsPerContainer!=null&&proj.unitsPerContainer!==totalUPC?`override · derived ${totalUPC}`:`= serving size × servings/unit`}</span></div>
+            {isBulkPack ? (
+              <div className="ff"><label>{cfg.gummy?'Gummies':'Pieces'} per Master Case</label>
+                <input disabled={locked} type="number" min="0" value={proj.unitsPerCase ?? (casePackEst||'')}
+                  placeholder={casePackEst?String(casePackEst):'pieces per case'}
+                  onChange={e=>upd({unitsPerCase:Number(e.target.value)||0})}/>
+                <span className="fsmall">{proj.unitsPerCase>0?'confirmed — packaging is spread across the case':(casePackEst?`estimate ${casePackEst.toLocaleString()} from the shipper size — confirm the real pack`:'set the real case pack')}</span></div>
+            ) : (
+              <div className="ff"><label>{ctInfo.label}</label>
+                <input disabled={locked} type="number" min="0" value={proj.unitsPerContainer ?? totalUPC}
+                  onChange={e=>upd({unitsPerContainer:Number(e.target.value)||0})}/>
+                <span className="fsmall">{proj.unitsPerContainer!=null&&proj.unitsPerContainer!==totalUPC?`override · derived ${totalUPC}`:`= serving size × servings/unit`}</span></div>
+            )}
+            {!isBulkPack && (
+              <div className="ff"><label>Units / Master Case</label>
+                <input disabled={locked} type="number" min="1" value={proj.unitsPerCase ?? (casePackEst||'')}
+                  placeholder={casePackEst?String(casePackEst):'per case'}
+                  title="Finished units per master shipper. The master shipper + display box cost is spread across this many units (not charged in full to each unit)."
+                  onChange={e=>upd({unitsPerCase:Number(e.target.value)||0})}/>
+                <span className="fsmall">{Number(proj.unitsPerCase)>0?'confirmed — shipper/display spread across the case':(casePackEst?`est. ${casePackEst} from shipper size — confirm`:'set units per master case')}</span></div>
+            )}
             <div className="ff"><label>Default Overage %</label><input disabled={locked} type="number" step="0.5" min="0"
               title="Applied to any ingredient without its own overage override (see the Overage % column in the table below)."
               value={+(((proj.overage ?? cfg.overage)||0)*100).toFixed(2)} onChange={e=>upd({overage:(Number(e.target.value)||0)/100})}/></div>
@@ -5327,9 +5435,11 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
             );
           })}
           <div className="fts">
-            <div><span className="ftl">{ctInfo.label}</span><span className="ftv">{piecesPerContainer}</span></div>
-            <div><span className="ftl">Packaging cost/unit</span><span className="ftv">{f$(pkgCPU,4)}</span></div>
+            <div><span className="ftl">{isBulkPack?(cfg.gummy?'Gummies':'Pieces')+' per Master Case':ctInfo.label}</span><span className="ftv">{isBulkPack?casePack.toLocaleString():piecesPerContainer}</span></div>
+            <div><span className="ftl">Packaging cost/{isBulkPack?unitNoun.toLowerCase():'unit'}</span><span className="ftv">{f$(pkgCPU,isBulkPack?6:4)}</span></div>
           </div>
+          {isBulkPack && <p className="fsmall" style={{marginTop:4}}>Bulk is priced per <strong>{unitNoun.toLowerCase()}</strong> — the {pkgRaw>0?f$(pkgRaw,4)+' of ':''}case packaging is spread across <strong>{casePack.toLocaleString()}</strong> {unitNoun.toLowerCase()}(s) per case.</p>}
+          {!isBulkPack && pkgPerCase>0 && <p className="fsmall" style={{marginTop:4}}>Master shipper/display ({f$(pkgPerCase,4)}/case) is spread across <strong>{casePack.toLocaleString()}</strong> units/case = {f$(pkgPerCase/(casePack||1),5)}/unit; per-unit packaging is {f$(pkgPerUnit,4)}.</p>}
         </div>
 
         <div className="panel">
@@ -5338,7 +5448,7 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
               {mbRes?"Master Bid model":"Manual fallback (set batch qty)"}</span></h2>
           {mbRes ? (
             <>
-              <p className="fsmall" style={{marginBottom:8}}>Computed by the Enova Master Bid engine at <strong>{mbBatchQty.toLocaleString()} units</strong> · <strong>{mbBlends} blend{mbBlends===1?"":"s"}</strong> · form <strong>{mbFormFor(proj.dosageForm, container)}</strong>. Validated to the digit against the Master Bid Template (P26132). Labor and overhead scale with quantity — see the tier reference below.</p>
+              <p className="fsmall" style={{marginBottom:8}}>Computed by the Enova Master Bid engine at <strong>{mbBatchQty.toLocaleString()} {unitNoun.toLowerCase()}{mbBatchQty===1?'':'s'}</strong> · <strong>{mbBlends} blend{mbBlends===1?"":"s"}</strong> · form <strong>{mbFormFor(proj.dosageForm, container)}</strong>. Validated to the digit against the Master Bid Template (P26132). Labor and overhead scale with quantity — see the tier reference below.</p>
               <div className="fr">
                 <div className="ff"><label>Direct Labor $ / Unit</label><input className="ro" disabled value={f$(laborPerUnit,4)}/>
                   <span className="fsmall">Pharmacy + Blending + Encap/Deposit + Inspection + Packout</span></div>
@@ -5374,21 +5484,21 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
           {mbRes && <div className="line"><span>Freight-in + material loss ({(matLossPct*100).toFixed(1)}%)</span><span>{f$(dmExtraCPU)}</span></div>}
           <div className="line"><span>Direct labor{mbRes?" (Master Bid)":""}</span><span>{f$(laborPerUnit)}</span></div>
           <div className="line"><span>Mfg overhead{mbRes?" (Master Bid)":` (${(overheadPct*100).toFixed(0)}%)`}</span><span>{f$(overheadCPU)}</span></div>
-          <div className="line total"><span>Total COGS / Unit{mbRes?` @ ${mbBatchQty.toLocaleString()} units`:""}</span><span>{f$(cogsPerUnit)}</span></div>
+          <div className="line total"><span>Total COGS / {unitNoun}{mbRes?` @ ${mbBatchQty.toLocaleString()} ${unitNoun.toLowerCase()}${mbBatchQty===1?'':'s'}`:""}</span><span>{f$(cogsPerUnit, isBulkPack?6:4)}</span></div>
         </div>
 
         <div className="panel">
-          <h2>Indicative Margin Reference — {proj.dosageForm} (MOQ {cfg.moq.toLocaleString()})
+          <h2>Indicative Margin Reference — {proj.dosageForm} · per {unitNoun} (MOQ {cfg.moq.toLocaleString()})
             <span className="fbadge warn" style={{marginLeft:"auto"}}>Internal only — not a customer quote</span></h2>
           <p className="fsmall" style={{marginBottom:8}}>A cost-plus reference only, to sanity-check margin against the real COGS above. <strong>These are not quoted prices</strong> — customer tier pricing is always entered manually on the <strong>Quote</strong> page.</p>
           <table className="ftbl">
-            <thead><tr><th>Quantity</th><th>COGS</th><th>Sale Price/Unit</th></tr></thead>
+            <thead><tr><th>{isBulkPack?unitNoun+' Quantity':'Quantity'}</th><th>COGS/{unitNoun}</th><th>Sale Price/{unitNoun}</th></tr></thead>
             <tbody>
               {tiers.map(({qty,cogs,price,comm},i)=>(
                 <tr key={qty} style={{background:i===0?"#eef1f4":""}}>
                   <td style={{fontFamily:"var(--mono)"}}>{qty.toLocaleString()}</td>
-                  <td style={{fontFamily:"var(--mono)"}}>{f$(cogs)}</td>
-                  <td style={{fontFamily:"var(--mono)",fontWeight:600}}>{f$(price)}</td>
+                  <td style={{fontFamily:"var(--mono)"}}>{f$(cogs, isBulkPack?6:4)}</td>
+                  <td style={{fontFamily:"var(--mono)",fontWeight:600}}>{f$(price, isBulkPack?6:4)}</td>
                 </tr>
               ))}
             </tbody>
@@ -5515,6 +5625,10 @@ function QuotePage({ projects, setProjects, onToggleNav }){
   const proj = projects.find(p => p.pn === pn) || null;
   const upd = (patch) => setProjects(prev => prev.map(p => p.pn === pn ? { ...p, ...patch } : p));
   const cfg = proj ? (FORM_CFG[proj.dosageForm] || FORM_CFG.Capsules) : FORM_CFG.Capsules;
+  // Bulk orders are priced per piece (a bulk gummy quote is per gummy, not per bottle).
+  const qBulk = !!(proj && (proj.isBulk || (proj.cogsBreakdown && proj.cogsBreakdown.isBulk)));
+  const qUnit = qBulk ? unitNounFor(proj.dosageForm) : 'Unit';
+  const qUnits = qUnit==='Unit' ? 'Units' : qUnit+'s';
 
   // Composition per serving — stated mg from the captured formula only (never invented).
   const comp = proj ? (proj.ingredients||[]).map(r => {
@@ -5567,8 +5681,8 @@ function QuotePage({ projects, setProjects, onToggleNav }){
       <table><thead><tr><th>Ingredient</th><th style="text-align:right">Active Ingredient Quantity</th><th>UOM</th></tr></thead>
       <tbody>${compRows}<tr><td><b>Total Input Quantity</b></td><td style="text-align:right"><b>${totalInput}</b></td><td>mg</td></tr></tbody></table>
       <h2>Tier Pricing</h2>
-      <table><thead><tr><th>Number of Units</th>${unitHdr}</tr></thead>
-      <tbody><tr><td>Sale Price per Unit</td>${priceRow}</tr></tbody></table>
+      <table><thead><tr><th>Number of ${qUnits}</th>${unitHdr}</tr></thead>
+      <tbody><tr><td>Sale Price per ${esc(qUnit)}</td>${priceRow}</tr></tbody></table>
       <h2>Preliminary Packaging</h2><p class="pkg">${esc(g('quotePackaging','—'))}</p>
       ${g('quoteOtherIngredients') ? `<h2>Notes / Considerations / Other</h2><p class="pkg">${esc(g('quoteOtherIngredients'))}</p>` : ''}
       <h2>Notices</h2><ul>${notices}</ul>
@@ -5637,8 +5751,8 @@ function QuotePage({ projects, setProjects, onToggleNav }){
               {comp.length>0 && <tr><td><b>Total Input Quantity</b></td><td style={{textAlign:'right',fontFamily:'var(--mono)',fontWeight:700}}>{totalInput}</td><td>mg</td></tr>}
             </tbody></table>
 
-          <div className="q-sec">Tier Pricing <span className="fbadge ai" style={{marginLeft:8}}>Sale price per unit is always manual</span></div>
-          <table className="ftbl"><thead><tr><th>Number of Units</th><th style={{textAlign:'right'}}>Sale Price / Unit</th><th/></tr></thead>
+          <div className="q-sec">Tier Pricing <span className="fbadge ai" style={{marginLeft:8}}>Sale price per {qUnit.toLowerCase()} is always manual</span>{qBulk && <span className="fbadge neutral" style={{marginLeft:6}}>Bulk — priced per {qUnit.toLowerCase()}</span>}</div>
+          <table className="ftbl"><thead><tr><th>Number of {qUnits}</th><th style={{textAlign:'right'}}>Sale Price / {qUnit}</th><th/></tr></thead>
             <tbody>
               {tiers.map((t,i)=>(<tr key={i}>
                 <td><input className="gen-in" type="number" value={t.units==null?'':t.units} onChange={e=>editTier(i,{units:Number(e.target.value)||0})}/></td>

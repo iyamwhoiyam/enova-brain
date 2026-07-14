@@ -1460,6 +1460,20 @@ function emptyProject(pn) {
    drift warning until an Enova employee re-approves. Quotes/MFSO read the approved
    snapshot, not the live number. */
 let CURRENT_ACTOR = { email:null, name:'Enova' };
+// Access control (mirrors the server-side RLS: only the 7 admins may write). Default TRUE
+// so offline/no-backend mode stays fully usable; useUserRole() sets it from studio_roles
+// once a real session is known. The DATABASE is the hard wall — this only drives UI/UX.
+let CURRENT_IS_ADMIN = true;
+// Surface Supabase write failures (e.g. a viewer's blocked write) to the App instead of
+// dropping them silently. App subscribes via _onWriteError; helpers call notifyWriteError.
+let _onWriteError = null;
+function notifyWriteError(msg){ try { if (typeof _onWriteError==='function') _onWriteError(msg); } catch(_){} }
+function friendlyWriteError(error){
+  const m = (error && (error.message||error.msg)) || String(error||'');
+  if (error && (error.code==='42501') || /row-level security|violates row-level|permission denied|not authorized/i.test(m))
+    return 'You have viewer access — only an admin can save changes. Ask an Enova admin to grant edit access.';
+  return 'Save failed: '+(m||'unknown error')+'. Your local copy is intact; it will retry.';
+}
 function nowISO(){ try { return new Date().toISOString(); } catch(e){ return ''; } }
 function fmtTs(iso){ try { return new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}); } catch(e){ return iso||''; } }
 function auditEntry(action, detail){
@@ -1471,9 +1485,21 @@ function withAudit(project, action, detail){
   const log = Array.isArray(project.auditLog) ? project.auditLog : [];
   return { ...project, auditLog: [...log, auditEntry(action, detail)].slice(-500) };
 }
-// Append an audit entry to one project inside a setProjects updater.
+// Mirror an audit event to the IMMUTABLE server-side trail (append-only, hash-chained —
+// §26 Part 11). Fire-and-forget; never blocks the UI. The in-blob auditLog is the fast
+// display cache; studio_audit is the authoritative, tamper-evident record.
+function dbAudit(pn, action, detail){
+  try {
+    if (typeof sb === 'undefined' || !sb || !pn) return;
+    sb.from('studio_audit')
+      .insert({ pn, actor_email:(CURRENT_ACTOR.email||'').toLowerCase()||null, action, detail: detail||'' })
+      .then(({error}) => { if (error) console.warn('[audit] server write failed:', error.message); });
+  } catch(_){}
+}
+// Append an audit entry to one project inside a setProjects updater, AND to the immutable trail.
 function logAudit(setProjects, pn, action, detail){
   setProjects(prev => prev.map(p => p.pn===pn ? withAudit(p, action, detail) : p));
+  dbAudit(pn, action, detail);
 }
 // Stable signature of the cost-bearing inputs — detects silent formula/setup drift.
 function formulaHash(p){
@@ -1603,6 +1629,30 @@ function validateProject(p){
   const cb = p.cogsBreakdown;
   if (!cb || !(cb.cogsPerUnit>0)) warnings.push('No costed COGS yet.');
   return { errors, warnings, ok: errors.length===0 };
+}
+// Blocking data-integrity gate for money-critical actions (send a Quote, sign the
+// MFSO → production). Returns TRUE to proceed, FALSE to abort. A clean project
+// proceeds silently. If there are readiness ERRORS ($0-cost / unmatched SKU / no
+// dose → COGS is understated), it demands an explicit Enova-employee OVERRIDE via
+// confirm() and records that override (with the exact reasons) in the audit trail.
+// Warnings never block. This is the accurate-quote safeguard: no customer gets a
+// quote or an authorized production run on understated cost without a logged decision.
+function passIntegrityGate(proj, setProjects, actionLabel){
+  const rz = validateProject(proj);
+  if (!rz.errors.length) return true;
+  // Overriding a data-integrity block is an admin-only decision.
+  if (!CURRENT_IS_ADMIN){
+    if (typeof window!=='undefined' && window.alert)
+      window.alert(`${actionLabel} is blocked — this formula has data-integrity issues (${rz.errors.join('; ')}) and only an admin can override. Ask an Enova admin.`);
+    return false;
+  }
+  const msg = `⚠ ${actionLabel} — data-integrity issues that UNDERSTATE COGS:\n\n`
+    + rz.errors.map(e=>'  • '+e).join('\n')
+    + `\n\nThese make the cost (and any quote built on it) inaccurate. Proceeding records`
+    + `\nan OVERRIDE by ${CURRENT_ACTOR.name||CURRENT_ACTOR.email||'this user'} in the audit trail.\n\nOverride and continue anyway?`;
+  if (typeof window!=='undefined' && window.confirm && !window.confirm(msg)) return false;
+  logAudit(setProjects, proj.pn, actionLabel+' — DATA-INTEGRITY OVERRIDE', rz.errors.join(' | '));
+  return true;
 }
 
 /* ══════════════ PRODUCTION DOCUMENTS (MFSO gate → SO / MO / BOM / MMR) ══════════════
@@ -4871,6 +4921,7 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
    below runs unconditionally and in a stable order. Remounts (key=pn) when the
    selected project changes, resetting the approval checkbox cleanly. ── */
 function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsumed }) {
+  const { isAdmin } = useRole();                          // only admins may approve/lock/unlock
   const [approveChk, setApproveChk] = useState(false);   // Enova-employee approval gate for Lock & Approve
   const cfg = FORM_CFG[proj.dosageForm] || FORM_CFG.Capsules;
   const upd = (patch) => setProjects(prev => prev.map(p => p.pn === proj.pn ? { ...p, ...patch } : p));
@@ -4993,6 +5044,7 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
         'Formula LOCKED & APPROVED',
         `${f$(snap.cogsPerUnit)}/unit @ ${(snap.mbBatchQty||mbBatchQty).toLocaleString()} units · ${proj.dosageForm} · ${container}${rzTxt}`);
     }));
+    dbAudit(proj.pn, 'E-SIGNATURE · Formula approved & locked', (CURRENT_ACTOR.name||CURRENT_ACTOR.email||'')+' approved '+f$((liveBreakdown||{}).cogsPerUnit)+'/unit');
   };
   const reapprove = () => {
     setProjects(prev => prev.map(p => {
@@ -5003,11 +5055,13 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
       return withAudit({ ...p, formulaLock:fl, cogsBreakdown:snap },
         'Cost re-approved', `${f$(snap.cogsPerUnit)}/unit (was ${f$(approvedCogs)})`);
     }));
+    dbAudit(proj.pn, 'E-SIGNATURE · Cost re-approved', (CURRENT_ACTOR.name||CURRENT_ACTOR.email||''));
   };
   const unlock = () => {
     setProjects(prev => prev.map(p => p.pn===proj.pn
       ? withAudit({ ...p, formulaLock:{ ...(p.formulaLock||{}), locked:false, unlockedBy:CURRENT_ACTOR.email, unlockedTs:nowISO() } }, 'Formula unlocked for editing', '')
       : p));
+    dbAudit(proj.pn, 'Formula unlocked for editing', CURRENT_ACTOR.email||'');
   };
 
   const noMatch = (proj.ingredients||[]).filter(r=>!r.item);
@@ -5362,7 +5416,7 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
               I am an Enova employee. I have reviewed this formula and I approve the cost build ({f$(cogsPerUnit)}/unit @ {mbBatchQty.toLocaleString()} units).
             </label>
             <div className="fbrow">
-              <button className="fbtn ok" disabled={!approveChk} onClick={()=>{ lockApprove(); setApproveChk(false); }}>🔒 Lock &amp; Approve</button>
+              <button className="fbtn ok" disabled={!approveChk || !isAdmin} title={isAdmin?'':'Only an admin can approve'} onClick={()=>{ lockApprove(); setApproveChk(false); }}>🔒 Lock &amp; Approve</button>
               <button className="fbtn navy" onClick={()=>{ upd({stage:'Formulation/Sample Development'}); logAudit(setProjects, proj.pn, 'Submitted for review', 'Stage → Formulation/Sample Development'); }}>Submit for Review (no lock)</button>
               <span className="fsmall">Approve when the formula is final. "Submit for Review" just moves it to the review stage.</span>
             </div>
@@ -5378,7 +5432,7 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
             )}
             {!costDrift && !formulaChanged && <div className="falert ok" style={{marginTop:8}}>✓ Live cost matches the approved snapshot. No drift.</div>}
             <div className="fbrow" style={{marginTop:10}}>
-              <button className="fbtn sec" onClick={()=>{ if(!window.confirm||window.confirm('Unlock this approved formula for editing? Costs will resume auto-updating.')) unlock(); }}>🔓 Unlock to edit</button>
+              <button className="fbtn sec" disabled={!isAdmin} title={isAdmin?'':'Only an admin can unlock'} onClick={()=>{ if(!window.confirm||window.confirm('Unlock this approved formula for editing? Costs will resume auto-updating.')) unlock(); }}>🔓 Unlock to edit</button>
               {(costDrift||formulaChanged) && <button className="fbtn ok" onClick={reapprove}>Re-approve at current cost ({f$(cogsPerUnit)})</button>}
               <span className="fsmall">Unlocking is recorded in the audit trail.</span>
             </div>
@@ -5484,6 +5538,7 @@ function QuotePage({ projects, setProjects, onToggleNav }){
 
   const exportQuote = () => {
     if (!proj) return;
+    if (!passIntegrityGate(proj, setProjects, 'Quote exported')) return;   // block/override an inaccurate quote
     const esc = (s) => String(s==null?'':s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
     const meta = [
       ['Client Name', client], ['Date', g('quoteDate', today)],
@@ -5550,6 +5605,12 @@ function QuotePage({ projects, setProjects, onToggleNav }){
       </div>
 
       <div className="gen-body">
+        {(() => { const rz = validateProject(proj); return rz.errors.length>0 ? (
+          <div className="falert err" style={{marginBottom:10}}>
+            <strong>⚠ This quote's cost is understated — fix before sending:</strong>
+            <ul style={{margin:"6px 0 0 18px"}}>{rz.errors.map((e,i)=><li key={i}>{e}</li>)}</ul>
+            <div className="fsmall" style={{marginTop:6}}>Exporting anyway will require an explicit override, logged to the audit trail.</div>
+          </div>) : null; })()}
         <div className="q-doc">
           <div className="q-title">New Product Quote <span className="q-brand">Enova Science</span></div>
 
@@ -5612,6 +5673,7 @@ function QuotePage({ projects, setProjects, onToggleNav }){
    document is generated from the project's captured formula + approved cost snapshot +
    manual tier pricing — nothing is invented. */
 function DocumentsPage({ projects, setProjects, onToggleNav }){
+  const { isAdmin } = useRole();               // only admins may sign the MFSO → production
   const [pn, setPn] = useState(null);          // opens BLANK — recall a project
   const [confirmSign, setConfirmSign] = useState(false);
   const proj = projects.find(p => p.pn === pn) || null;
@@ -5619,11 +5681,13 @@ function DocumentsPage({ projects, setProjects, onToggleNav }){
   const locked = proj ? isLocked(proj) : false;
 
   const signMFSO = () => {
+    if (!passIntegrityGate(proj, setProjects, 'MFSO signed → production')) return;   // no production run on understated cost without a logged override
     setProjects(prev => prev.map(x => {
       if (x.pn !== pn) return x;
       const sig = { signed:true, by:CURRENT_ACTOR.email, byName:CURRENT_ACTOR.name, ts:nowISO() };
       return withAudit({ ...x, mfsoSigned:sig, stage:'In Production' }, 'MFSO signed by customer', 'Authorized → In Production');
     }));
+    dbAudit(pn, 'E-SIGNATURE · MFSO signed → In Production', 'Authorized by '+(CURRENT_ACTOR.name||CURRENT_ACTOR.email||''));
     setConfirmSign(false);
   };
   const unsignMFSO = () => {
@@ -5631,6 +5695,7 @@ function DocumentsPage({ projects, setProjects, onToggleNav }){
     setProjects(prev => prev.map(x => x.pn===pn
       ? withAudit({ ...x, mfsoSigned:{ ...(x.mfsoSigned||{}), signed:false, revokedBy:CURRENT_ACTOR.email, revokedTs:nowISO() } }, 'MFSO signature reverted', '')
       : x));
+    dbAudit(pn, 'MFSO signature reverted', 'Reverted by '+(CURRENT_ACTOR.name||CURRENT_ACTOR.email||''));
   };
 
   if (!proj) {
@@ -5681,7 +5746,7 @@ function DocumentsPage({ projects, setProjects, onToggleNav }){
           <p className="fsmall">The customer signs the MFSO based on the quote/bid. <strong>A signed MFSO authorizes production</strong> and unlocks the documents below; the project moves to <strong>In Production</strong>.</p>
 
           {!locked && <div className="falert warn" style={{marginBottom:8}}>The formula is not yet <strong>approved &amp; locked</strong> on the Formulation page. Approve it first so the MFSO reflects a frozen formula and cost.</div>}
-          {readiness.errors.length>0 && <div className="falert err" style={{marginBottom:8}}>Data readiness: {readiness.errors.join(' ')}</div>}
+          {readiness.errors.length>0 && <div className="falert err" style={{marginBottom:8}}><strong>Data readiness — COGS understated:</strong> {readiness.errors.join(' ')} <em>Signing will require an explicit override, logged to the audit trail.</em></div>}
 
           <div className="fbrow">
             <button className="fbtn navy" onClick={()=>printDoc(buildMFSO(proj))}>🖨 Generate / Print MFSO</button>
@@ -5690,7 +5755,7 @@ function DocumentsPage({ projects, setProjects, onToggleNav }){
                 <input type="checkbox" checked={confirmSign} onChange={e=>setConfirmSign(e.target.checked)}/>
                 I confirm the customer has signed the MFSO for {proj.pn}.
               </label>
-              <button className="fbtn ok" disabled={!confirmSign} onClick={signMFSO}>✅ Mark MFSO Signed → Production</button>
+              <button className="fbtn ok" disabled={!confirmSign || !isAdmin} title={isAdmin?'':'Only an admin can authorize production'} onClick={signMFSO}>✅ Mark MFSO Signed → Production</button>
             </>)}
           </div>
           {signed && (
@@ -5729,6 +5794,7 @@ function DocumentsPage({ projects, setProjects, onToggleNav }){
    Formulation page's saved breakdown, tier prices entered MANUALLY. Nothing is invented.
    Every generated MFSO must be approved by an Enova employee before it is marked signed. */
 function GeneratePage({ projects, setProjects, onToggleNav }){
+  const { isAdmin } = useRole();               // only admins may sign the MFSO
   // Opens BLANK — nothing generates until an Enova user recalls a project.
   const [pn, setPn] = useState(null);
   const [step, setStep] = useState(1);
@@ -5781,9 +5847,11 @@ function GeneratePage({ projects, setProjects, onToggleNav }){
 
   // Signing the MFSO authorizes production (Enova process: signed MFSO → In Production).
   const markSignedMFSO = () => {
+    if (!passIntegrityGate(proj, setProjects, 'MFSO signed → production')) return;
     setProjects(prev => prev.map(x => x.pn===pn
       ? withAudit({ ...x, mfsoSigned:{ signed:true, by:CURRENT_ACTOR.email, byName:CURRENT_ACTOR.name, ts:nowISO() }, stage:'In Production' }, 'MFSO signed by customer', 'Authorized → In Production')
       : x));
+    dbAudit(pn, 'E-SIGNATURE · MFSO signed → In Production', 'Authorized by '+(CURRENT_ACTOR.name||CURRENT_ACTOR.email||''));
   };
 
   if (!proj) {
@@ -5912,7 +5980,7 @@ function GeneratePage({ projects, setProjects, onToggleNav }){
               <button className="fbtn" onClick={()=>setStep(3)}>← Back</button>
               <span style={{display:'flex',gap:8}}>
                 <button className="fbtn" onClick={printMFSO}>🖨 Print / Save MFSO</button>
-                <button className="fbtn teal" disabled={!approved} title={approved?'':'Approve first'} onClick={markSignedMFSO}>✓ Mark Signed → MFSO stage</button>
+                <button className="fbtn teal" disabled={!approved || !isAdmin} title={!isAdmin?'Only an admin can sign':(approved?'':'Approve first')} onClick={markSignedMFSO}>✓ Mark Signed → MFSO stage</button>
               </span>
             </div>
           </div>
@@ -5953,14 +6021,16 @@ function useSupabaseProjects(email){
   const removing   = useRef({});          // pn -> true (to delete)
   const flushTimer = useRef(null);
   const selfWrite  = useRef(new Set());   // pns we just wrote — ignore our own realtime echo
+  const revs       = useRef({});          // pn -> last-seen server rev (optimistic-concurrency baseline)
 
   useEffect(() => {
     if (!sb) return;                       // offline: keep local seed, no sync
     let channel;
     (async () => {
-      const { data, error } = await sb.from('studio_projects').select('pn,data');
+      const { data, error } = await sb.from('studio_projects').select('pn,data,rev');
       if (error) { console.warn('[studio] load failed:', error.message); return; }
       if (data && data.length) {
+        data.forEach(r => { revs.current[r.pn] = Number(r.rev)||0; });   // concurrency baseline
         setLocal(data.map(r => migrateProject(r.data)));   // normalize/backfill every stored record
       } else {
         const seed = buildSeedProjects();  // first run ever: seed the shared table from the app's data
@@ -5974,8 +6044,16 @@ function useSupabaseProjects(email){
           const pn = (payload.new && payload.new.pn) || (payload.old && payload.old.pn);
           if (!pn) return;
           if (selfWrite.current.has(pn)) { selfWrite.current.delete(pn); return; }
+          const newRev = payload.new ? (Number(payload.new.rev)||0) : 0;
+          // Optimistic-concurrency notice (fired outside the state updater): if we have
+          // unsaved edits for this project and someone else just advanced its server rev,
+          // warn the user their copy is now behind — without discarding their edits.
+          if (payload.eventType !== 'DELETE' && (pending.current[pn] || removing.current[pn]) && newRev > (revs.current[pn]||0)) {
+            notifyWriteError('“'+pn+'” was just updated by someone else. Your unsaved changes are kept — reload to see theirs before saving so you don’t overwrite them.');
+          }
+          if (payload.new) revs.current[pn] = newRev;
           setLocal(prev => {
-            if (payload.eventType === 'DELETE') return prev.filter(p => p.pn !== pn);
+            if (payload.eventType === 'DELETE') { delete revs.current[pn]; return prev.filter(p => p.pn !== pn); }
             const row = payload.new && payload.new.data; if (!row) return prev;
             // Concurrency guard: never clobber a project we have unsaved local edits for.
             if (pending.current[pn] || removing.current[pn]) return prev;
@@ -6001,7 +6079,7 @@ function useSupabaseProjects(email){
     if (upserts.length) {
       sb.from('studio_projects').upsert(
         upserts.map(([pn,v]) => ({ pn, data:v.data, updated_by: email||null, updated_at: new Date().toISOString() })),
-        { onConflict:'pn' }).then(({error}) => { if (error) console.warn('[studio] save failed:', error.message); });
+        { onConflict:'pn' }).then(({error}) => { if (error){ console.warn('[studio] save failed:', error.message); notifyWriteError(friendlyWriteError(error)); } });
     }
     if (inserts.length) {
       // Brand-new projects INSERT (not upsert): the `pn` primary key REJECTS a duplicate rather
@@ -6013,7 +6091,15 @@ function useSupabaseProjects(email){
         if (!error) return;
         const isConflict = error.code === '23505' || /duplicate key|already exists|unique/i.test(error.message||'');
         if (!isConflict) {
-          // Transient failure (network/RLS) — re-queue so it retries; never drop a new project.
+          const perm = error.code === '42501' || /row-level security|violates row-level|permission denied|not authorized/i.test(error.message||'');
+          if (perm) {
+            // A viewer tried to create a project — the DB blocked it. Surface it; do NOT
+            // retry forever (a permission error won't resolve on its own).
+            console.warn('[studio] new-project blocked by permissions:', error.message);
+            notifyWriteError(friendlyWriteError(error));
+            return;
+          }
+          // Transient failure (network) — re-queue so it retries; never drop a new project.
           console.warn('[studio] new-project save failed, will retry:', error.message);
           inserts.forEach(([pn,v]) => { pending.current[pn] = v; });
           if (!flushTimer.current) flushTimer.current = setTimeout(flush, 1500);
@@ -6038,7 +6124,7 @@ function useSupabaseProjects(email){
     if (dels.length) {
       dels.forEach(pn => selfWrite.current.add(pn));
       sb.from('studio_projects').delete().in('pn', dels)
-        .then(({error}) => { if (error) console.warn('[studio] delete failed:', error.message); });
+        .then(({error}) => { if (error){ console.warn('[studio] delete failed:', error.message); notifyWriteError(friendlyWriteError(error)); } });
     }
   };
 
@@ -6262,6 +6348,45 @@ function LoginScreen(){
   );
 }
 
+// ── Reliability (§26): self-hosted client error logging + a global error boundary so a
+// component crash shows a recoverable message instead of a white screen. No external
+// monitoring dependency — errors append to studio_errors (admins can read them). ──
+function logClientError(kind, message, stack){
+  try {
+    console.error('[enova]', kind, message);
+    if (typeof sb !== 'undefined' && sb) {
+      sb.from('studio_errors').insert({
+        actor_email:((CURRENT_ACTOR&&CURRENT_ACTOR.email)||'').toLowerCase()||null,
+        kind, message:String(message==null?'':message).slice(0,2000), stack:String(stack==null?'':stack).slice(0,6000),
+        url:(typeof location!=='undefined'?location.href:''), ua:(typeof navigator!=='undefined'?navigator.userAgent:'')
+      }).then(({error})=>{ if(error) console.warn('[enova] error-log write failed:', error.message); });
+    }
+  } catch(_){}
+}
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('error', (e)=> logClientError('window', e&&e.message, e&&e.error&&e.error.stack));
+  window.addEventListener('unhandledrejection', (e)=> logClientError('promise', (e&&e.reason&&e.reason.message)||String(e&&e.reason), e&&e.reason&&e.reason.stack));
+}
+class ErrorBoundary extends React.Component {
+  constructor(props){ super(props); this.state = { err:null }; }
+  static getDerivedStateFromError(err){ return { err }; }
+  componentDidCatch(err, info){ logClientError('react', err&&err.message, (err&&err.stack)||(info&&info.componentStack)); }
+  render(){
+    if (this.state.err) {
+      return (
+        <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#f4f6f8',padding:24}}>
+          <div style={{maxWidth:520,background:'#fff',border:'1px solid #d7dee5',borderRadius:10,padding:'28px 30px',boxShadow:'0 6px 24px rgba(20,40,60,.08)'}}>
+            <div style={{fontSize:34,marginBottom:8}}>⚠️</div>
+            <h2 style={{margin:'0 0 8px',color:'#1B3A5C',fontSize:18}}>Something went wrong on this screen</h2>
+            <p style={{color:'#556',fontSize:13,lineHeight:1.5,margin:'0 0 16px'}}>Your data is safe — nothing was lost, and this has been logged for the Enova team. Reload to continue where you left off.</p>
+            <button onClick={()=>{ try{location.reload();}catch(_){}} } style={{background:'#1D7A6B',color:'#fff',border:'none',borderRadius:6,padding:'9px 16px',fontSize:13,fontWeight:600,cursor:'pointer'}}>Reload</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 function Root(){
   const [session,setSession] = useState(undefined);   // undefined = still checking
   useEffect(() => {
@@ -6270,10 +6395,12 @@ function Root(){
     const { data:sub } = sb.auth.onAuthStateChange((_e,s) => setSession(s));
     return () => sub.subscription.unsubscribe();
   }, []);
-  if (!sb) return <App session={null}/>;               // Supabase unavailable → original offline behavior
-  if (session === undefined) return <div className="login-wrap"><div className="login-card"><div className="login-sub">Loading…</div></div></div>;
-  if (!session) return <LoginScreen/>;
-  return <App session={session}/>;
+  let content;
+  if (!sb) content = <App session={null}/>;            // Supabase unavailable → original offline behavior
+  else if (session === undefined) content = <div className="login-wrap"><div className="login-card"><div className="login-sub">Loading…</div></div></div>;
+  else if (!session) content = <LoginScreen/>;
+  else content = <App session={session}/>;
+  return <ErrorBoundary>{content}</ErrorBoundary>;      // any crash below is caught & recoverable
 }
 
 /* ══════════════════ INVENTORY PAGE — live MISys item master + import/sync ══════════════════
@@ -6283,6 +6410,7 @@ function Root(){
    $/g (kg auto-normalized), packaging $/each; zero-cost items flagged, never invented.
    Approve & Replace swaps the working inventory for every page and persists per-browser. */
 function InventoryPage({ onToggleNav, onCloudPush, cloudStatus }){
+  const { isAdmin } = useRole();                    // only admins may publish inventory to all users
   const [parsed, setParsed] = useState(null);      // { items, stats, diff }
   const [wb, setWb] = useState(null);
   const [fname, setFname] = useState('');
@@ -6417,7 +6545,7 @@ function InventoryPage({ onToggleNav, onCloudPush, cloudStatus }){
             )}
             <p className="fsmall" style={{margin:'8px 0 4px'}}><strong>By category:</strong> {Object.entries(st.byCat).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([c,n])=>`${c} (${n})`).join(' · ')}</p>
             <div className="fbrow" style={{marginTop:8}}>
-              <button className="fbtn teal" onClick={approve} disabled={pushing}>✓ Approve &amp; Publish Inventory ({st.total.toLocaleString()} items)</button>
+              <button className="fbtn teal" onClick={approve} disabled={pushing || !isAdmin} title={isAdmin?'':'Only an admin can publish inventory'}>✓ Approve &amp; Publish Inventory ({st.total.toLocaleString()} items)</button>
               <button className="fbtn sec" onClick={()=>{setParsed(null);setWb(null);if(fileRef.current)fileRef.current.value='';}} disabled={pushing}>Cancel</button>
               <span className="fsmall">Replaces the working inventory for every page (Formulation costs, packaging, documents) and <strong>publishes it to every signed-in Enova user</strong> via Supabase.</span>
             </div>
@@ -6453,8 +6581,43 @@ function InventoryPage({ onToggleNav, onCloudPush, cloudStatus }){
   );
 }
 
+// Role context so any page can read the signed-in user's access level without prop-threading.
+const RoleContext = React.createContext({ isAdmin:true, role:'admin' });
+function useRole(){ return React.useContext(RoleContext); }
+
+// Resolve the signed-in user's role from studio_roles (admins may write; everyone else is
+// read-only). Offline/no-backend → full access. Caches per-email so admins never flicker to
+// read-only on load. The server RLS is the real enforcement; this only shapes the UI.
+function useUserRole(email){
+  const key = 'enova:role:' + (email||'');
+  const [role, setRole] = useState(() => {
+    if (!sb) return 'admin';
+    try { return localStorage.getItem(key) || null; } catch(_){ return null; }
+  });
+  useEffect(() => {
+    if (!sb) { setRole('admin'); return; }
+    if (!email) { setRole(null); return; }
+    let alive = true;
+    sb.from('studio_roles').select('role').eq('email', String(email).toLowerCase()).maybeSingle()
+      .then(({data,error}) => { if (!alive) return;
+        const r = error ? (role||'viewer') : ((data && data.role) || 'viewer');
+        setRole(r); try { localStorage.setItem(key, r); } catch(_){} })
+      .catch(() => { if (alive) setRole(r => r || 'viewer'); });
+    return () => { alive = false; };
+  }, [email]);
+  // Optimistic while loading (role==null) so admins see no flicker; a resolved 'viewer'
+  // locks the UI. Any race is still caught by the server RLS + notifyWriteError.
+  const isAdmin = !sb ? true : (role == null ? true : role === 'admin');
+  useEffect(() => { CURRENT_IS_ADMIN = isAdmin; }, [isAdmin]);
+  return { role: role || (sb ? null : 'admin'), isAdmin };
+}
+
 function App({ session }) {
   const email = (session && session.user && session.user.email) || null;
+  const { isAdmin, role } = useUserRole(email);
+  // Surface blocked/failed writes (e.g. a viewer's rejected save) as a dismissible banner.
+  const [writeErr, setWriteErr] = useState(null);
+  useEffect(() => { _onWriteError = (m) => setWriteErr(m); return () => { _onWriteError = null; }; }, []);
   // Attribute every audit entry to the signed-in Enova user (module-level actor,
   // read by logAudit/withAudit without prop-threading through every page).
   CURRENT_ACTOR = { email, name: email ? emailToName(email) : 'Enova' };
@@ -6507,6 +6670,7 @@ function App({ session }) {
   ];
 
   return (
+    <RoleContext.Provider value={{ isAdmin, role }}>
     <div className="app-shell">
       <div className={`app-sidebar ${collapsed?'collapsed':''}`}>
         <div className="app-logo">
@@ -6539,6 +6703,8 @@ function App({ session }) {
         )}
       </div>
       <div className="app-page">
+        {role==='viewer' && <div className="falert warn" style={{margin:0,borderRadius:0,zIndex:150}}>👁 <strong>Viewer access</strong> — you can see everything but can't save changes. Ask an Enova admin (Carlos, Tong, Joseph, Marina, Nick, Jonathan, or Ryan) for edit access.</div>}
+        {writeErr && <div className="falert err" style={{margin:0,borderRadius:0,display:'flex',alignItems:'center',gap:8,zIndex:150}}><span style={{flex:1}}>⚠ {writeErr}</span><button className="fbtn sec sm" onClick={()=>setWriteErr(null)}>Dismiss</button></div>}
         {nav === 'wip' && <WIPBoardPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onFormulate={goFormulate} onSendReview={sendReview} people={ENOVA_PEOPLE} openPagePn={openPn} onPageOpened={()=>setOpenPn(null)} onUpdateProject={updateProject} />}
         {nav === 'projects' && <ProjectsPage projects={projects} onToggleNav={toggleNav} onFormulate={goFormulate} onSendReview={sendReview} people={ENOVA_PEOPLE} onUpdateProject={updateProject} />}
         {nav === 'formulation' && <FormulationPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} targetPn={formulationPn} autoGenPn={pendingGen} onGenConsumed={()=>setPendingGen(null)} />}
@@ -6548,6 +6714,7 @@ function App({ session }) {
         {nav === 'inventory' && <InventoryPage onToggleNav={toggleNav} onCloudPush={sharedInv.push} cloudStatus={sharedInv.status} />}
       </div>
     </div>
+    </RoleContext.Provider>
   );
 }
 

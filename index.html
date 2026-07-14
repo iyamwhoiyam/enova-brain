@@ -3869,6 +3869,137 @@ function defaultContainerFor(dosageForm, isBulk){
     default:               return isBulk ? 'Bulk Bag' : 'Bottle';
   }
 }
+// ══════════════════ PACKAGING GENERATOR (deterministic, inventory-grounded) ══════════════════
+// Auto-selects a COMPLETE, quote-ready packaging set from LIVE inventory: sizes the container
+// to the finished-unit fill, matches the closure to the container's neck finish, and fills
+// label / desiccant / tamper / master shipper (+ scoop for powder, capsule shell for capsules)
+// with sensible standards. PREFERS packaging recalled from a prior project with the same
+// product spec when one exists (grows as Enova fills packaging; shared via Supabase). Every
+// pick is a real MISys SKU with a real cost → accurate packaging cost for the customer quote.
+const CAPSULE_CC = { '000':1.37, '00':0.91, '0':0.68, '1':0.50, '2':0.37, '3':0.30, '4':0.20, '5':0.13 };
+function capsuleShellCC(shellItem){
+  const d = (shellItem && (shellItem.d || shellItem.n)) || '';
+  const m = /["“”'\s](000|00|0|1|2|3|4|5)["“”'\s]/.exec(' '+d+' ');
+  return CAPSULE_CC[m ? m[1] : '00'] || CAPSULE_CC['00'];
+}
+function pkgCapacityCC(desc){
+  if (!desc) return null;
+  let m = /(\d+(?:\.\d+)?)\s*cc\b/i.exec(desc); if (m) return parseFloat(m[1]);
+  m = /(\d+(?:\.\d+)?)\s*oz\b/i.exec(desc);      if (m) return parseFloat(m[1])*29.5735;   // fl oz → cc
+  m = /(\d+(?:\.\d+)?)\s*ml\b/i.exec(desc);      if (m) return parseFloat(m[1]);
+  m = /(\d+(?:\.\d+)?)\s*(?:l|liter|litre)\b/i.exec(desc); if (m) return parseFloat(m[1])*1000;
+  return null;
+}
+function pkgNeckFinish(desc){
+  if (!desc) return null;
+  let m = /\b(\d{2,3}\/\d{3})\b/.exec(desc); if (m) return m[1];        // 45/400
+  m = /\b(\d{2,3})\s*mm\b/i.exec(desc);       if (m) return m[1]+'mm';  // 70mm / 28mm
+  return null;
+}
+function pkgBlendGramsPerServing(proj){
+  if (/gumm/i.test(proj.dosageForm||'')) return ((Number(proj.gummyWt)||0)*(Number(proj.servingSize)||1))/1000;
+  let mg=0; (proj.ingredients||[]).forEach(r=>{ mg += Number(r.inputMg)||0; });
+  return mg/1000;
+}
+// Container volume (cc) needed to hold ONE finished unit (with fill headspace).
+function estimatePackFillCC(proj, pieces){
+  const form = proj.dosageForm||'', spu = Number(proj.servingsPerUnit)||1;
+  if (/gumm/i.test(form))          return ((Number(proj.gummyWt)||4500)/1000 * pieces) * 1.4;   // 60×3g=180g → ~250cc (validated)
+  if (/capsule|tablet/i.test(form)) return pieces * capsuleShellCC(proj.shellItem) * 1.5;        // count × shell cc × headspace
+  if (/powder/i.test(form))        return ((pkgBlendGramsPerServing(proj)||5) * spu / 0.6) * 1.25; // density ~0.6 g/cc
+  if (/liquid/i.test(form))        return ((Number(proj.servingSize)||1) * spu) * 1.12;           // mL/serving × servings
+  return pieces * 1.0;
+}
+function pkgPool(cat){ return (typeof INVENTORY!=='undefined'?INVENTORY:[]).filter(i => i.c===cat && i.u>0); }
+function pkgIsContainerSlot(slot){ return slot.k==='container' || slot.k==='bag' || slot.k==='foil'; }
+function pkgPickContainer(pool, targetCC, proj){
+  const wantGlass = /liquid|tincture/i.test(proj.dosageForm||'');
+  const cand = pool.map(i=>({ i, cc:pkgCapacityCC(i.d), neck:pkgNeckFinish(i.d) })).filter(x=>x.cc>0 && x.neck);
+  if (!cand.length){ const any=pool.slice().sort((a,b)=>a.u-b.u)[0]; return { item:any||null, reason: any?'no sized match — verify':'' }; }
+  const score = (x)=>{ let s=0; const d=x.i.d.toLowerCase();
+    if (wantGlass){ if(/glass|pet/.test(d)) s+=3; } else { if(/hdpe/.test(d)) s+=3; if(/white/.test(d)) s+=1; }
+    return s; };
+  const fit = cand.filter(x=>x.cc >= targetCC*0.98);
+  let chosen;
+  if (fit.length){
+    const minCC = Math.min(...fit.map(x=>x.cc));
+    const tight = fit.filter(x=>x.cc <= minCC*1.25);                  // within 25% of the tightest fit
+    tight.sort((a,b)=> (score(b)-score(a)) || (a.cc-b.cc) || (a.i.u-b.i.u));
+    chosen = tight[0];
+  } else { cand.sort((a,b)=>b.cc-a.cc); chosen = cand[0]; }            // nothing big enough → largest
+  return { item:chosen.i, reason:`${Math.round(chosen.cc)}cc for ~${Math.round(targetCC)}cc fill · neck ${chosen.neck}` };
+}
+function pkgPickClosure(pool, container){
+  const neck = container ? pkgNeckFinish(container.d) : null;
+  const pref = (i)=>{ let s=0; const d=i.d.toLowerCase(); if(/crc|child/.test(d)) s+=3; if(/induction|heat|seal|liner/.test(d)) s+=2; if(/white/.test(d)) s+=1; return s; };
+  const match = neck ? pool.filter(i=>pkgNeckFinish(i.d)===neck) : [];
+  if (match.length){ match.sort((a,b)=>pref(b)-pref(a)||a.u-b.u); return { item:match[0], reason:`neck ${neck} match` }; }
+  const any = pool.slice().sort((a,b)=>a.u-b.u)[0];
+  return { item:any||null, reason: neck?`no ${neck} closure in stock — verify`:'verify neck finish' };
+}
+function pkgPickScoop(pool, proj){
+  const g = pkgBlendGramsPerServing(proj), targetCC = g>0 ? g/0.6 : null;
+  const cand = pool.map(i=>({ i, cc:pkgCapacityCC(i.d) })).filter(x=>x.cc>0);
+  if (targetCC && cand.length){ cand.sort((a,b)=>Math.abs(a.cc-targetCC)-Math.abs(b.cc-targetCC)); return { item:cand[0].i, reason:`${cand[0].cc}cc ≈ ${g.toFixed(1)} g/serving` }; }
+  const any=pool[0]; return { item:any||null, reason:any?'standard scoop':'' };
+}
+function pkgPickByKeywords(pool, kws, label){
+  for (const kw of kws){ const hit = pool.find(i=>new RegExp(kw,'i').test(i.d)); if (hit) return { item:hit, reason:label||'standard' }; }
+  const any = pool.slice().sort((a,b)=>a.u-b.u)[0];
+  return { item:any||null, reason: any?(label||'standard'):'' };
+}
+// Recall the closest prior project (with real packaging selected) for the same product spec.
+function pkgRecall(proj, projects, pieces){
+  if (!Array.isArray(projects)) return null;
+  let best=null, bestScore=0;
+  projects.forEach(p=>{
+    if (!p || p.pn===proj.pn || !p.pkg || !Object.keys(p.pkg).length) return;
+    if ((p.dosageForm||'') !== (proj.dosageForm||'')) return;                 // form must match
+    let s = 3;
+    if ((p.containerType||'') === (proj.containerType||'')) s += 2;
+    const pc = Number(p.unitsPerContainer)>0 ? Number(p.unitsPerContainer) : (Number(p.servingSize)||1)*(Number(p.servingsPerUnit)||1);
+    if (pc && pieces) s += 2 * (Math.min(pc,pieces)/Math.max(pc,pieces));
+    if (String(p.gummyType||'') === String(proj.gummyType||'')) s += 0.5;
+    if (s > bestScore){ bestScore=s; best=p; }
+  });
+  return (best && bestScore>=3) ? { pkg:best.pkg, src:best.pn, shellItem:best.shellItem } : null;
+}
+// THE generator: returns { pkg (slotKey→SKU), meta (slotKey→{source,reason}), shell, ... }.
+function generatePackaging(proj, projects){
+  const container = proj.containerType || defaultContainerFor(proj.dosageForm, proj.isBulk);
+  const ctInfo = CONTAINER_TYPES[container] || CONTAINER_TYPES['Bottle'];
+  const slots = ctInfo.pkg || [];
+  const pieces = Number(proj.unitsPerContainer)>0 ? Number(proj.unitsPerContainer) : (Number(proj.servingSize)||1)*(Number(proj.servingsPerUnit)||1);
+  const targetCC = estimatePackFillCC(proj, pieces);
+  const recall = pkgRecall(proj, projects, pieces);
+  const pkg = {}, meta = {};
+  let chosenContainer = null;
+  slots.forEach(slot => {
+    if (recall && recall.pkg[slot.k]){                                        // 1) recall a prior project's pick
+      const fresh = INV_IX[recall.pkg[slot.k].n];
+      if (fresh){ pkg[slot.k]=fresh; meta[slot.k]={source:'recalled', reason:`from ${recall.src}`}; if (pkgIsContainerSlot(slot)) chosenContainer=fresh; return; }
+    }
+    const pool = pkgPool(slot.cat); if (!pool.length) return;
+    let r;
+    if (pkgIsContainerSlot(slot))       { r = pkgPickContainer(pool, targetCC, proj); chosenContainer = r.item; }
+    else if (slot.k==='closure')        { r = pkgPickClosure(pool, chosenContainer); }
+    else if (slot.k==='scoop')          { r = pkgPickScoop(pool, proj); }
+    else if (slot.cat==='Label')        { r = pkgPickByKeywords(pool, ['white plain','laser','plain','wrap','bopp'], 'standard label'); }
+    else if (slot.cat==='Desiccant')    { r = pkgPickByKeywords(pool, ['2 gram silica','silica gel','desiccant'], 'moisture control'); }
+    else if (/Tamper/.test(slot.cat))   { r = pkgPickByKeywords(pool, ['clear.*perf','clear'], 'shrink band'); }
+    else if (/Shipper/.test(slot.cat))  { r = pkgPickByKeywords(pool, ['12 x','13 x','10 x','box'], 'master case'); }
+    else                                { r = { item: pool.slice().sort((a,b)=>a.u-b.u)[0], reason:'standard' }; }
+    if (r && r.item){ pkg[slot.k]=r.item; meta[slot.k]={source: recall?'sized (recall n/a)':'sized', reason:r.reason}; }
+  });
+  // Capsule shell (part of the BOM) — default a "00" veggie shell if none chosen.
+  let shell = null;
+  if ((FORM_CFG[proj.dosageForm]||{}).shell && !proj.shellItem){
+    const sp = pkgPool('Capsule Shell');
+    shell = pkgPickByKeywords(sp, ['00.*veggie|veggie.*00','"00".*hpmc','00.*hpmc','veggie','00'], 'default "00" veggie').item || null;
+  }
+  return { container, slots, pkg, meta, shell, targetCC, pieces, recallSrc: recall?recall.src:null };
+}
+
 // Map dose form + container → the Master Bid Template form key (drives the
 // per-form labor + packout model in window.EnovaMasterBid). Tablets run on the
 // Capsule-Bottle line (matches the real P26132 Edibolts tablet bid).
@@ -4841,7 +4972,27 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
   const remIng = id => { if (locked) return; const r=(proj.ingredients||[]).find(x=>x.id===id); upd({ ingredients:(proj.ingredients||[]).filter(x=>x.id!==id) }); logAudit(setProjects, proj.pn, 'Ingredient removed', r?((r.item&&r.item.d)||r.importedName||''):''); };
   const mutIng = (id,p) => { if (locked) return; upd({ ingredients:(proj.ingredients||[]).map(r=>r.id===id?{...r,...p}:r) }); };
   const setBaseItem = (i,item) => { if (locked) return; upd({ baseItems:{...(proj.baseItems||{}), [i]:item} }); };
-  const setPkg = (k,item) => { if (locked) return; upd({ pkg:{...(proj.pkg||{}), [k]:item} }); };
+  const setPkg = (k,item) => { if (locked) return; upd({ pkg:{...(proj.pkg||{}), [k]:item}, pkgAuto:{...(proj.pkgAuto||{}), [k]:undefined} }); };
+  // One-click: build a COMPLETE, quote-ready packaging set from live inventory
+  // (sized to the finished-unit fill, neck-matched closure, label/desiccant/tamper/
+  // shipper + scoop/shell as needed). Recalls a prior project's picks for the same spec.
+  const autoGenPackaging = () => {
+    if (locked) return;
+    const cur = proj.pkg && Object.keys(proj.pkg).length ? proj.pkg : null;
+    if (cur && typeof window!=='undefined' && window.confirm &&
+        !window.confirm('Replace the current packaging with an auto-generated set sized from live inventory?')) return;
+    let gen; try { gen = generatePackaging(proj, projects); } catch(e){ gen = null; }
+    if (!gen || !gen.pkg || !Object.keys(gen.pkg).length){
+      if (typeof window!=='undefined' && window.alert) window.alert('No matching packaging found in live inventory for this spec. Check the container type and form.');
+      return;
+    }
+    const patch = { pkg: gen.pkg, pkgAuto: gen.meta };
+    if (!proj.containerType) patch.containerType = gen.container;
+    if (gen.shell && !proj.shellItem) patch.shellItem = gen.shell;
+    upd(patch);
+    logAudit(setProjects, proj.pn, 'Packaging auto-generated',
+      `${Object.keys(gen.pkg).length} component${Object.keys(gen.pkg).length===1?'':'s'} sized from live inventory${gen.recallSrc?' · recalled from '+gen.recallSrc:''}`);
+  };
 
   const handleIntakeApply = (ext, matches) => {
     // Never overwrite an approved/locked formula without an explicit unlock.
@@ -4894,7 +5045,25 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
       patch.unitsPerContainer = null;
     }
     if (rows.length) { patch.ingredients = rows; patch.baseItems = {}; }
+    // ── Auto-generate a complete, quote-ready packaging set ──────────────
+    // Only when packaging is currently empty (form change cleared it, or a
+    // fresh project) — never clobber packaging an Enova user already chose.
+    const merged = { ...proj, ...patch };
+    const curPkg = merged.pkg && Object.keys(merged.pkg).length ? merged.pkg : null;
+    if (!curPkg) {
+      try {
+        const gen = generatePackaging(merged, projects);
+        if (gen && gen.pkg && Object.keys(gen.pkg).length) {
+          patch.pkg = gen.pkg;
+          patch.pkgAuto = gen.meta;              // slotKey → {source, reason} for badges
+          if (!merged.containerType) patch.containerType = gen.container;
+          if (gen.shell && !merged.shellItem) patch.shellItem = gen.shell;
+        }
+      } catch(e){ /* packaging is optional here — never block the formula apply */ }
+    }
     upd(patch);
+    if (patch.pkg) logAudit(setProjects, proj.pn, 'Packaging auto-generated',
+      `${Object.keys(patch.pkg).length} component${Object.keys(patch.pkg).length===1?'':'s'} sized from live inventory`);
     if (rows.length) logAudit(setProjects, proj.pn, 'Formula generated',
       `${rows.length} ingredient${rows.length===1?'':'s'} extracted${ext.productName?' · '+ext.productName:''}`);
   };
@@ -5014,8 +5183,12 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
 
         <div className="panel">
           <h2>Packaging — {container} · {ctInfo.label}
-            <span className={"fbadge "+(isBulkPack?"warn":"neutral")} style={{marginLeft:"auto"}}>{isBulkPack?"Bulk pack-out":"Finished / retail"}</span></h2>
+            <button className="fbtn sec sm" disabled={locked} onClick={autoGenPackaging}
+              title="Size a complete packaging set from live inventory (container→fill, neck-matched closure, label/desiccant/tamper/shipper). Recalls prior projects with the same spec."
+              style={{marginLeft:"auto"}}>⚡ Auto-Generate Packaging</button>
+            <span className={"fbadge "+(isBulkPack?"warn":"neutral")}>{isBulkPack?"Bulk pack-out":"Finished / retail"}</span></h2>
           {isBulkPack && <div className="falert info">Bulk pack-out ({container}) — no retail bottle/closure/label. Bulk container + master shipper only.</div>}
+          {!isBulkPack && <p className="fsmall" style={{marginTop:-4,marginBottom:8}}>Auto-generated picks are real MISys SKUs with live costs. Every slot stays editable — adjust any pick and its badge clears.</p>}
           {cfg.shell && (
             <div className="pkgr">
               <label>Capsule Shells</label>
@@ -5028,13 +5201,16 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
           {pkgSlots.map(slot => {
             const sel = (proj.pkg||{})[slot.k];
             const fresh = sel ? INV_IX[sel.n] : null;
+            const auto = sel ? (proj.pkgAuto||{})[slot.k] : null;
+            const autoLabel = auto ? (auto.source==='recalled'?'♻ '+auto.reason:'⚡ '+auto.reason) : null;
             return (
               <div className="pkgr" key={slot.k}>
                 <label>{slot.l}</label>
                 <FPkgSearch val={sel} cat={slot.cat} onSelect={item=>setPkg(slot.k,item)}/>
                 <span className="fsmall">{fresh?f$(fresh.u,4):"—"}</span>
                 <span className="fsmall" title="MISys on-hand">{fresh&&fresh.q!=null?`${fN(fresh.q,0)} on hand`:""}</span>
-                <span>{sel&&(!fresh||fresh.u===0)?<span className="fbadge bad">No Cost</span>:""}</span>
+                <span>{sel&&(!fresh||fresh.u===0)?<span className="fbadge bad">No Cost</span>
+                  :(autoLabel?<span className={"fbadge "+(auto.source==='recalled'?"ok":"neutral")} title={auto.source==='recalled'?"Recalled from a prior project with the same spec":"Auto-sized from live inventory — edit to override"}>{autoLabel}</span>:"")}</span>
               </div>
             );
           })}

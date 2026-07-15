@@ -75,6 +75,77 @@
 })(typeof self!=='undefined'?self:this);
 
 </script>
+<script id="enova-formulator">
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+ * ENOVA FORMULATOR — deterministic, AI-independent backend formulation engine.
+ * Builds a COMPLETE, turnkey formula for a given dose form from the customer's actives + the
+ * Enova house-standard system for that form. Every SKU and level is DERIVED FROM ENOVA'S OWN
+ * completed formulas (the corpus), never invented; taste-tuned levels (flavor/sweetener) are
+ * added at a corpus-typical default and FLAGGED "confirm level". Nothing is auto-approved — the
+ * Enova reviewer edits every cell before sign-off. Costing is re-done live by the app (INV_IX +
+ * EnovaMasterBid); this engine only decides WHAT goes in and HOW MUCH per Enova standards.
+ * Validated by test_formulator_capsules.js (regenerates the real capsule corpus). No AI, no network.
+ * ══════════════════════════════════════════════════════════════════════════════════════════ */
+(function (root, factory) {
+  var api = factory();
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.EnovaFormulator = api;
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+  var r2 = function (x, dp) { var p = Math.pow(10, dp == null ? 2 : dp); return Math.round((Number(x) || 0) * p) / p; };
+  var sum = function (a) { return a.reduce(function (s, x) { return s + (Number(x) || 0); }, 0); };
+
+  // KNOWLEDGE BASE — SKUs + levels copied/derived from Enova's corpus (see
+  // claude/Enova_FormulationEngine_PhaseA_SystemMap.md). Forms are added as each is validated.
+  var KB = {
+    Capsules: {
+      unit: "capsule", balanceModel: "shell-fill",
+      // Flow system recurs in 6/10 capsule products. Derived: Mag Stearate 0.75% and Silica 0.75%
+      // of the actives blend (Cycle Support 240ct = 0.75/0.75; AcneVeya = 0.77/0.86; Energy Focus = 0.74).
+      system: [
+        { role: "Lubricant (flow)", name: "Magnesium Stearate (vegetable)", alt: "ALT-RP-0472", pctActives: 0.0075 },
+        { role: "Glidant (flow)", name: "Silicon Dioxide (precipitated silica)", alt: "ALT-RP-0387", pctActives: 0.0075 }
+      ],
+      fill: { role: "Fill / bulking", name: "Microcrystalline Cellulose", alt: "ALT-RP-0493", balance: true },
+      shell: { "000": [950, 1400], "00": [700, 950], "0": [500, 680], "1": [400, 500], "2": [300, 400], "3": [200, 300], "4": [130, 200], "5": [90, 130] },
+      shellOrder: ["5", "4", "3", "2", "1", "0", "00", "000"]
+    }
+  };
+
+  function buildCapsules(req) {
+    var cfg = KB.Capsules;
+    var ss = Math.max(1, Math.round(Number(req.servingSize) || 1)); // capsules per serving
+    var actives = (req.actives || []).filter(function (a) { return Number(a.mg) > 0; });
+    var rows = [], notes = [], warnings = [];
+    var activesMg = sum(actives.map(function (a) { return a.mg; }));
+    if (activesMg <= 0) return { form: "Capsules", rows: [], notes: [], warnings: ["No dosed actives provided."] };
+    actives.forEach(function (a) { rows.push({ name: a.name, alt: a.alt || null, mg: r2(a.mg, 3), role: "Active", source: "request" }); });
+    var flow = [];
+    cfg.system.forEach(function (s) {
+      var mg = r2(activesMg * s.pctActives, 2);
+      if (mg > 0) { flow.push(mg); rows.push({ name: s.name, alt: s.alt, mg: mg, role: s.role, source: "enova-standard", note: (s.pctActives * 100) + "% of actives", confirm: true }); }
+    });
+    var blend = activesMg + sum(flow);
+    var perCap = blend / ss;
+    var shell = cfg.shellOrder.find(function (s) { return cfg.shell[s][1] >= perCap; }) || "000";
+    if (perCap > cfg.shell["000"][1]) warnings.push("One capsule's blend (" + r2(perCap, 0) + " mg) exceeds a size 000 capsule (1400 mg). Increase capsules/serving (currently " + ss + ").");
+    var mcc = r2(Math.max(0, cfg.shell[shell][0] * ss - blend), 2);
+    if (mcc > 0) rows.push({ name: cfg.fill.name, alt: cfg.fill.alt, mg: mcc, role: cfg.fill.role, source: "computed-balance", note: "fills to size " + shell + " minimum" });
+    var finalBlend = blend + mcc;
+    notes.push("Shell: size " + shell + " · fill ≈ " + r2(finalBlend / ss, 0) + " mg/capsule · " + ss + " capsule(s)/serving.");
+    notes.push("Flow system (Mag Stearate + Silica) is Enova's capsule standard at 0.75% of actives each — editable.");
+    if (mcc === 0) notes.push("Actives fill the shell — no bulking needed.");
+    return { form: "Capsules", unit: "capsule", shell: shell, blendPerServing: r2(finalBlend, 2), fillPerCapsule: r2(finalBlend / ss, 2), rows: rows, notes: notes, warnings: warnings };
+  }
+
+  function build(form, req) {
+    var f = String(form || "").toLowerCase();
+    if (/capsule/.test(f)) return buildCapsules(req || {});
+    return { form: form, rows: [], notes: [], warnings: ["No deterministic system defined for form '" + form + "' yet — actives only. (Forms are being built in order: capsules → stickpacks/powder → liquid; gummies use the existing turnkey base.)"] };
+  }
+  return { build: build, buildCapsules: buildCapsules, KB: KB, VERSION: "0.1.0-capsules" };
+});
+</script>
 <script id="enova-calc-engine">
 /*
  * ⚠ NOT WIRED INTO THE LIVE APP — DO NOT USE FOR COSTING AS-IS. ⚠
@@ -1335,6 +1406,28 @@ const FORM_ALIASES = {
   "Gel Sachets":"Gels","Tincture / Liquid":"Tincture","Softgel":"Softgels","Syrup":"Liquid",
 };
 function normalizeForm(f){ const t=(f||'').trim(); return FORM_ALIASES[t] || t; }
+// Resolve an extracted/imported dosage-form string to a REAL FORM_CFG key (the operational config,
+// keyed "Gummies - Retail"/"Gummies - Bulk"/"Capsules"/"Powder"/"Liquid"/"Stickpacks"/"Tablets").
+// This is deliberately NOT normalizeForm(): that collapses to display/stage buckets like "Gummies"
+// or "Softgels" which are NOT FORM_CFG keys — routing an intake through it silently defaulted every
+// GUMMY request to Capsules (the base/coating/packaging then never fired). Returns a valid FORM_CFG
+// key, or null when unrecognized (caller keeps the current form rather than mis-mapping).
+function resolveFormCfgKey(f){
+  const t = String(f||'').trim();
+  if (!t) return null;
+  if (typeof FORM_CFG!=='undefined' && FORM_CFG[t]) return t;   // already a valid key (localExtractF output)
+  const s = t.toLowerCase();
+  let key = null;
+  if (/gumm/.test(s))                            key = /bulk/.test(s) ? 'Gummies - Bulk' : 'Gummies - Retail';
+  else if (/capsule|vcap|veg ?cap|\bcaps\b/.test(s)) key = 'Capsules';
+  else if (/tablet|caplet/.test(s))              key = 'Tablets';
+  else if (/stick|sachet/.test(s))               key = 'Stickpacks';
+  else if (/liquid|tincture|shot|syrup|dropper/.test(s)) key = 'Liquid';
+  else if (/powder|scoop/.test(s))               key = 'Powder';
+  if (key && typeof FORM_CFG!=='undefined' && FORM_CFG[key]) return key;
+  const nf = normalizeForm(t);                                  // last resort: a display alias that IS a key
+  return (typeof FORM_CFG!=='undefined' && FORM_CFG[nf]) ? nf : null;
+}
 
 // Strip leading "Client:/Client Name:/Customer:/Customer Name:" labels from a
 // customer string for display (the raw Salesforce values carry these prefixes).
@@ -4434,6 +4527,9 @@ function localExtractF(rawText){
   for (let line of lines){
     if (!line) continue;
     line = line.replace(/^project description\s*[:\-]\s*/i,"");   // an ingredient may ride on this label line
+    // Strip an "Ingredients:/Actives:/Active Ingredient:" label prefix so the FIRST active on that
+    // line parses to a clean name (e.g. "Ingredients: ACV 1000mg" → "ACV 1000mg", not "Ingredients: ACV").
+    line = line.replace(/^(?:active\s+ingredients?|actives?|ingredients?)\s*[:\-]\s*/i,"");
     if (!line) continue;
     if (SKIP_LINE.test(line)) continue;
     UNIT_RE.lastIndex=0; let m, last=null;
@@ -4525,6 +4621,99 @@ function localExtractF(rawText){
   };
 }
 
+// ── Structured importer for Enova's completed "Master Formula" workbook (the R&D/bid template) ──
+// Enova's existing library of finished formulas (100+) imports EXACTLY as written: the full per-form
+// system — actives PLUS whatever that sheet lists (flavor / sweetener / acid / amino-bitter-block /
+// preservative / solvent / electrolyte …) — and the packaging SKUs come straight from the source of
+// truth, matched to inventory by RM# (ALT code). Deterministic (SheetJS), offline, NEVER invents:
+// $0 / blank lines are carried as-is and flagged. Returns the SAME shape localExtractF does (so it
+// flows through the review grid + Apply) plus structured `packaging`/`shellItem`. Returns null if the
+// workbook is NOT this template — the caller then falls back to the loose text parser.
+function parseMasterFormulaWorkbook(wb){
+  if (!wb || !wb.SheetNames || typeof window==='undefined' || !window.XLSX) return null;
+  const sn = wb.SheetNames.find(n=>/master\s*formula/i.test(n));
+  if (!sn) return null;
+  const grid = window.XLSX.utils.sheet_to_json(wb.Sheets[sn], {header:1, defval:null, blankrows:true});
+  if (!grid.length) return null;
+  const at  = (r,c)=> (grid[r] && grid[r][c]!=null) ? grid[r][c] : null;
+  const t   = (v)=> v==null ? '' : String(v).trim();
+  const num = (v)=>{ if(v==null||v==='') return null; const n=Number(String(v).replace(/[, ]/g,'')); return isFinite(n)?n:null; };
+  const find = (re)=>{ for(let r=0;r<grid.length;r++){ const row=grid[r]||[]; for(let c=0;c<Math.min(row.length,6);c++){ if(re.test(t(row[c]))) return [r,c]; } } return null; };
+  const valRight = (re)=>{ const p=find(re); if(!p) return null; const row=grid[p[0]]||[]; for(let c=p[1]+1;c<row.length;c++){ if(t(row[c])!=='') return row[c]; } return null; };
+
+  // The form indicator (A1) must map to a real dose form, or this isn't the Enova template.
+  const formRaw = t(at(0,0));
+  const dosageForm = resolveFormCfgKey(formRaw);
+  if (!dosageForm) return null;
+
+  // Ingredient table header: "Ingredient" in col A with "RM#"/"Input" alongside.
+  let hr=-1;
+  for(let r=0;r<grid.length;r++){ if(t(at(r,0)).toLowerCase()==='ingredient' && /rm#|input/i.test(t(at(r,1))+t(at(r,6)))){ hr=r; break; } }
+  if (hr<0) return null;
+
+  // Ingredients: header+1 until the totals / finished-goods block. Cols: A name · B RM# · C potency ·
+  // D overage · G "Input, mg" (label claim → the app's inputMg) · I "mg Input Per Serving" (fallback).
+  const ingredients=[]; const flags=[];
+  for(let r=hr+1;r<grid.length;r++){
+    const a=t(at(r,0));
+    if(/total number of ingredients/i.test(a) || /^semi-?finished|^finished good|^blend\b/i.test(a)) break;
+    const altRaw = t(at(r,1));
+    const alt = /^ALT-/i.test(altRaw) ? altRaw.toUpperCase() : null;
+    let inputMg = num(at(r,6)); if(inputMg==null) inputMg = num(at(r,8)); if(inputMg==null) inputMg = num(at(r,9));
+    // A real ingredient row always has a NAME or an RM#/ALT. Requiring one excludes the blend-TOTAL
+    // row (no name, RM# col holds 0/the sum) and anonymous filler — otherwise the total line imports
+    // as a phantom 4,749 mg "ingredient".
+    if(!a && !alt) continue;
+    const pot = num(at(r,2));
+    let potencyPct = pot==null ? 100 : (pot<=1 ? pot*100 : pot);
+    potencyPct = Math.max(1, Math.min(100, potencyPct));
+    const ov = num(at(r,3));
+    const overage = ov==null ? null : (ov<=1 ? ov : ov/100);
+    ingredients.push({ name: a || (alt ? ('RM# '+alt) : '(unnamed component — verify)'), mgPerServing: inputMg!=null?inputMg:0,
+      rawUnitAsWritten: (inputMg!=null?inputMg:0)+' mg', potencyPct, overage, alt });
+    if(!(inputMg>0)) flags.push(`"${a||alt}" has no dose in the sheet — enter its amount before costing.`);
+    if(alt && typeof INV_IX!=='undefined' && !INV_IX[alt]) flags.push(`${alt} (${a}) is not in current inventory — import the latest MISys export to price it.`);
+    if(ingredients.length>=200) break;
+  }
+  if(!ingredients.length) return null;
+
+  // Serving math (per-form: powder counts scoops, liquid is 1 dose, count forms use the serving count).
+  const isPowder=/powder/i.test(formRaw), isLiquid=/liquid|syrup|tincture|shot/i.test(formRaw);
+  const servingsPerUnit = num(valRight(/servings?\s*\/\s*unit|servings?\s*per\s*unit/i)) || 1;
+  let servingSize;
+  if(isPowder) servingSize = num(valRight(/#\s*of\s*scoops/i)) || 1;
+  else if(isLiquid) servingSize = 1;
+  else servingSize = num(valRight(/serving size/i)) || 1;
+
+  // Packaging: real SKUs by slot label in the finished-goods block (RM# in col B, description in col E).
+  const PKG_MAP = [ [/^container\b/i,'container'], [/^closure\b/i,'closure'], [/^label\b/i,'label'],
+    [/^scoop\b/i,'scoop'], [/^desiccant\b/i,'desiccant'], [/neckband|tamper/i,'tamper'],
+    [/^display/i,'display'], [/master case shipper|^shipper\b/i,'shipper'], [/^bag\b|pouch/i,'bag'], [/^foil/i,'foil'] ];
+  const packaging={}; let shellItem=null, containerDesc=null;
+  for(let r=hr+1;r<grid.length;r++){
+    const a=t(at(r,0)); const altP=t(at(r,1));
+    if(!a || !/^ALT-/i.test(altP)) continue;
+    if(/capsule shell|^shell\b/i.test(a)){ shellItem={ n:altP.toUpperCase(), d:t(at(r,4))||a }; continue; }
+    for(const [re,slot] of PKG_MAP){ if(re.test(a) && !packaging[slot]){ packaging[slot]={ n:altP.toUpperCase(), d:t(at(r,4))||a }; if(slot==='container') containerDesc=t(at(r,4)); break; } }
+  }
+
+  const customerName = t(valRight(/customer name|client name/i)) || null;
+  const productName  = t(valRight(/product name/i)) || null;
+  let pn=null; for(let r=0;r<Math.min(grid.length,8) && !pn;r++){ for(const v of (grid[r]||[])){ const m=/\bP\d{5,6}\b/.exec(t(v)); if(m){ pn=m[0]; break; } } }
+
+  return {
+    customerName, productName, pn,
+    dosageForm, isBulk:false, gummyType:null, gummyWeightMg:null,
+    servingSize, servingsPerUnit, batchQuantity:null,
+    ingredients,
+    packaging: Object.keys(packaging).length?packaging:null,
+    shellItem,
+    packagingDescription: containerDesc||null,
+    tierPricing:[], productDescription:null,
+    formulationNotes: [`Imported from the Enova Master Formula workbook (${dosageForm}). Verify each SKU match and dose before approving.`, ...flags.slice(0,12)].join('\n'),
+    source:'masterFormulaWorkbook',
+  };
+}
 const toB64F = f => new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=()=>rej(new Error("Read failed"));r.readAsDataURL(f);});
 function xlsxTxtF(buf){
   const wb=window.XLSX.read(buf,{type:"array",cellDates:true});
@@ -4644,9 +4833,13 @@ function FIntakePanel({onApply, attachments, autoTrigger, autoText, onAutoDone})
     const seedOv = fov!=null ? fov : 0.03;
     setMatches(ings.map(i=>{
       const nm = cleanIngName(i.name);
+      // A workbook import carries the exact RM# (ALT) — match that SKU directly; otherwise fuzzy-match by name.
+      const alt = i.alt || i.importedAlt || null;
+      const direct = (alt && typeof INV_IX!=='undefined' && INV_IX[alt]) ? { item: INV_IX[alt], score: 999, exact: true } : null;
       return { name:nm, mg:i.mgPerServing,
         potencyPct: (Number(i.potencyPct)>0 && Number(i.potencyPct)<=100) ? Number(i.potencyPct) : 100,
-        overage: seedOv, unit:i.rawUnitAsWritten, match:bestGuessF(nm) };
+        overage: (i.overage!=null ? i.overage : seedOv), unit:i.rawUnitAsWritten,
+        alt, match: direct || bestGuessF(nm) };
     }));
     setStatus("done");
   };
@@ -4665,6 +4858,16 @@ function FIntakePanel({onApply, attachments, autoTrigger, autoText, onAutoDone})
     reset();
     try {
       const extn = f.name.split(".").pop().toLowerCase();
+      // Enova Master Formula workbook? Import it STRUCTURED (actives + full system + packaging by RM#),
+      // regardless of engine — it's the source of truth. Non-template .xlsx fall through to text parsing.
+      if(["xlsx","xls"].includes(extn) && window.XLSX){
+        setStatus("reading");
+        try {
+          const wb = window.XLSX.read(await f.arrayBuffer(), {type:"array", cellDates:true});
+          const mf = parseMasterFormulaWorkbook(wb);
+          if(mf){ setWarn(`Imported the Enova Master Formula sheet — ${mf.ingredients.length} line(s) + packaging, matched to inventory by RM#. Review every row before Apply.`); applyResult(mf); return; }
+        } catch(e){ /* not the template / unreadable → fall back to text extraction below */ }
+      }
       const isText = ["docx","xlsx","xls","txt","csv"].includes(extn);
       const isDoc  = ["pdf","png","jpg","jpeg","gif","webp"].includes(extn);
       if(engine==='offline'){
@@ -5017,7 +5220,8 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
           </div>
         ) : (
           <FormulationEditor key={proj.pn} proj={proj} projects={projects}
-            setProjects={setProjects} autoGenPn={autoGenPn} onGenConsumed={onGenConsumed}/>
+            setProjects={setProjects} autoGenPn={autoGenPn} onGenConsumed={onGenConsumed}
+            onRename={setActivePn}/>
         )}
       </div>
     </div>
@@ -5027,11 +5231,33 @@ function FormulationPage({projects, setProjects, onToggleNav, targetPn, autoGenP
 /* ── FormulationEditor: only mounts when a project is loaded, so every hook
    below runs unconditionally and in a stable order. Remounts (key=pn) when the
    selected project changes, resetting the approval checkbox cleanly. ── */
-function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsumed }) {
+function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsumed, onRename }) {
   const { isAdmin } = useRole();                          // only admins may approve/lock/unlock
   const [approveChk, setApproveChk] = useState(false);   // Enova-employee approval gate for Lock & Approve
+  const [pnDraft, setPnDraft] = useState(proj.pn);       // editable Project # (commits on blur/Enter)
   const cfg = FORM_CFG[proj.dosageForm] || FORM_CFG.Capsules;
   const upd = (patch) => setProjects(prev => prev.map(p => p.pn === proj.pn ? { ...p, ...patch } : p));
+
+  // Rename the Project # — the number a project is filed under. NEVER overwrites another project:
+  // if the target number is already in use it is BLOCKED with a warning (pn is the DB primary key).
+  // A valid rename flows through the central setProjects choke-point, which INSERTs the new number
+  // and DELETEs the old one (§22), and re-points the page's active selection via onRename.
+  const renamePn = (raw) => {
+    const next = String(raw||'').trim().toUpperCase();
+    if (!next || next === proj.pn) return false;
+    if (!/^P\d{3,}/.test(next)) { toast('Project number must look like "P#####" (start with P + digits).','warn'); return false; }
+    const clash = (projects||[]).find(p => p.pn !== proj.pn && p.pn === next);
+    if (clash) {
+      toast(`Project number ${next} is already in use${clash.customer?` by ${cleanCustomer(clash.customer)}`:''}${clash.product?` — ${clash.product}`:''}. Choose a different number.`,'err');
+      return false;
+    }
+    const old = proj.pn;
+    setProjects(prev => prev.map(p => p.pn===old ? withAudit({ ...p, pn:next, pnRenamedFrom:old }, 'Project number changed', `${old} → ${next}`) : p));
+    dbAudit(next, 'Project number changed', `${old} → ${next}`);
+    if (typeof onRename === 'function') onRename(next);   // keep this project focused after the rename
+    toast(`Project number changed: ${old} → ${next}`,'ok');
+    return true;
+  };
 
   const totalUPC = (proj.servingSize||1) * (proj.servingsPerUnit||1);   // computed pieces/container
   // ── Pack-out (container) layer — independent of dose form ──
@@ -5206,6 +5432,32 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
   const addIng = () => { if (locked) return; upd({ ingredients:[...(proj.ingredients||[]), {id:Math.random(), item:null, inputMg:0, potencyPct:100}] }); logAudit(setProjects, proj.pn, 'Ingredient row added', ''); };
   const remIng = id => { if (locked) return; const r=(proj.ingredients||[]).find(x=>x.id===id); upd({ ingredients:(proj.ingredients||[]).filter(x=>x.id!==id) }); logAudit(setProjects, proj.pn, 'Ingredient removed', r?((r.item&&r.item.d)||r.importedName||''):''); };
   const mutIng = (id,p) => { if (locked) return; upd({ ingredients:(proj.ingredients||[]).map(r=>r.id===id?{...r,...p}:r) }); };
+  // ── Build the COMPLETE turnkey formula for this form (deterministic Enova Formulator engine).
+  // Keeps the customer actives, then adds/refreshes the Enova house-standard system for the form
+  // (e.g. capsules: 0.75% mag stearate + 0.75% silica flow + MCC balanced to the shell). Every
+  // added row is a real MISys SKU, flagged "Enova standard" and fully editable — nothing approved.
+  const ENOVA_SYS_ALTS = new Set(['ALT-RP-0472','ALT-RP-0387','ALT-RP-0493']);   // capsule flow+fill SKUs
+  const buildTurnkey = () => {
+    if (locked) return;
+    const EFmt = (typeof window!=='undefined' && window.EnovaFormulator) ? window.EnovaFormulator : null;
+    if (!EFmt) { toast('Formulation engine still loading — try again in a moment.','warn'); return; }
+    // Actives = current rows that aren't system components.
+    const activeRows = (proj.ingredients||[]).filter(r => !(r.item && ENOVA_SYS_ALTS.has(r.item.n)));
+    const actives = activeRows.filter(r => (Number(r.inputMg)||0) > 0).map(r => ({
+      name: r.importedName || (r.item && r.item.d) || '', alt: r.item ? r.item.n : null, mg: Number(r.inputMg)||0 }));
+    if (!actives.length) { toast('Add the customer actives first, then Build Full Formula.','warn'); return; }
+    const out = EFmt.build(proj.dosageForm, { actives, servingSize: proj.servingSize, servingsPerUnit: proj.servingsPerUnit });
+    const sysOnly = (out.rows||[]).filter(r => r.source && r.source !== 'request');
+    if (!sysOnly.length) { toast((out.warnings&&out.warnings[0]) || ('No deterministic system for '+proj.dosageForm+' yet.'), 'warn'); return; }
+    const sysRows = sysOnly.map(r => ({ id:Math.random(),
+      item: (r.alt && typeof INV_IX!=='undefined' && INV_IX[r.alt]) ? INV_IX[r.alt] : null,
+      inputMg: r.mg, potencyPct: 100, importedName: r.name, importedAlt: r.alt||null,
+      enovaRole: r.role||null, enovaStandard: true, aiSuggested: true }));
+    upd({ ingredients:[...activeRows, ...sysRows] });
+    logAudit(setProjects, proj.pn, 'Turnkey formula built (Enova Formulator)', [(out.notes||[]).join(' · '), ...(out.warnings||[])].filter(Boolean).join(' | '));
+    const warn = (out.warnings||[]).length ? ' ⚠ '+out.warnings[0] : '';
+    toast('Built the Enova-standard system for '+proj.dosageForm+' ('+sysRows.length+' component(s)) — review every row before approving.'+warn, warn?'warn':'ok');
+  };
   const setBaseItem = (i,item) => { if (locked) return; upd({ baseItems:{...(proj.baseItems||{}), [i]:item} }); };
   const setPkg = (k,item) => { if (locked) return; upd({ pkg:{...(proj.pkg||{}), [k]:item}, pkgAuto:{...(proj.pkgAuto||{}), [k]:undefined} }); };
   // One-click: build a COMPLETE, quote-ready packaging set from live inventory
@@ -5235,7 +5487,7 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
       const r = { id:Math.random(), item:m.match?m.match.item:null,
         inputMg:Number(m.mg)||0,
         potencyPct:(Number(m.potencyPct)>0?Number(m.potencyPct):100),
-        aiSuggested:true, importedName:cleanIngName(m.name) };
+        aiSuggested:true, importedName:cleanIngName(m.name), importedAlt:m.alt||null };
       // carry a per-ingredient overage override only if it differs from nothing
       if (m.overage!=null && isFinite(Number(m.overage))) r.overage = Number(m.overage);
       return r;
@@ -5246,9 +5498,11 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
     const patch = {};
     if (ext.customerName) patch.customer = ext.customerName;
     if (ext.productName)  patch.product  = ext.productName;
-    // Normalize the extracted form to a real Enova form (handles "Gummies - Retail/Bulk", "Tablets", etc.).
-    const nf = normalizeForm(ext.dosageForm);
-    if (nf && FORM_CFG[nf]) { patch.dosageForm = nf; patch.overage = (FORM_CFG[nf].overage)||0.03; }
+    // Resolve to a real FORM_CFG key (NOT normalizeForm — that collapses "Gummies - Retail" to the
+    // non-key "Gummies", which silently defaulted gummy intakes to Capsules and skipped the whole
+    // turnkey gummy base/coating/packaging). resolveFormCfgKey keeps the retail/bulk distinction.
+    const nf = resolveFormCfgKey(ext.dosageForm);
+    if (nf) { patch.dosageForm = nf; patch.overage = (FORM_CFG[nf].overage)||0.03; }
     if (/bulk/i.test(ext.dosageForm||'') || ext.isBulk===true) patch.isBulk = true;
     if (ext.servingSize!=null)     patch.servingSize    = Number(ext.servingSize)||1;
     if (ext.servingsPerUnit!=null) patch.servingsPerUnit = Number(ext.servingsPerUnit)||1;
@@ -5260,9 +5514,16 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
     if (FORM_CFG[gForm] && FORM_CFG[gForm].gummy){
       const gType = ext.gummyType || proj.gummyType || 'sugar';
       patch.gummyType = gType;
-      const gw = ext.gummyWeightMg ? Number(ext.gummyWeightMg)
-        : (proj.gummyWt && Number(proj.gummyWt)>0 ? Number(proj.gummyWt) : (gType==='sugarFree' ? 3000 : 4500));
-      patch.gummyWt = gw;
+      // Enova templates: sugar 4500 mg/gummy, sugar-free 3000 mg/gummy. An explicit stated weight
+      // wins. Otherwise keep the project's weight ONLY if it's already this same gummy variant (a
+      // user may have tuned it) — a fresh conversion or a variant switch uses the template default,
+      // so a sugar-free gummy isn't left at the sugar weight (which also mis-sizes the packaging).
+      const variantDefault = gType==='sugarFree' ? 3000 : 4500;
+      const formChanged = !!(patch.dosageForm && patch.dosageForm !== proj.dosageForm);
+      const typeChanged = gType !== (proj.gummyType||null);
+      const keepExisting = !formChanged && !typeChanged && Number(proj.gummyWt)>0;
+      patch.gummyWt = ext.gummyWeightMg ? Number(ext.gummyWeightMg)
+        : (keepExisting ? Number(proj.gummyWt) : variantDefault);
     } else {
       if (ext.gummyWeightMg)  patch.gummyWt  = Number(ext.gummyWeightMg);
       if (ext.gummyType)      patch.gummyType = ext.gummyType;
@@ -5285,6 +5546,13 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
       patch.unitsPerContainer = null;
     }
     if (rows.length) { patch.ingredients = rows; patch.baseItems = {}; }
+    // A structured Master Formula import brings the REAL packaging SKUs from the sheet (matched by
+    // RM#) — use them verbatim instead of auto-generating, so nothing is invented. Skips the
+    // auto-packaging step below because merged.pkg is now non-empty.
+    if (ext.packaging && typeof ext.packaging==='object' && Object.keys(ext.packaging).length) {
+      patch.pkg = { ...ext.packaging }; patch.pkgAuto = {};
+    }
+    if (ext.shellItem) patch.shellItem = ext.shellItem;
     // ── Auto-generate a complete, quote-ready packaging set ──────────────
     // Only when packaging is currently empty (form change cleared it, or a
     // fresh project) — never clobber packaging an Enova user already chose.
@@ -5333,7 +5601,13 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
         <div className="panel">
           <h2>Product Setup</h2>
           <div className="fr">
-            <div className="ff" style={{maxWidth:110}}><label>Project #</label><input className="ro" disabled value={proj.pn}/></div>
+            <div className="ff" style={{maxWidth:120}}><label>Project #</label>
+              <input value={pnDraft} disabled={locked}
+                title="Editable. A project number can't overwrite another project — you'll be warned if it's already in use."
+                onChange={e=>setPnDraft(e.target.value)}
+                onKeyDown={e=>{ if(e.key==='Enter'){ e.target.blur(); } else if(e.key==='Escape'){ setPnDraft(proj.pn); e.target.blur(); } }}
+                onBlur={()=>{ if(pnDraft.trim().toUpperCase()!==proj.pn && !renamePn(pnDraft)) setPnDraft(proj.pn); }}/>
+              {pnDraft.trim().toUpperCase()!==proj.pn && <span className="fsmall">press Enter to rename · Esc to cancel</span>}</div>
             <div className="ff"><label>Customer</label><input value={proj.customer||''} onChange={e=>upd({customer:e.target.value})}/></div>
             <div className="ff"><label>Product Name</label><input value={proj.product||''} onChange={e=>upd({product:e.target.value})}/></div>
             <div className="ff"><label>Dosage Form</label>
@@ -5414,7 +5688,10 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
                   <tr key={row.id} className={nm?"f-missing":nc?"f-flagged":row.aiSuggested?"f-ai":""}>
                     <td>
                       <FInvSearch val={row.item?row.item.d:""} onSelect={s=>mutIng(row.id,{item:s})}/>
-                      {row.item && <div className="fsmall">{row.item.n}</div>}
+                      {row.item ? <div className="fsmall">{row.item.n}</div>
+                        : (row.importedName||row.importedAlt) &&
+                          <div className="fsmall" style={{color:'var(--warn)'}} title="Imported from the request/workbook but not matched to a MISys SKU — search above to match, or import fresh inventory.">
+                            {row.importedName||'—'}{row.importedAlt?' · '+row.importedAlt:''} <span style={{opacity:.7}}>— search to match</span></div>}
                     </td>
                     <td><input disabled={locked} className="fcell" type="number" min="0" value={row.inputMg} onChange={e=>mutIng(row.id,{inputMg:Number(e.target.value)||0})}/></td>
                     <td><input disabled={locked} className="fcell" type="number" min="0" max="100" value={row.potencyPct} onChange={e=>mutIng(row.id,{potencyPct:Number(e.target.value)||0})}/></td>
@@ -5434,7 +5711,11 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
               })}
             </tbody>
           </table>
-          <div className="fbrow"><button className="fbtn sec sm" disabled={locked} onClick={addIng}>+ Add Ingredient</button></div>
+          <div className="fbrow">
+            <button className="fbtn sec sm" disabled={locked} onClick={addIng}>+ Add Ingredient</button>
+            {/capsule/i.test(proj.dosageForm||'') && <button className="fbtn navy sm" disabled={locked} onClick={buildTurnkey}
+              title="Add the Enova house-standard system for this form (flow agents + fill balanced to the shell), derived from Enova's own formulas. Every added row is editable.">⚙ Build Full Formula (Enova standard)</button>}
+          </div>
           <div className="fts">
             <div><span className="ftl">Total mg/serving</span><span className="ftv">{fN(actMg,1)}</span></div>
             <div><span className="ftl">Cost/serving</span><span className="ftv">{f$(actCPS,4)}</span></div>

@@ -1831,6 +1831,17 @@ function docStyle(){ return `<style>body{font:12px Arial,Helvetica,sans-serif;co
 // unit = ONE piece (piecesPerContainer = 1). Ingredient MASS scales with SERVINGS; gummy/base/
 // shell mass with PIECES. Returns both batch totals so BOM/MMR/MO and the workbook all agree —
 // no 60× bulk overcount.
+// ── Enova house-standard finished-goods packaging costs ──────────────────────
+// These are FIXED Enova rules, NOT blank-material SKU prices from MISys:
+//   • Any printed finished LABEL is a flat $0.15 each — it overrides the blank
+//     label-stock SKU cost (e.g. a $0.0558 blank roll).
+//   • A STICK PACK is its own label at $0.20 each. A stick-pack box is the sellable
+//     unit and holds N stick packs (= N servings at 1 serving/stick), so the box
+//     carries N × $0.20 — charged per stick pack (like a capsule shell), not once.
+// A real SKU is still selected for each slot (BOM traceability); only the COST is
+// pinned to the house standard. Single source of truth for the editor + documents.
+const ENOVA_LABEL_COST = 0.15;
+const ENOVA_STICKPACK_COST = 0.20;
 function docBatchBasis(p){
   const cb = p.cogsBreakdown || {};
   const ss = Number(p.servingSize)||1;
@@ -1874,12 +1885,17 @@ function docPackagingRows(p){
   ((ct&&ct.pkg)||[]).forEach(slot=>{
     const sel=(p.pkg||{})[slot.k]; if(!sel) return;
     const f=(typeof INV_IX!=='undefined'&&INV_IX[sel.n])||sel;
+    // Stick pack foil IS the label at the house-standard $0.20/stick — one per PIECE
+    // (basis.pieces stick packs in the batch), like a capsule shell, not one per box.
+    if (slot.k==='foil'){ rows.push({ name:slot.l+' — '+((f&&f.d)||sel.n||'—'), alt:(f&&f.n)||null, qtyEach:basis.pieces, uom:'sticks', u:ENOVA_STICKPACK_COST }); return; }
     // The master shipper and a retail display/inner box each hold a full case of finished units
     // (and for a BULK order EVERY packaging item is shared across a master case), so the batch
     // needs ceil(units ÷ case pack) of them — not one per unit. All other slots are one per unit.
     const perCase = basis.isBulk || slot.k==='shipper' || slot.k==='display';
     const qtyEach = perCase ? (qty>0 ? Math.max(1, Math.ceil(qty/(casePack||1))) : 0) : qty;
-    rows.push({ name:slot.l+' — '+((f&&f.d)||sel.n||'—'), alt:(f&&f.n)||null, qtyEach, uom:perCase?'cases':'ea', u:f&&f.u!=null?f.u:null });
+    // Any printed label is the house-standard flat $0.15, overriding the blank label SKU price.
+    const uCost = slot.k==='label' ? ENOVA_LABEL_COST : (f&&f.u!=null?f.u:null);
+    rows.push({ name:slot.l+' — '+((f&&f.d)||sel.n||'—'), alt:(f&&f.n)||null, qtyEach, uom:perCase?'cases':'ea', u:uCost });
   });
   return rows;
 }
@@ -5318,7 +5334,14 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
   let pkgPerUnit = 0, pkgPerCase = 0;
   pkgSlots.forEach(slot=>{
     const sel = (proj.pkg||{})[slot.k]; if (!sel) return;
-    const f = INV_IX[sel.n]; const u = f?f.u:0;
+    const f = INV_IX[sel.n];
+    // House-standard finished-goods costs override the blank-material SKU price:
+    //  • Stick pack foil IS the label at $0.20/stick — charged per stick pack in the
+    //    box (piecesPerContainer sticks), like a capsule shell, not once per box.
+    if (slot.k==='foil') { pkgPerUnit += ENOVA_STICKPACK_COST * piecesPerContainer; return; }
+    let u = f?f.u:0;
+    //  • Any printed label is a flat $0.15, regardless of the blank label-stock price.
+    if (slot.k==='label') u = ENOVA_LABEL_COST;
     if (isPerCasePkgSlot(slot.k)) pkgPerCase += u; else pkgPerUnit += u;
   });
   const pkgRaw = pkgPerUnit + pkgPerCase;   // total packaging spend per master case (display/debug)
@@ -5746,14 +5769,18 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
             const fresh = sel ? INV_IX[sel.n] : null;
             const auto = sel ? (proj.pkgAuto||{})[slot.k] : null;
             const autoLabel = auto ? (auto.source==='recalled'?'♻ '+auto.reason:'⚡ '+auto.reason) : null;
+            // House-standard finished-goods cost overrides the blank-material SKU price.
+            const houseStd = slot.k==='label' ? ENOVA_LABEL_COST : slot.k==='foil' ? ENOVA_STICKPACK_COST : null;
+            const effUnit = !sel ? null : (houseStd!=null ? houseStd : (fresh?fresh.u:null));
             return (
               <div className="pkgr" key={slot.k}>
                 <label>{slot.l}</label>
                 <FPkgSearch val={sel} cat={slot.cat} onSelect={item=>setPkg(slot.k,item)}/>
-                <span className="fsmall">{fresh?f$(fresh.u,4):"—"}</span>
+                <span className="fsmall">{effUnit!=null?f$(effUnit,4)+(houseStd!=null&&slot.k==='foil'?'/stick':''):"—"}</span>
                 <span className="fsmall" title="MISys on-hand">{fresh&&fresh.q!=null?`${fN(fresh.q,0)} on hand`:""}</span>
-                <span>{sel&&(!fresh||fresh.u===0)?<span className="fbadge bad">No Cost</span>
-                  :(autoLabel?<span className={"fbadge "+(auto.source==='recalled'?"ok":"neutral")} title={auto.source==='recalled'?"Recalled from a prior project with the same spec":"Auto-sized from live inventory — edit to override"}>{autoLabel}</span>:"")}</span>
+                <span>{houseStd!=null&&sel?<span className="fbadge ok" title={slot.k==='label'?"Enova standard: any printed label is $0.15 each (overrides the blank label-stock SKU price)":"Enova standard: a stick pack is its own label at $0.20 each — the box carries one per stick pack"}>Enova std {f$(houseStd,2)}{slot.k==='foil'?'/stick':''}</span>
+                  :(sel&&(!fresh||fresh.u===0)?<span className="fbadge bad">No Cost</span>
+                  :(autoLabel?<span className={"fbadge "+(auto.source==='recalled'?"ok":"neutral")} title={auto.source==='recalled'?"Recalled from a prior project with the same spec":"Auto-sized from live inventory — edit to override"}>{autoLabel}</span>:""))}</span>
               </div>
             );
           })}

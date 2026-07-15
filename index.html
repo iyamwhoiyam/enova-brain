@@ -422,6 +422,8 @@ body{font-family:var(--sans);font-size:13px;color:var(--ink);background:var(--pa
 .rep-btn:hover,.flt-btn:hover{border-color:var(--navy);color:var(--navy);}
 .rep-btn.active{background:var(--navy);color:#fff;border-color:var(--navy);font-weight:600;}
 .flt-btn.active{background:var(--teal);color:#fff;border-color:var(--teal);}
+.rep-btn.danger,.flt-btn.danger{color:var(--bad);border-color:var(--bad);}
+.rep-btn.danger:hover,.flt-btn.danger:hover{background:var(--bad);color:#fff;border-color:var(--bad);}
 
 /* KPIs — Shop-Ware stat tiles */
 .kpis{display:flex;gap:10px;align-items:stretch;margin-left:auto;flex-shrink:0;}
@@ -1122,6 +1124,30 @@ input.fcell:focus{border-color:var(--teal);outline:none;background:#fff;}
 .pp-review-btn:hover{filter:brightness(1.06);}
 .pp-review-btn:disabled{opacity:.5;cursor:default;}
 .pp-review-msg{font-size:11.5px;font-weight:700;color:var(--ok);}
+/* ── Transient toast notices (replace jarring native alert) — locked-token accents ── */
+.toast-wrap{position:fixed;bottom:18px;right:18px;z-index:400;display:flex;flex-direction:column;gap:8px;max-width:340px;}
+.toast{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--navy);border-radius:6px;
+  padding:10px 14px;font-size:12.5px;color:var(--ink);line-height:1.4;cursor:pointer;
+  box-shadow:0 6px 22px rgba(20,40,60,.14);animation:toastIn .16s ease-out;}
+.toast.ok{border-left-color:var(--ok);}
+.toast.warn{border-left-color:var(--warn);}
+.toast.err{border-left-color:var(--bad);}
+.toast.info{border-left-color:var(--teal);}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+/* ── Styled confirm modal (replace jarring native confirm) ── */
+.cfm-overlay{position:fixed;inset:0;z-index:500;background:rgba(20,32,44,.44);display:flex;
+  align-items:center;justify-content:center;padding:24px;animation:toastIn .12s ease-out;}
+.cfm-box{background:var(--card);border-radius:10px;max-width:420px;width:100%;padding:22px 24px;
+  box-shadow:0 12px 40px rgba(20,40,60,.24);}
+.cfm-title{font-size:15px;font-weight:800;color:var(--navy-dk);margin-bottom:8px;}
+.cfm-msg{font-size:13px;color:var(--ink);line-height:1.5;margin-bottom:18px;}
+.cfm-actions{display:flex;justify-content:flex-end;gap:10px;}
+.cfm-btn{font-family:var(--sans);font-size:12.5px;font-weight:700;padding:8px 16px;border-radius:5px;
+  cursor:pointer;border:1.5px solid;transition:opacity .12s;}
+.cfm-btn:hover{opacity:.85;}
+.cfm-btn.ghost{background:#fff;border-color:var(--line);color:var(--navy-dk);}
+.cfm-btn.primary{background:var(--navy);border-color:var(--navy);color:#fff;}
+.cfm-btn.danger{background:var(--bad);border-color:var(--bad);color:#fff;}
 </style>
 </head>
 <body>
@@ -1478,6 +1504,25 @@ let CURRENT_IS_ADMIN = true;
 // dropping them silently. App subscribes via _onWriteError; helpers call notifyWriteError.
 let _onWriteError = null;
 function notifyWriteError(msg){ try { if (typeof _onWriteError==='function') _onWriteError(msg); } catch(_){} }
+// Transient in-app TOAST — replaces jarring native alert() for informational notices. kind:
+// 'info'|'ok'|'warn'|'err'. Falls back to window.alert only if the ToastHost isn't mounted
+// (e.g. server-side render / early boot), so it's always safe to call from module scope.
+let _onToast = null;
+function toast(msg, kind){
+  try { if (typeof _onToast==='function'){ _onToast(msg, kind||'info'); return; } } catch(_){}
+  if (typeof window!=='undefined' && window.alert) window.alert(msg);
+}
+// Styled in-app CONFIRM — replaces native confirm(). Returns Promise<boolean>. Accepts a string
+// or {message,title,confirmLabel,cancelLabel,danger}. Falls back to window.confirm if the
+// ConfirmHost isn't mounted, so callers can always `await` it with the same semantics.
+let _onConfirm = null;
+function confirmDialog(opts){
+  const o = (typeof opts==='string') ? { message: opts } : (opts || {});
+  return new Promise(resolve=>{
+    try { if (typeof _onConfirm==='function'){ _onConfirm({ ...o, resolve }); return; } } catch(_){}
+    resolve(typeof window!=='undefined' && window.confirm ? window.confirm(o.message||'') : true);
+  });
+}
 function friendlyWriteError(error){
   const m = (error && (error.message||error.msg)) || String(error||'');
   if (error && (error.code==='42501') || /row-level security|violates row-level|permission denied|not authorized/i.test(m))
@@ -1575,7 +1620,7 @@ function buildAuditWorkbook(p){
     {name:'Batch Cost Build', aoa:bc}, {name:'Bid', aoa:bid} ] };
 }
 function exportProjectWorkbook(p){
-  if (typeof XLSX==='undefined' || !XLSX.utils){ if(typeof window!=='undefined'&&window.alert) window.alert('Spreadsheet library still loading — try again in a moment.'); return; }
+  if (typeof XLSX==='undefined' || !XLSX.utils){ toast('Spreadsheet library still loading — try again in a moment.','warn'); return; }
   const d = buildAuditWorkbook(p);
   const wb = XLSX.utils.book_new();
   d.sheets.forEach(s => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s.aoa), s.name));
@@ -1654,8 +1699,7 @@ function passIntegrityGate(proj, setProjects, actionLabel){
   if (!rz.errors.length) return true;
   // Overriding a data-integrity block is an admin-only decision.
   if (!CURRENT_IS_ADMIN){
-    if (typeof window!=='undefined' && window.alert)
-      window.alert(`${actionLabel} is blocked — this formula has data-integrity issues (${rz.errors.join('; ')}) and only an admin can override. Ask an Enova admin.`);
+    toast(`${actionLabel} is blocked — this formula has data-integrity issues (${rz.errors.join('; ')}) and only an admin can override. Ask an Enova admin.`,'err');
     return false;
   }
   const msg = `⚠ ${actionLabel} — data-integrity issues that UNDERSTATE COGS:\n\n`
@@ -2333,7 +2377,7 @@ function ImportProjectsModal({ projects, setProjects, onClose }){
                       <td style={{textAlign:'right',fontFamily:'var(--mono)'}}>{rec.cogsPerUnit!=null?money(rec.cogsPerUnit):'—'}</td>
                       <td style={{textAlign:'right'}}>{rec.nIngredients!=null?`${rec.matched}/${rec.nIngredients}`:'—'}</td>
                       <td style={{textAlign:'right',fontFamily:'var(--mono)',color:price!=null?'var(--ok)':'#b0b8c0'}}>
-                        {price!=null?money(price):'blank'}</td>
+                        {price!=null?money(price):'—'}</td>
                       <td style={{fontSize:10.5,color:'#8a6500',maxWidth:230}}>
                         {(rec.warnings||[]).join(' ')||'—'}</td>
                     </tr>
@@ -3525,7 +3569,7 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onSendR
           <input type="date" className="search" style={{minWidth:130,padding:'5px 8px'}}
             value={dateTo} onChange={e => setDateTo(e.target.value)} title="To date"/>
           {(dateFrom || dateTo) && (
-            <button className="rep-btn" style={{color:'#d9534f',borderColor:'#d9534f'}}
+            <button className="rep-btn danger"
               onClick={() => {setDateFrom('');setDateTo('');}}>✕ Clear dates</button>
           )}
           <div className="sep"/>
@@ -3548,7 +3592,7 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onSendR
             </button>
           ))}
           {pmFilter !== 'All' && (
-            <button className="rep-btn" style={{color:'#d9534f',borderColor:'#d9534f'}} onClick={() => setPmFilter('All')}>✕ Clear</button>
+            <button className="rep-btn danger" onClick={() => setPmFilter('All')}>✕ Clear</button>
           )}
         </div>
       </div>
@@ -3560,7 +3604,7 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onSendR
           <div className="sl">Pipeline · Cost / Revenue</div>
           <div className="duo">
             <div className="d"><span className="dl">Cost</span><span className="dv cost">{money(roll.pipeCost)}</span></div>
-            <div className="d"><span className="dl">Revenue</span><span className="dv rev">{roll.pricedBatchedN?money(roll.pipeRev):'blank'}</span></div>
+            <div className="d"><span className="dl">Revenue</span><span className="dv rev">{roll.pricedBatchedN?money(roll.pipeRev):'—'}</span></div>
           </div>
           <div className="ss">{roll.batchedN} batched · {roll.np} priced</div>
         </div>
@@ -3569,7 +3613,7 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onSendR
           <div className="sl">In-Production · Cost / Rev</div>
           <div className="duo">
             <div className="d"><span className="dl">Cost</span><span className="dv cost">{money(roll.prodCost)}</span></div>
-            <div className="d"><span className="dl">Revenue</span><span className="dv rev">{roll.prodRev?money(roll.prodRev):'blank'}</span></div>
+            <div className="d"><span className="dl">Revenue</span><span className="dv rev">{roll.prodRev?money(roll.prodRev):'—'}</span></div>
           </div>
           <div className="ss">Stage: In Production</div>
         </div>
@@ -3578,7 +3622,7 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onSendR
           <div className="sl">Per Unit (avg)</div>
           <div className="duo">
             <div className="d"><span className="dl">Cost</span><span className="dv cost">{roll.n?f4(roll.avgCost):'—'}</span></div>
-            <div className="d"><span className="dl">Revenue</span><span className="dv rev">{roll.np?f4(roll.avgRev):'blank'}</span></div>
+            <div className="d"><span className="dl">Revenue</span><span className="dv rev">{roll.np?f4(roll.avgRev):'—'}</span></div>
           </div>
           <div className="ss">{roll.n} costed · {roll.np} priced</div>
         </div>
@@ -5167,14 +5211,13 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
   // One-click: build a COMPLETE, quote-ready packaging set from live inventory
   // (sized to the finished-unit fill, neck-matched closure, label/desiccant/tamper/
   // shipper + scoop/shell as needed). Recalls a prior project's picks for the same spec.
-  const autoGenPackaging = () => {
+  const autoGenPackaging = async () => {
     if (locked) return;
     const cur = proj.pkg && Object.keys(proj.pkg).length ? proj.pkg : null;
-    if (cur && typeof window!=='undefined' && window.confirm &&
-        !window.confirm('Replace the current packaging with an auto-generated set sized from live inventory?')) return;
+    if (cur && !(await confirmDialog({ message:'Replace the current packaging with an auto-generated set sized from live inventory?', confirmLabel:'Replace' }))) return;
     let gen; try { gen = generatePackaging(proj, projects); } catch(e){ gen = null; }
     if (!gen || !gen.pkg || !Object.keys(gen.pkg).length){
-      if (typeof window!=='undefined' && window.alert) window.alert('No matching packaging found in live inventory for this spec. Check the container type and form.');
+      toast('No matching packaging found in live inventory for this spec. Check the container type and form.','warn');
       return;
     }
     const patch = { pkg: gen.pkg, pkgAuto: gen.meta };
@@ -5185,9 +5228,9 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
       `${Object.keys(gen.pkg).length} component${Object.keys(gen.pkg).length===1?'':'s'} sized from live inventory${gen.recallSrc?' · recalled from '+gen.recallSrc:''}`);
   };
 
-  const handleIntakeApply = (ext, matches) => {
+  const handleIntakeApply = async (ext, matches) => {
     // Never overwrite an approved/locked formula without an explicit unlock.
-    if (locked) { if (typeof window!=='undefined' && window.alert) window.alert('This formula is approved & locked. Unlock it first to replace the formula.'); return; }
+    if (locked) { toast('This formula is approved & locked. Unlock it first to replace the formula.','warn'); return; }
     const rows = matches.map(m => {
       const r = { id:Math.random(), item:m.match?m.match.item:null,
         inputMg:Number(m.mg)||0,
@@ -5199,8 +5242,7 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
     });
     // Guard: don't silently overwrite an existing formula.
     if (rows.length && (proj.ingredients||[]).length &&
-        typeof window!=='undefined' && window.confirm &&
-        !window.confirm(`Replace the current ${(proj.ingredients||[]).length}-ingredient formula on ${proj.pn} with the ${rows.length} extracted ingredient(s)?`)) return;
+        !(await confirmDialog({ message:`Replace the current ${(proj.ingredients||[]).length}-ingredient formula on ${proj.pn} with the ${rows.length} extracted ingredient(s)?`, confirmLabel:'Replace' }))) return;
     const patch = {};
     if (ext.customerName) patch.customer = ext.customerName;
     if (ext.productName)  patch.product  = ext.productName;
@@ -5542,7 +5584,7 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
             )}
             {!costDrift && !formulaChanged && <div className="falert ok" style={{marginTop:8}}>✓ Live cost matches the approved snapshot. No drift.</div>}
             <div className="fbrow" style={{marginTop:10}}>
-              <button className="fbtn sec" disabled={!isAdmin} title={isAdmin?'':'Only an admin can unlock'} onClick={()=>{ if(!window.confirm||window.confirm('Unlock this approved formula for editing? Costs will resume auto-updating.')) unlock(); }}>🔓 Unlock to edit</button>
+              <button className="fbtn sec" disabled={!isAdmin} title={isAdmin?'':'Only an admin can unlock'} onClick={async()=>{ if(await confirmDialog({message:'Unlock this approved formula for editing? Costs will resume auto-updating.',title:'Unlock formula',confirmLabel:'Unlock'})) unlock(); }}>🔓 Unlock to edit</button>
               {(costDrift||formulaChanged) && <button className="fbtn ok" onClick={reapprove}>Re-approve at current cost ({f$(cogsPerUnit)})</button>}
               <span className="fsmall">Unlocking is recorded in the audit trail.</span>
             </div>
@@ -5804,8 +5846,8 @@ function DocumentsPage({ projects, setProjects, onToggleNav }){
     dbAudit(pn, 'E-SIGNATURE · MFSO signed → In Production', 'Authorized by '+(CURRENT_ACTOR.name||CURRENT_ACTOR.email||''));
     setConfirmSign(false);
   };
-  const unsignMFSO = () => {
-    if (typeof window!=='undefined' && window.confirm && !window.confirm('Revert the MFSO signature for '+pn+'? This takes the project back out of the signed/production state.')) return;
+  const unsignMFSO = async () => {
+    if (!(await confirmDialog({ message:'Revert the MFSO signature for '+pn+'? This takes the project back out of the signed/production state.', title:'Revert MFSO signature', confirmLabel:'Revert', danger:true }))) return;
     setProjects(prev => prev.map(x => x.pn===pn
       ? withAudit({ ...x, mfsoSigned:{ ...(x.mfsoSigned||{}), signed:false, revokedBy:CURRENT_ACTOR.email, revokedTs:nowISO() } }, 'MFSO signature reverted', '')
       : x));
@@ -6572,8 +6614,8 @@ function InventoryPage({ onToggleNav, onCloudPush, cloudStatus }){
     }
     setFname('');
   };
-  const revert = () => {
-    if (typeof window!=='undefined' && window.confirm && !window.confirm('Revert to the bundled inventory snapshot and discard the imported one?')) return;
+  const revert = async () => {
+    if (!(await confirmDialog({ message:'Revert to the bundled inventory snapshot and discard the imported one?', title:'Revert inventory', confirmLabel:'Revert', danger:true }))) return;
     try { localStorage.removeItem('enova:inventory'); localStorage.removeItem('enova:inventoryMeta'); } catch(e){}
     applyInventory(INVENTORY_EMBEDDED.slice(), { persist:false });
     setTick(t=>t+1);
@@ -6726,6 +6768,56 @@ function useUserRole(email){
   return { role: role || (sb ? null : 'admin'), isAdmin };
 }
 
+// Transient toast stack — subscribes to the module-level toast() emitter. Auto-dismisses;
+// click to dismiss early. Portaled to <body> so it floats above every page/panel.
+function ToastHost(){
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    _onToast = (msg, kind) => {
+      const id = Math.random().toString(36).slice(2, 9);
+      setItems(t => [...t, { id, msg, kind }]);
+      setTimeout(() => setItems(t => t.filter(x => x.id !== id)), 4600);
+    };
+    return () => { _onToast = null; };
+  }, []);
+  if (!items.length) return null;
+  const drop = (id) => setItems(t => t.filter(x => x.id !== id));
+  return ReactDOM.createPortal(
+    <div className="toast-wrap">
+      {items.map(t => (
+        <div key={t.id} className={"toast " + (t.kind || 'info')} onClick={() => drop(t.id)} title="Dismiss">{t.msg}</div>
+      ))}
+    </div>, document.body);
+}
+// Styled confirm modal — subscribes to confirmDialog(). Resolves true on confirm, false on
+// cancel / overlay-click / Escape. Portaled to <body>.
+function ConfirmHost(){
+  const [req, setReq] = useState(null);
+  useEffect(() => {
+    _onConfirm = (o) => setReq(o);
+    return () => { _onConfirm = null; };
+  }, []);
+  useEffect(() => {
+    if (!req) return;
+    const onKey = (e) => { if (e.key === 'Escape') done(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [req]);
+  if (!req) return null;
+  const done = (v) => { try { req.resolve(v); } catch(_){} setReq(null); };
+  return ReactDOM.createPortal(
+    <div className="cfm-overlay" onClick={() => done(false)}>
+      <div className="cfm-box" onClick={e => e.stopPropagation()}>
+        <div className="cfm-title">{req.title || 'Please confirm'}</div>
+        <div className="cfm-msg">{req.message}</div>
+        <div className="cfm-actions">
+          <button className="cfm-btn ghost" onClick={() => done(false)}>{req.cancelLabel || 'Cancel'}</button>
+          <button className={"cfm-btn " + (req.danger ? 'danger' : 'primary')} onClick={() => done(true)}>{req.confirmLabel || 'Confirm'}</button>
+        </div>
+      </div>
+    </div>, document.body);
+}
+
 function App({ session }) {
   const email = (session && session.user && session.user.email) || null;
   const { isAdmin, role } = useUserRole(email);
@@ -6816,6 +6908,8 @@ function App({ session }) {
           </div>
         )}
       </div>
+      <ToastHost />
+      <ConfirmHost />
       <div className="app-page">
         {role==='viewer' && <div className="falert warn" style={{margin:0,borderRadius:0,zIndex:150}}>👁 <strong>Viewer access</strong> — you can see everything but can't save changes. Ask an Enova admin (Carlos, Tong, Joseph, Marina, Nick, Jonathan, or Ryan) for edit access.</div>}
         {writeErr && <div className="falert err" style={{margin:0,borderRadius:0,display:'flex',alignItems:'center',gap:8,zIndex:150}}><span style={{flex:1}}>⚠ {writeErr}</span><button className="fbtn sec sm" onClick={()=>setWriteErr(null)}>Dismiss</button></div>}

@@ -1007,6 +1007,22 @@ table.ptbl tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--teal);}
 .btn.del{background:#fff;border-color:var(--bad);color:var(--bad);}
 
 .small{font-size:10.5px;color:#857b6c;}
+
+/* ── MFSO editor (every cell/column/row editable) ── */
+.mfe-sec{margin-top:14px;} .mfe-sec h3{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink);background:#eef2f6;border-left:3px solid var(--ink);padding:5px 8px;margin:0 0 8px;}
+.mfe-sec h4{font-size:11px;color:#556;margin:10px 0 4px;font-weight:700;}
+.mfe-in{width:100%;box-sizing:border-box;font-size:11px;padding:3px 5px;border:1px solid #cfd6de;border-radius:3px;background:#fff;color:var(--ink);}
+.mfe-in:focus{outline:none;border-color:var(--ink);}
+.mfe-in:disabled{background:#f4f5f7;color:#889;}
+.mfe-tbl{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:4px;}
+.mfe-tbl th{text-align:left;font-size:10px;color:#667;text-transform:uppercase;letter-spacing:.03em;padding:3px 5px;border-bottom:1px solid #d7dde3;background:#f7f9fb;}
+.mfe-tbl td{padding:2px 4px;border-bottom:1px solid #eef1f4;vertical-align:middle;}
+.mfe-tbl td.num{width:90px;} .mfe-tbl td.act{width:30px;text-align:center;}
+.mfe-grid{display:grid;grid-template-columns:150px 1fr;gap:4px 8px;align-items:center;margin-bottom:6px;}
+.mfe-grid label{font-size:11px;color:#556;}
+.mfe-del{border:1px solid var(--bad);background:#fff;color:var(--bad);border-radius:3px;width:22px;height:22px;line-height:1;cursor:pointer;font-size:12px;padding:0;}
+.mfe-add{border:1px dashed #9aa7b4;background:#fff;color:#556;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;margin-top:2px;}
+.mfe-del:disabled,.mfe-add:disabled{opacity:.4;cursor:not-allowed;}
 </style>
 <style>
 /* ── App shell: sidebar + page switcher ── */
@@ -1722,6 +1738,9 @@ const FORMULATION_DEFAULTS = {
   // the remainder). Powder & stickpack use servWtMg (mg per serving/stick); liquids use servVolMl
   // (mL per serving). Null until set by the intake or the reviewer.
   servWtMg:null, servVolMl:null,
+  // Editable MFSO document overrides (all 8 sections). Null → the printable auto-fills from the
+  // formula/costing/packaging (mfsoDefaults); once edited, holds the reviewer's version.
+  mfso:null,
 };
 
 function emptyProject(pn) {
@@ -2123,73 +2142,113 @@ function mfsoPieceWord(form){
   return 'Unit(s)';
 }
 
+// ── MFSO editable data model ─────────────────────────────────────────────────
+// mfsoDefaults(p) derives the FULL structured MFSO from the formula/costing/packaging
+// (the auto-filled draft). mfsoModel(p) merges the reviewer's saved edits (p.mfso) over
+// those defaults, so BOTH the printable (buildMFSO) and the editor read one source of truth.
+// Every table/cell here is user-editable in the MFSO editor; legal/boilerplate stays verbatim.
+function mfsoDefaults(p){
+  const rows = docIngredientRows(p);
+  const cb = p.cogsBreakdown||{};
+  const pieceW = mfsoPieceWord(p.dosageForm);
+  const pieces = cb.piecesPerContainer!=null?cb.piecesPerContainer:((Number(p.servingSize)||1)*(Number(p.servingsPerUnit)||1));
+  const isCount=/capsule|tablet|gumm|stick/i.test(String(p.dosageForm||''));
+  const isCap=/capsule/i.test(String(p.dosageForm||''));
+  const today=(()=>{ try{ return new Date().toLocaleDateString('en-US'); }catch(e){ return ''; } })();
+  const pkgNm=(key)=>{ const sel=(p.pkg||{})[key]; if(!sel) return null; const f=(typeof INV_IX!=='undefined'&&INV_IX[sel.n])||sel; return (f&&f.d)||sel.n||null; };
+  const shellName=(()=>{ if(!p.shellItem) return null; const f=(typeof INV_IX!=='undefined'&&INV_IX[p.shellItem.n])||p.shellItem; return (f&&f.d)||p.shellItem.n||null; })();
+  const isGummyDoc=(typeof FORM_CFG!=='undefined'&&(FORM_CFG[p.dosageForm]||{}).gummy);
+  const baseNames=(isGummyDoc&&typeof gummyBaseNames!=='undefined')?gummyBaseNames(p):[];
+  const otherIng=[...baseNames, ...((p.quoteOtherIngredients&&String(p.quoteOtherIngredients).trim())?[String(p.quoteOtherIngredients).trim()]:[])].join(', ');
+  const mapped=new Set(['container','bag','foil','pouch','closure','label','scoop','desiccant','tamper','display','shipper']);
+  const extraPkg=Object.keys(p.pkg||{}).filter(k=>!mapped.has(k)).map(k=>({label:k, value:pkgNm(k)||''})).filter(x=>x.value);
+  const packaging=[
+    {label:'Capsule Shells', value:isCap?(shellName||''):'', na:!isCap},
+    {label:'Container', value:pkgNm('container')||pkgNm('bag')||pkgNm('foil')||pkgNm('pouch')||''},
+    {label:'Closure', value:pkgNm('closure')||''},
+    {label:'Label', value:pkgNm('label')||''},
+    {label:'Scoop', value:pkgNm('scoop')||''},
+    {label:'Desiccant', value:pkgNm('desiccant')||''},
+    {label:'TE Neckband', value:pkgNm('tamper')||''},
+    {label:'Display Box', value:pkgNm('display')||''},
+    {label:'Master Case Divider (if glass)', value:'', na:true},
+    {label:'Master Case Shipper (plain paperboard)', value:pkgNm('shipper')||''},
+    {label:'Outer Case Label', value:'CLIENT; PRODUCT NAME; LOT#; BEST BY; QTY'},
+    ...extraPkg,
+  ];
+  const feeTiers=(Array.isArray(p.tierPricing)&&p.tierPricing.length?p.tierPricing
+    :(((typeof FORM_CFG!=='undefined'&&(FORM_CFG[p.dosageForm]||{}).tiers)||[]).map(u=>({units:u,price:null}))));
+  return {
+    header:{ customer:cleanCustomer(p.customer)||'', date:p.quoteDate||today, product:p.product||'', item:p.pn, revision:p.revision||1, salesRep:p.rep||'' },
+    composition: rows.map(r=>({ ingredient:r.name, input:+(Number(r.mgPS)||0).toFixed(2), claim:(r.labelMg!=null&&r.labelMg!=='')?r.labelMg:'', uom:'mg' })),
+    otherIngredients: otherIng||'',
+    generalSpec:{ appearance:'', color:'', aroma:'', flavor:'', servingSize:(p.servingSize!=null?p.servingSize:''), servingUnit:pieceW, servingsPerUnit:(p.servingsPerUnit!=null?p.servingsPerUnit:''), totalUoM:(pieces+' '+pieceW), weightVariance:'+ 5%', countVariance:isCount?('+ 1 '+pieceW.replace(/\(s\)|\(ies\)/,'')):'' },
+    packaging,
+    palletization:{ unitsCase:'', casesLayer:'', layersHigh:'', totalCasesPallet:'', totalUnitsPallet:'', palletSpecs:'CORNERS / WRAPPED', specialInstructions:'' },
+    micro: MFSO_MICRO.map(m=>({ analyte:m[0], spec:m[1], uom:m[2], method:m[3] })),
+    chemical: MFSO_POTENCY.map(m=>({ name:m[0], cost:m[1], frequency:'' })),
+    regulatory: MFSO_REGULATORY.map(m=>({ certification:m[0], included:m[1], charge:m[2], timeline:m[3], choice:'' })),
+    optionalTesting: MFSO_OPTIONAL.map(m=>({ description:m[0], itemNo:m[1], cost:m[2], choice:'' })),
+    additionalTesting:'',
+    fees: feeTiers.map(t=>({ units:Number(t.units)||0, price:(t.price!=null?t.price:null) })),
+    payTerms:'Pay Terms: 50% Deposit, Remaining 50% Due on Completion Prior to Shipping. *Quote Valid for 30 days.',
+  };
+}
+// Merge saved edits over the derived defaults. Arrays replace wholesale (the editor owns them);
+// object sections shallow-merge so a single edited cell is honored without losing the rest.
+function mfsoModel(p){
+  const d=mfsoDefaults(p); const m=p&&p.mfso;
+  if(!m||typeof m!=='object') return d;
+  const out={...d};
+  for(const k of Object.keys(d)){
+    if(m[k]==null) continue;
+    if(Array.isArray(d[k])) out[k]=Array.isArray(m[k])?m[k]:d[k];
+    else if(d[k]&&typeof d[k]==='object') out[k]={...d[k], ...(typeof m[k]==='object'?m[k]:{})};
+    else out[k]=m[k];
+  }
+  return out;
+}
+
 // Faithful, complete 8-section Master Formula Sign-Off (matches the Enova MFSO template).
-// Customer-facing: NO internal MISys ALT codes or unit costs. Yellow (customer-completed)
-// fields render as blank fill lines. Regulatory / micro / legal blocks are verbatim.
+// Customer-facing: NO internal MISys ALT codes or unit costs. Renders from mfsoModel(p) so the
+// reviewer's edits flow through to print. Yellow (customer-completed) fields render as blank fill
+// lines. Regulatory / micro / legal blocks are verbatim unless edited.
 function buildMFSO(p){
-  const rows=docIngredientRows(p);
+  const M=mfsoModel(p);
   const cb=p.cogsBreakdown||{}; const sig=p.mfsoSigned||{};
   const pieceW=mfsoPieceWord(p.dosageForm);
-  const pieces=cb.piecesPerContainer!=null?cb.piecesPerContainer:((p.servingSize||1)*(p.servingsPerUnit||1));
-  const container=cb.container||p.containerType||'—';
   const isCount=/capsule|tablet|gumm|stick/i.test(String(p.dosageForm||''));
-  const fill=(v)=> (v!=null&&v!=='') ? docEsc(v) : '<span class="fill">&nbsp;</span>';
-  const pkgName=(key)=>{ const sel=(p.pkg||{})[key]; if(!sel) return null; const f=(typeof INV_IX!=='undefined'&&INV_IX[sel.n])||sel; return (f&&f.d)||sel.n||null; };
-  const shellName=(()=>{ if(!p.shellItem) return null; const f=(typeof INV_IX!=='undefined'&&INV_IX[p.shellItem.n])||p.shellItem; return (f&&f.d)||p.shellItem.n||null; })();
-  const today=(()=>{ try{ return new Date().toLocaleDateString('en-US'); }catch(e){ return ''; } })();
-
-  const comp=rows.map(r=>`<tr><td>${docEsc(r.name)}</td><td class=r>${r.mgPS.toFixed(2)}</td><td class=r>${r.labelMg||''}</td><td>mg</td></tr>`).join('')
-    || '<tr><td colspan=4 class=muted>No formula captured.</td></tr>';
-  // For gummies the base/process system is part of the complete formula — list it as
-  // "Other Ingredients" (label convention: actives dosed above, inactives listed here).
-  const isGummyDoc = (typeof FORM_CFG!=='undefined' && (FORM_CFG[p.dosageForm]||{}).gummy);
-  const baseNames = (isGummyDoc && typeof gummyBaseNames!=='undefined') ? gummyBaseNames(p) : [];
-  const otherIng = [...baseNames, ...((p.quoteOtherIngredients&&String(p.quoteOtherIngredients).trim())?[String(p.quoteOtherIngredients).trim()]:[])].join(', ');
-
-  const pkgRow=(label,val,alwaysNa)=>`<tr><td style="width:38%">${label}</td><td class="${val?'':'yh'}">${val?docEsc(val):(alwaysNa?'n/a':'<span class="fill">&nbsp;</span>')}</td></tr>`;
-  // Container-agnostic: the primary container comes from whatever slot THIS container
-  // type uses (bottle/jar/tub → container, bulk → bag, stick pack → foil, pouch → pouch);
-  // Capsule Shells is n/a unless it's a capsule; a catch-all appends any selected
-  // component not covered by the standard rows so nothing a project selected is dropped.
   const isCap=/capsule/i.test(String(p.dosageForm||''));
-  const mapped=new Set(['container','bag','foil','pouch','closure','label','scoop','desiccant','tamper','display','shipper']);
-  const extraPkg=Object.keys(p.pkg||{}).filter(k=>!mapped.has(k)).map(k=>{ const nm=pkgName(k); return nm?pkgRow(k, nm):''; }).join('');
-  const packaging=[
-    pkgRow('Capsule Shells', shellName, !isCap),
-    pkgRow('Container', pkgName('container')||pkgName('bag')||pkgName('foil')||pkgName('pouch')),
-    pkgRow('Closure', pkgName('closure')),
-    pkgRow('Label', pkgName('label')),
-    pkgRow('Scoop', pkgName('scoop')),
-    pkgRow('Desiccant', pkgName('desiccant')),
-    pkgRow('TE Neckband', pkgName('tamper')),
-    pkgRow('Display Box', pkgName('display')),
-    pkgRow('Master Case Divider (if glass)', null, true),
-    pkgRow('Master Case Shipper (plain paperboard)', pkgName('shipper')),
-    pkgRow('Outer Case Label', 'CLIENT; PRODUCT NAME; LOT#; BEST BY; QTY'),
-    extraPkg,
-  ].join('');
+  const fill=(v)=> (v!=null&&v!=='') ? docEsc(v) : '<span class="fill">&nbsp;</span>';
+  const yhCell=(v)=> (v!=null&&v!=='') ? `<td>${docEsc(v)}</td>` : '<td class=yh><span class="fill">&nbsp;</span></td>';
+  const today=(()=>{ try{ return new Date().toLocaleDateString('en-US'); }catch(e){ return ''; } })();
+  const H=M.header||{}, gs=M.generalSpec||{}, pal=M.palletization||{};
 
-  const feeTiers = (Array.isArray(p.tierPricing)&&p.tierPricing.length ? p.tierPricing
-    : (((typeof FORM_CFG!=='undefined'&&(FORM_CFG[p.dosageForm]||{}).tiers)||[]).map(u=>({units:u,price:null}))));
-  const feeRows = feeTiers.map(t=>`<tr><td class=r>${(Number(t.units)||0).toLocaleString()}</td><td>units</td><td class="r ${t.price!=null?'':'yh'}">${t.price!=null?'$'+Number(t.price).toFixed(2):'<span class="fill">&nbsp;</span>'}</td></tr>`).join('')
+  const comp=(M.composition||[]).map(r=>`<tr><td>${docEsc(r.ingredient)}</td><td class=r>${(Number(r.input)||0).toFixed(2)}</td><td class=r>${r.claim!=null&&r.claim!==''?docEsc(r.claim):''}</td><td>${docEsc(r.uom||'mg')}</td></tr>`).join('')
+    || '<tr><td colspan=4 class=muted>No formula captured.</td></tr>';
+  const otherIng = M.otherIngredients||'';
+  const pkgRow=(label,val,alwaysNa)=>`<tr><td style="width:38%">${docEsc(label)}</td><td class="${val?'':'yh'}">${val?docEsc(val):(alwaysNa?'n/a':'<span class="fill">&nbsp;</span>')}</td></tr>`;
+  const packaging=(M.packaging||[]).map(x=>pkgRow(x.label, x.value, x.na)).join('');
+
+  const feeRows=(M.fees||[]).map(t=>`<tr><td class=r>${(Number(t.units)||0).toLocaleString()}</td><td>units</td><td class="r ${t.price!=null?'':'yh'}">${t.price!=null?'$'+Number(t.price).toFixed(2):'<span class="fill">&nbsp;</span>'}</td></tr>`).join('')
     || '<tr><td colspan=3 class=muted>Tier pricing is manual — none entered.</td></tr>';
 
-  const micro=MFSO_MICRO.map(m=>`<tr><td>${docEsc(m[0])}</td><td>${docEsc(m[1])}</td><td>${docEsc(m[2])}</td><td>${docEsc(m[3])}</td></tr>`).join('');
-  const potency=MFSO_POTENCY.map(m=>`<tr><td>${docEsc(m[0])}</td><td class=r>$${m[1].toFixed(2)}</td><td class=yh><span class="fill">&nbsp;</span></td></tr>`).join('');
-  const reg=MFSO_REGULATORY.map(m=>`<tr><td>${docEsc(m[0])}</td><td>${docEsc(m[1])}</td><td>${docEsc(m[2])}</td><td>${docEsc(m[3])}</td><td class=yh><span class="fill">&nbsp;</span></td></tr>`).join('');
-  const opt=MFSO_OPTIONAL.map(m=>`<tr><td>${docEsc(m[0])}</td><td>${docEsc(m[1])}</td><td class=r>${docEsc(m[2])}</td><td class=yh><span class="fill">&nbsp;</span></td></tr>`).join('');
+  const micro=(M.micro||[]).map(m=>`<tr><td>${docEsc(m.analyte)}</td><td>${docEsc(m.spec)}</td><td>${docEsc(m.uom)}</td><td>${docEsc(m.method)}</td></tr>`).join('');
+  const potency=(M.chemical||[]).map(m=>`<tr><td>${docEsc(m.name)}</td><td class=r>$${(Number(m.cost)||0).toFixed(2)}</td><td class="${m.frequency?'':'yh'}">${m.frequency?docEsc(m.frequency):'<span class="fill">&nbsp;</span>'}</td></tr>`).join('');
+  const reg=(M.regulatory||[]).map(m=>`<tr><td>${docEsc(m.certification)}</td><td>${docEsc(m.included)}</td><td>${docEsc(m.charge)}</td><td>${docEsc(m.timeline)}</td><td class="${m.choice?'':'yh'}">${m.choice?docEsc(m.choice):'<span class="fill">&nbsp;</span>'}</td></tr>`).join('');
+  const opt=(M.optionalTesting||[]).map(m=>`<tr><td>${docEsc(m.description)}</td><td>${docEsc(m.itemNo)}</td><td class=r>${docEsc(m.cost)}</td><td class="${m.choice?'':'yh'}">${m.choice?docEsc(m.choice):'<span class="fill">&nbsp;</span>'}</td></tr>`).join('');
 
   return `<!doctype html><meta charset=utf8><title>MFSO ${docEsc(p.pn)}</title>${docStyle()}
    <h1>ENOVA SCIENCE</h1>
    <div class=addr>4740 S Cleveland Ave, Fort Myers, FL 33907</div>
    <div class=sub><b>MASTER FORMULA SIGN OFF APPROVAL</b> · ${docEsc(p.pn)} · Rev V${docEsc(p.revision||1)} · ${sig.signed?'<span class="stamp ok">SIGNED</span>':'<span class="stamp wait">FOR CUSTOMER SIGNATURE</span>'}</div>
    <div class=grid>
-     <div><span class=k>Customer:</span> ${docEsc(cleanCustomer(p.customer))}</div>
-     <div><span class=k>Date:</span> ${docEsc(p.quoteDate||today)}</div>
-     <div><span class=k>Product Name:</span> ${docEsc(p.product||'—')}</div>
-     <div><span class=k>Enova Item #:</span> ${docEsc(p.pn)}</div>
-     <div><span class=k>Revision #:</span> ${docEsc(p.revision||1)}</div>
-     <div><span class=k>Sales Rep:</span> ${docEsc(p.rep||'—')}</div>
+     <div><span class=k>Customer:</span> ${docEsc(H.customer||cleanCustomer(p.customer)||'')}</div>
+     <div><span class=k>Date:</span> ${docEsc(H.date||p.quoteDate||today)}</div>
+     <div><span class=k>Product Name:</span> ${docEsc(H.product||p.product||'—')}</div>
+     <div><span class=k>Enova Item #:</span> ${docEsc(H.item||p.pn)}</div>
+     <div><span class=k>Revision #:</span> ${docEsc(H.revision||p.revision||1)}</div>
+     <div><span class=k>Sales Rep:</span> ${docEsc(H.salesRep||p.rep||'—')}</div>
    </div>
    <div class=inst>Instructions: Please review and complete all fields highlighted (blank) and return to Enova Science at your earliest convenience.</div>
 
@@ -2200,15 +2259,15 @@ function buildMFSO(p){
 This Formula is the proprietary property of Enova Science. This Flavor System is the proprietary property of Enova Science.</div>
    <div class=subhd>1.2. General Specification</div>
    <table><tbody>
-     <tr><td style="width:38%">Appearance</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
-     <tr><td>Color</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
-     <tr><td>Aroma</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
-     <tr><td>Flavor</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
-     <tr><td>Serving Size</td><td>${docEsc(p.servingSize||'—')} ${pieceW}</td></tr>
-     <tr><td>Servings / Unit</td><td>${docEsc(p.servingsPerUnit||'—')}</td></tr>
-     <tr><td>Total UoM</td><td>${pieces} ${pieceW}</td></tr>
-     <tr><td>Weight Variance</td><td>+ 5%</td></tr>
-     ${isCount?`<tr><td>Count Variance</td><td>+ 1 ${pieceW.replace(/\(s\)|\(ies\)/,'')}</td></tr>`:''}
+     <tr><td style="width:38%">Appearance</td><td class="${gs.appearance?'':'yh'}">${gs.appearance?docEsc(gs.appearance):'<span class="fill">&nbsp;</span>'}</td></tr>
+     <tr><td>Color</td><td class="${gs.color?'':'yh'}">${gs.color?docEsc(gs.color):'<span class="fill">&nbsp;</span>'}</td></tr>
+     <tr><td>Aroma</td><td class="${gs.aroma?'':'yh'}">${gs.aroma?docEsc(gs.aroma):'<span class="fill">&nbsp;</span>'}</td></tr>
+     <tr><td>Flavor</td><td class="${gs.flavor?'':'yh'}">${gs.flavor?docEsc(gs.flavor):'<span class="fill">&nbsp;</span>'}</td></tr>
+     <tr><td>Serving Size</td><td>${docEsc((gs.servingSize!=null&&gs.servingSize!=='')?gs.servingSize:'—')} ${docEsc(gs.servingUnit||pieceW)}</td></tr>
+     <tr><td>Servings / Unit</td><td>${docEsc((gs.servingsPerUnit!=null&&gs.servingsPerUnit!=='')?gs.servingsPerUnit:'—')}</td></tr>
+     <tr><td>Total UoM</td><td>${docEsc(gs.totalUoM||'')}</td></tr>
+     <tr><td>Weight Variance</td><td>${docEsc(gs.weightVariance||'+ 5%')}</td></tr>
+     ${gs.countVariance?`<tr><td>Count Variance</td><td>${docEsc(gs.countVariance)}</td></tr>`:''}
    </tbody></table>
 
    <div class=sechd>SECTION 2. PACKAGING SPECIFICATIONS</div>
@@ -2229,13 +2288,13 @@ All Printed Material must be reviewed by Enova Science before printing to ensure
 
    <div class=sechd>SECTION 3. PALLETIZATION SPECIFICATIONS</div>
    <table><tbody>
-     <tr><td style="width:38%">Units / Case</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
-     <tr><td>Cases / Layer</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
-     <tr><td>No. Layers High</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
-     <tr><td>Total Cases / Pallet</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
-     <tr><td>Total Units / Pallet</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
-     <tr><td>Pallet Specs (size, braces)</td><td>CORNERS / WRAPPED</td></tr>
-     <tr><td>Special Instructions</td><td class=yh><span class="fill">&nbsp;</span></td></tr>
+     <tr><td style="width:38%">Units / Case</td>${yhCell(pal.unitsCase)}</tr>
+     <tr><td>Cases / Layer</td>${yhCell(pal.casesLayer)}</tr>
+     <tr><td>No. Layers High</td>${yhCell(pal.layersHigh)}</tr>
+     <tr><td>Total Cases / Pallet</td>${yhCell(pal.totalCasesPallet)}</tr>
+     <tr><td>Total Units / Pallet</td>${yhCell(pal.totalUnitsPallet)}</tr>
+     <tr><td>Pallet Specs (size, braces)</td><td>${docEsc(pal.palletSpecs||'CORNERS / WRAPPED')}</td></tr>
+     <tr><td>Special Instructions</td>${yhCell(pal.specialInstructions)}</tr>
    </tbody></table>
    <div class=legal>Master Case and Pallet Specifications are suggestions made by Enova Science. If the Client has a specific request, please advise. Keep bottle tightly closed. Store between 21°C - 29°C (70° - 89°F) away from sunlight. Shipment of Finished Goods: Shipping arrangements must be made within 36 hours after receipt of notification of release. Enova Science reserves the right to charge up to $100 per pallet per day should shipping arrangements not be made within the aforementioned time period unless otherwise agreed upon.</div>
 
@@ -2252,12 +2311,12 @@ All Printed Material must be reviewed by Enova Science before printing to ensure
    <div class=sechd>SECTION 7. OPTIONAL COMPLIANCE TESTING</div>
    <div class=legal>Per cGMP Regulation Guidelines the brand owner is responsible for ALL label claims. All label claims (including the Shelf Life/Best By Date term) need to be validated by a third party upon development of the product. Cost below does not include the cost of the product and/or shipping to the testing laboratory. Pay terms for all compliance testing is pre-paid.</div>
    <table><thead><tr><th>Description</th><th>Item #</th><th class=r>Cost</th><th>Type YES or NO</th></tr></thead><tbody>${opt}
-     <tr><td>Additional Testing Required by Client (specify):</td><td colspan=3 class=yh><span class="fill">&nbsp;</span></td></tr></tbody></table>
+     <tr><td>Additional Testing Required by Client (specify):</td><td colspan=3 class="${M.additionalTesting?'':'yh'}">${M.additionalTesting?docEsc(M.additionalTesting):'<span class="fill">&nbsp;</span>'}</td></tr></tbody></table>
    <div class=legal>This product may not be in compliance with California Proposition 65. If the brand owner has 10 or more employees, the following warning label must be on every package sold/shipped to California. Enova Science assumes no liability for brand compliance. Testing is always recommended.</div>
 
    <div class=sechd>SECTION 8. FEES</div>
    <table><thead><tr><th class=r>Price / MOQ</th><th></th><th class=r>Sale Price / Unit</th></tr></thead><tbody>${feeRows}</tbody></table>
-   <div class=note2>Pay Terms: 50% Deposit, Remaining 50% Due on Completion Prior to Shipping. *Quote Valid for 30 days.</div>
+   <div class=note2>${docEsc(M.payTerms||'Pay Terms: 50% Deposit, Remaining 50% Due on Completion Prior to Shipping. *Quote Valid for 30 days.')}</div>
    <div class=note2>Additional Fees per PO:
 • Certificate of Analysis ($120 per lot)
 • Potency Testing on Label Claims
@@ -6305,6 +6364,189 @@ function QuotePage({ projects, setProjects, onToggleNav }){
    into production and the production documents (SO, MO, BOM, MMR) become available. Every
    document is generated from the project's captured formula + approved cost snapshot +
    manual tier pricing — nothing is invented. */
+// ── MFSO editor — every field/column/cell/row of the Master Formula Sign-Off is editable. ──
+// Auto-filled from the formula/costing/packaging (mfsoDefaults); edits persist to proj.mfso and
+// flow straight into the printable buildMFSO. Disabled once the MFSO is signed (revert to edit).
+function MFSOEditor({ proj, upd, signed }){
+  const m = mfsoModel(proj);
+  const ro = !!signed;
+  const put  = (key, val) => upd({ mfso: { ...(proj.mfso||{}), [key]: val } });
+  const putF = (sec, field, val) => put(sec, { ...(m[sec]||{}), [field]: val });
+  const putRow = (sec, i, field, val) => { const a=(m[sec]||[]).map((r,j)=> j===i?{...r,[field]:val}:r); put(sec, a); };
+  const addRow = (sec, blank) => put(sec, [...(m[sec]||[]), blank]);
+  const delRow = (sec, i) => put(sec, (m[sec]||[]).filter((_,j)=>j!==i));
+  const T = (val, on, extra) => <input className="mfe-in" disabled={ro} value={val==null?'':val} onChange={e=>on(e.target.value)} {...(extra||{})}/>;
+  const Field = (label, val, on, extra) => <React.Fragment><label>{label}</label>{T(val,on,extra)}</React.Fragment>;
+  const H=m.header||{}, gs=m.generalSpec||{}, pal=m.palletization||{};
+  const regen = async () => {
+    if (!(await confirmDialog({ message:'Rebuild the MFSO from the current formula, costing, and packaging? This discards your MFSO edits.', confirmLabel:'Rebuild from formula', danger:true }))) return;
+    upd({ mfso: null }); toast('MFSO rebuilt from the formula — edits cleared.','ok');
+  };
+  const delBtn = (sec,i) => <button className="mfe-del" disabled={ro} title="Remove row" onClick={()=>delRow(sec,i)}>×</button>;
+
+  return (
+    <div className="panel">
+      <h2>MFSO Document — Editable
+        <span className="fbadge neutral" style={{marginLeft:8}}>{proj.mfso?'edited':'auto-filled from formula'}</span>
+        <button className="fbtn sec sm" style={{marginLeft:'auto'}} disabled={ro} onClick={regen} title="Discard edits and regenerate every section from the current formula/costing/packaging.">↻ Rebuild from formula</button>
+      </h2>
+      <p className="fsmall" style={{marginBottom:8}}>Every field, column, and row below is editable and prints on the MFSO. It starts auto-filled from the formula; adjust per product, customer MOQ, required tests, and packaging. {ro && <strong>The MFSO is signed — revert the signature above to edit.</strong>}</p>
+
+      {/* Header */}
+      <div className="mfe-sec">
+        <h3>Header</h3>
+        <div className="mfe-grid">
+          {Field('Customer', H.customer, v=>putF('header','customer',v))}
+          {Field('Date', H.date, v=>putF('header','date',v))}
+          {Field('Product Name', H.product, v=>putF('header','product',v))}
+          {Field('Enova Item #', H.item, v=>putF('header','item',v))}
+          {Field('Revision #', H.revision, v=>putF('header','revision',v))}
+          {Field('Sales Rep', H.salesRep, v=>putF('header','salesRep',v))}
+        </div>
+      </div>
+
+      {/* Section 1.1 Composition */}
+      <div className="mfe-sec">
+        <h3>Section 1 · 1.1 Composition (per serving)</h3>
+        <table className="mfe-tbl"><thead><tr><th>Ingredient</th><th>Input, mg</th><th>Label Claim</th><th>UOM</th><th></th></tr></thead>
+          <tbody>{(m.composition||[]).map((r,i)=>(
+            <tr key={i}>
+              <td>{T(r.ingredient, v=>putRow('composition',i,'ingredient',v))}</td>
+              <td className="num">{T(r.input, v=>putRow('composition',i,'input',v), {type:'number', step:'0.01'})}</td>
+              <td className="num">{T(r.claim, v=>putRow('composition',i,'claim',v))}</td>
+              <td className="num">{T(r.uom, v=>putRow('composition',i,'uom',v))}</td>
+              <td className="act">{delBtn('composition',i)}</td>
+            </tr>))}</tbody></table>
+        <button className="mfe-add" disabled={ro} onClick={()=>addRow('composition',{ingredient:'',input:'',claim:'',uom:'mg'})}>+ Add ingredient</button>
+        <h4>Other Ingredients</h4>
+        {T(m.otherIngredients, v=>put('otherIngredients',v))}
+      </div>
+
+      {/* Section 1.2 General Spec */}
+      <div className="mfe-sec">
+        <h3>Section 1 · 1.2 General Specification</h3>
+        <div className="mfe-grid">
+          {Field('Appearance', gs.appearance, v=>putF('generalSpec','appearance',v))}
+          {Field('Color', gs.color, v=>putF('generalSpec','color',v))}
+          {Field('Aroma', gs.aroma, v=>putF('generalSpec','aroma',v))}
+          {Field('Flavor', gs.flavor, v=>putF('generalSpec','flavor',v))}
+          {Field('Serving Size', gs.servingSize, v=>putF('generalSpec','servingSize',v))}
+          {Field('Serving Unit', gs.servingUnit, v=>putF('generalSpec','servingUnit',v))}
+          {Field('Servings / Unit', gs.servingsPerUnit, v=>putF('generalSpec','servingsPerUnit',v))}
+          {Field('Total UoM', gs.totalUoM, v=>putF('generalSpec','totalUoM',v))}
+          {Field('Weight Variance', gs.weightVariance, v=>putF('generalSpec','weightVariance',v))}
+          {Field('Count Variance', gs.countVariance, v=>putF('generalSpec','countVariance',v))}
+        </div>
+      </div>
+
+      {/* Section 2 Packaging */}
+      <div className="mfe-sec">
+        <h3>Section 2 · Packaging Specifications</h3>
+        <table className="mfe-tbl"><thead><tr><th>Component</th><th>Spec / Value</th><th></th></tr></thead>
+          <tbody>{(m.packaging||[]).map((r,i)=>(
+            <tr key={i}>
+              <td>{T(r.label, v=>putRow('packaging',i,'label',v))}</td>
+              <td>{T(r.value, v=>putRow('packaging',i,'value',v))}</td>
+              <td className="act">{delBtn('packaging',i)}</td>
+            </tr>))}</tbody></table>
+        <button className="mfe-add" disabled={ro} onClick={()=>addRow('packaging',{label:'',value:''})}>+ Add packaging line</button>
+      </div>
+
+      {/* Section 3 Palletization */}
+      <div className="mfe-sec">
+        <h3>Section 3 · Palletization Specifications</h3>
+        <div className="mfe-grid">
+          {Field('Units / Case', pal.unitsCase, v=>putF('palletization','unitsCase',v))}
+          {Field('Cases / Layer', pal.casesLayer, v=>putF('palletization','casesLayer',v))}
+          {Field('No. Layers High', pal.layersHigh, v=>putF('palletization','layersHigh',v))}
+          {Field('Total Cases / Pallet', pal.totalCasesPallet, v=>putF('palletization','totalCasesPallet',v))}
+          {Field('Total Units / Pallet', pal.totalUnitsPallet, v=>putF('palletization','totalUnitsPallet',v))}
+          {Field('Pallet Specs', pal.palletSpecs, v=>putF('palletization','palletSpecs',v))}
+          {Field('Special Instructions', pal.specialInstructions, v=>putF('palletization','specialInstructions',v))}
+        </div>
+      </div>
+
+      {/* Section 4 Micro */}
+      <div className="mfe-sec">
+        <h3>Section 4 · Microbiological Specifications</h3>
+        <table className="mfe-tbl"><thead><tr><th>Analyte</th><th>Specification</th><th>Unit</th><th>Method</th><th></th></tr></thead>
+          <tbody>{(m.micro||[]).map((r,i)=>(
+            <tr key={i}>
+              <td>{T(r.analyte, v=>putRow('micro',i,'analyte',v))}</td>
+              <td>{T(r.spec, v=>putRow('micro',i,'spec',v))}</td>
+              <td>{T(r.uom, v=>putRow('micro',i,'uom',v))}</td>
+              <td>{T(r.method, v=>putRow('micro',i,'method',v))}</td>
+              <td className="act">{delBtn('micro',i)}</td>
+            </tr>))}</tbody></table>
+        <button className="mfe-add" disabled={ro} onClick={()=>addRow('micro',{analyte:'',spec:'',uom:'',method:''})}>+ Add analyte</button>
+      </div>
+
+      {/* Section 5 Chemical / potency */}
+      <div className="mfe-sec">
+        <h3>Section 5 · Chemical (Label-Claim Potency) Testing</h3>
+        <table className="mfe-tbl"><thead><tr><th>Name</th><th>Cost ($)</th><th>Testing Frequency</th><th></th></tr></thead>
+          <tbody>{(m.chemical||[]).map((r,i)=>(
+            <tr key={i}>
+              <td>{T(r.name, v=>putRow('chemical',i,'name',v))}</td>
+              <td className="num">{T(r.cost, v=>putRow('chemical',i,'cost',v), {type:'number', step:'0.01'})}</td>
+              <td>{T(r.frequency, v=>putRow('chemical',i,'frequency',v))}</td>
+              <td className="act">{delBtn('chemical',i)}</td>
+            </tr>))}</tbody></table>
+        <button className="mfe-add" disabled={ro} onClick={()=>addRow('chemical',{name:'',cost:0,frequency:''})}>+ Add analyte</button>
+      </div>
+
+      {/* Section 6 Regulatory */}
+      <div className="mfe-sec">
+        <h3>Section 6 · Regulatory Compliance &amp; Documentation</h3>
+        <table className="mfe-tbl"><thead><tr><th>Certification</th><th>Included</th><th>Additional Charge</th><th>Timeline</th><th>Choice</th><th></th></tr></thead>
+          <tbody>{(m.regulatory||[]).map((r,i)=>(
+            <tr key={i}>
+              <td>{T(r.certification, v=>putRow('regulatory',i,'certification',v))}</td>
+              <td className="num">{T(r.included, v=>putRow('regulatory',i,'included',v))}</td>
+              <td>{T(r.charge, v=>putRow('regulatory',i,'charge',v))}</td>
+              <td>{T(r.timeline, v=>putRow('regulatory',i,'timeline',v))}</td>
+              <td className="num">{T(r.choice, v=>putRow('regulatory',i,'choice',v))}</td>
+              <td className="act">{delBtn('regulatory',i)}</td>
+            </tr>))}</tbody></table>
+        <button className="mfe-add" disabled={ro} onClick={()=>addRow('regulatory',{certification:'',included:'',charge:'',timeline:'',choice:''})}>+ Add certification</button>
+      </div>
+
+      {/* Section 7 Optional testing */}
+      <div className="mfe-sec">
+        <h3>Section 7 · Optional Compliance Testing</h3>
+        <table className="mfe-tbl"><thead><tr><th>Description</th><th>Item #</th><th>Cost</th><th>Choice</th><th></th></tr></thead>
+          <tbody>{(m.optionalTesting||[]).map((r,i)=>(
+            <tr key={i}>
+              <td>{T(r.description, v=>putRow('optionalTesting',i,'description',v))}</td>
+              <td className="num">{T(r.itemNo, v=>putRow('optionalTesting',i,'itemNo',v))}</td>
+              <td className="num">{T(r.cost, v=>putRow('optionalTesting',i,'cost',v))}</td>
+              <td className="num">{T(r.choice, v=>putRow('optionalTesting',i,'choice',v))}</td>
+              <td className="act">{delBtn('optionalTesting',i)}</td>
+            </tr>))}</tbody></table>
+        <button className="mfe-add" disabled={ro} onClick={()=>addRow('optionalTesting',{description:'',itemNo:'',cost:'',choice:''})}>+ Add test</button>
+        <h4>Additional Testing Required by Client</h4>
+        {T(m.additionalTesting, v=>put('additionalTesting',v))}
+      </div>
+
+      {/* Section 8 Fees */}
+      <div className="mfe-sec">
+        <h3>Section 8 · Fees (MOQ Tiers)</h3>
+        <table className="mfe-tbl"><thead><tr><th>Units / MOQ</th><th>Sale Price / Unit ($)</th><th></th></tr></thead>
+          <tbody>{(m.fees||[]).map((r,i)=>(
+            <tr key={i}>
+              <td className="num">{T(r.units, v=>putRow('fees',i,'units', v===''?0:Number(v)||0), {type:'number'})}</td>
+              <td className="num">{T(r.price==null?'':r.price, v=>putRow('fees',i,'price', v===''?null:Number(v)), {type:'number', step:'0.0001'})}</td>
+              <td className="act">{delBtn('fees',i)}</td>
+            </tr>))}</tbody></table>
+        <button className="mfe-add" disabled={ro} onClick={()=>addRow('fees',{units:0,price:null})}>+ Add tier</button>
+        <p className="fsmall" style={{marginTop:4}}>Tier pricing is always manual (§ house rule). MOQ is customer-specific — edit tiers per customer.</p>
+        <h4>Pay Terms</h4>
+        {T(m.payTerms, v=>put('payTerms',v))}
+      </div>
+    </div>
+  );
+}
+
 function DocumentsPage({ projects, setProjects, onToggleNav }){
   const { isAdmin } = useRole();               // only admins may sign the MFSO → production
   const [pn, setPn] = useState(null);          // opens BLANK — recall a project
@@ -6312,6 +6554,7 @@ function DocumentsPage({ projects, setProjects, onToggleNav }){
   const proj = projects.find(p => p.pn === pn) || null;
   const signed = !!(proj && proj.mfsoSigned && proj.mfsoSigned.signed);
   const locked = proj ? isLocked(proj) : false;
+  const upd = (patch) => setProjects(prev => prev.map(p => p.pn === pn ? { ...p, ...patch } : p));
 
   const signMFSO = () => {
     if (!passIntegrityGate(proj, setProjects, 'MFSO signed → production')) return;   // no production run on understated cost without a logged override
@@ -6398,6 +6641,9 @@ function DocumentsPage({ projects, setProjects, onToggleNav }){
             </div>
           )}
         </div>
+
+        {/* MFSO editor — every cell/column/row editable; prints via buildMFSO */}
+        <MFSOEditor proj={proj} upd={upd} signed={signed}/>
 
         {/* Production documents — locked until MFSO signed */}
         <div className="panel" style={{position:"relative"}}>

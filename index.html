@@ -2294,6 +2294,15 @@ input.fcell:focus{border-color:var(--teal);outline:none;background:#fff;}
 .rdy-cfg-row select{padding:5px;border:1px solid var(--line);border-radius:var(--r);font:inherit;font-size:12px;}
 .rdy-cfg-del{border:none;background:none;cursor:pointer;font-size:14px;}
 .rdy-cfg-foot{display:flex;gap:8px;align-items:center;margin-top:12px;}
+/* §49 commitment scope segmented control + project-page commitment card inputs */
+.scope-seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;}
+.scope-seg button{border:none;background:#fff;font:inherit;font-size:12px;padding:4px 10px;cursor:pointer;color:#5a6b7a;border-right:1px solid var(--line);}
+.scope-seg button:last-child{border-right:none;}
+.scope-seg button.on{background:var(--navy);color:#fff;}
+.scope-seg button b{font-weight:800;margin-left:3px;}
+.pp-chk{cursor:pointer;}
+.pp-chk input[type=checkbox]{margin-left:auto;width:16px;height:16px;cursor:pointer;}
+.pp-inp{margin-left:auto;max-width:150px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;font:inherit;font-size:12px;}
 </style>
 </head>
 <body>
@@ -2793,6 +2802,13 @@ const FORMULATION_DEFAULTS = {
   // realtime path as mfsoSigned/mfso. Gate STATUS is the frequently-updated shared field; the gate
   // TEMPLATE (which gates exist) is a separate shared config (READINESS_GATES / studio_readiness_config).
   readiness:null,
+  // §49 COMMITMENT — the signals that make a project a "real" job (Shop-Ware: only committed jobs on
+  // the active board). Everything else is an archived Lead (searchable, never deleted). ACTIVE vs
+  // ARCHIVED is DERIVED from these + mfsoSigned + stage (no bulk data mutation), overridable per
+  // project via `archived` / `keepActive`.
+  commit:{ nda:false, ndaDate:null, poNumber:'', soIssued:false, paying:false, payingNote:'', ts:null },
+  archived:false,    // manual force-archive (hide from the active pipeline)
+  keepActive:false,  // manual force-keep (pin to the active pipeline even without a signal)
 };
 
 function emptyProject(pn) {
@@ -2965,6 +2981,9 @@ function migrateProject(raw){
   if (!p.pkg || typeof p.pkg!=='object') p.pkg = {};
   if (!p.baseItems || typeof p.baseItems!=='object') p.baseItems = {};
   if (!p.approvals || typeof p.approvals!=='object') p.approvals = {};
+  // §49 commitment: ensure the commit object exists (backfills every legacy record on load).
+  if (!p.commit || typeof p.commit!=='object') p.commit = { nda:false, ndaDate:null, poNumber:'', soIssued:false, paying:false, payingNote:'', ts:null };
+  p.archived = !!p.archived; p.keepActive = !!p.keepActive;
   // §48 readiness: keep null OR a well-formed object (never a stray scalar); normalize sub-structures.
   if (p.readiness != null){
     if (typeof p.readiness !== 'object') p.readiness = null;
@@ -3839,6 +3858,40 @@ const CH_HEX = {'ch-Inquiry':'#7b8794','ch-Formulating':'#2f8fc4','ch-LabReview'
   'ch-QAHold':'#8e5bb5','ch-Shipping':'#2b7a9e','ch-Completed':'#3a4a57','ch-Cancelled':'#d9534f','ch-default':'#5a6b7a'};
 const stageHex = (s) => CH_HEX[STAGE_COLOR_KEY(s)] || '#5a6b7a';
 const isClosedStage = (s) => /complete|cancel/i.test(s||'');
+
+// §49 COMMITMENT GATE — which projects are "real" jobs (Shop-Ware: only committed jobs on the board).
+// A project earns the ACTIVE pipeline once it shows a real commitment signal (MFSO signed, NDA signed,
+// SO/PO issued, or paying); everything else is an archived LEAD (searchable, never deleted).
+// Classification is DERIVED (no bulk data mutation) but overridable per project (keepActive / archived).
+function projCommit(p){ return (p && p.commit && typeof p.commit==='object') ? p.commit : {}; }
+function commitSignals(p){
+  const c = projCommit(p); const sig = [];
+  if (p && p.mfsoSigned && p.mfsoSigned.signed) sig.push('MFSO');
+  if (c.paying) sig.push('Paying');
+  if (c.soIssued || (c.poNumber && String(c.poNumber).trim())) sig.push('SO/PO');
+  if (c.nda) sig.push('NDA');
+  // Stage-based signal so every active job shows WHY it qualifies (not just the explicit flags).
+  const st = normalizeStage(p && p.stage);
+  if (st==='In Production' || st==='PO Submitted'){ if (!sig.includes('In Prod')) sig.push('In Prod'); }
+  else if (isSignedMFSO(p && p.stage) && !sig.includes('MFSO')) sig.push('MFSO');
+  return sig;
+}
+function isCommitted(p){
+  if (commitSignals(p).length) return true;
+  const st = normalizeStage(p && p.stage);
+  return isSignedMFSO(p && p.stage) || st==='In Production' || st==='PO Submitted';
+}
+function isActiveProj(p){ if (p && p.archived) return false; if (p && p.keepActive) return true; return isCommitted(p); }
+function isArchivedProj(p){ return !isClosedStage(p && p.stage) && !isActiveProj(p); }
+// Highest signal for the Commitment column (sort/filter). Priority: Paying > MFSO > SO/PO > NDA.
+function commitTopLabel(p){ const s=commitSignals(p); for (const k of ['Paying','MFSO','In Prod','SO/PO','NDA']) if (s.includes(k)) return k; return (p&&p.keepActive)?'Kept':'—'; }
+// Small badge row of a project's commitment signals (used in the tables + cards).
+function CommitBadges({ p }){
+  const s = commitSignals(p);
+  if (!s.length) return <span style={{color:'#b3bcc4'}}>{(p&&p.keepActive)?'Kept active':((p&&p.archived)?'Archived':'—')}</span>;
+  const clr = { 'Paying':['#e6f4e6','#2f7d33'], 'MFSO':['#e2eefb','#2f6ea5'], 'In Prod':['#e6f4e6','#3a7d3f'], 'SO/PO':['#e1f2f9','#17849e'], 'NDA':['#efeaf7','#6b4fa0'] };
+  return <span style={{display:'inline-flex',gap:4,flexWrap:'wrap'}}>{s.map(k=>{ const c=clr[k]||['#eef2f5','#5a6b7a']; return <span key={k} style={{fontSize:10,fontWeight:700,padding:'1px 6px',borderRadius:8,background:c[0],color:c[1],whiteSpace:'nowrap'}}>{k}</span>; })}</span>;
+}
 const stageProgress = (s) => { if (isClosedStage(s)) return 1; const i=DEFAULT_STAGES.indexOf(normalizeStage(s)); return i<0?0:(i+1)/DEFAULT_STAGES.length; };
 const _m2 = (v) => v==null?'—':'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 
@@ -3923,11 +3976,18 @@ function FilterPop({ col, value, distinct, onChange, onClear, onClose, alignLeft
   );
 }
 
-function ProjectTable({ rows, closed, onOpen, noun }){
+function ProjectTable({ rows, closed, onOpen, noun, commitToggle }){
   const [sort, setSort] = useState({key:'dateReceived', dir:'desc'});
   const [filters, setFilters] = useState({});
   const [openFilter, setOpenFilter] = useState(null);
   const [q, setQ] = useState('');   // global free-text search across the whole row
+  const [scope, setScope] = useState('active');   // §49 active | archive | all (only when commitToggle)
+  // Commitment scope: ACTIVE = committed jobs (the important ones), ARCHIVE = uncommitted leads.
+  const scopeRows = commitToggle
+    ? rows.filter(p => scope==='all' ? true : scope==='active' ? isActiveProj(p) : isArchivedProj(p))
+    : rows;
+  const nActive = commitToggle ? rows.filter(isActiveProj).length : 0;
+  const nArchive = commitToggle ? rows.filter(isArchivedProj).length : 0;
 
   // Close an open filter popover only when clicking truly outside it (not on the
   // scrollbar, a checkbox, or the funnel). No overlay — an overlay sat under the
@@ -3947,6 +4007,8 @@ function ProjectTable({ rows, closed, onOpen, noun }){
         cell:p=> p.dosageForm ? <span className="plabel" style={{background:FORM_CLR[p.dosageForm]||'#7b8794'}}>{p.dosageForm}</span> : '—'},
       {key:'stage', label:'Status', options:DEFAULT_STAGES, get:p=>normalizeStage(p.stage)||'',
         cell:p=> <span style={{display:'inline-flex',alignItems:'center',gap:6,whiteSpace:'nowrap'}}><span style={{width:8,height:8,borderRadius:'50%',background:stageHex(p.stage),flexShrink:0}}/>{normalizeStage(p.stage)||'—'}</span>},
+      {key:'commit', label:'Commitment', options:['Paying','MFSO','In Prod','SO/PO','NDA','Kept','—'], get:p=>commitTopLabel(p),
+        cell:p=> <CommitBadges p={p}/>},
       {key:'dateReceived', label:'Received', type:'date', get:p=>p.dateReceived||'',
         cell:p=>p.dateReceivedDisplay||p.dateReceived||'—'},
       {key:'pn', label:'Project #', get:p=>p.pn||'', cell:p=><span className="pcell-pn">{p.pn}</span>},
@@ -3976,7 +4038,7 @@ function ProjectTable({ rows, closed, onOpen, noun }){
 
   const distinct = (c) => {
     const s = new Set(); let hasBlank=false;
-    rows.forEach(p => { const v=c.get(p); if(v==null||v==='') hasBlank=true; else s.add(String(v)); });
+    scopeRows.forEach(p => { const v=c.get(p); if(v==null||v==='') hasBlank=true; else s.add(String(v)); });
     const dataVals=[...s];
     let list;
     if (c.options){
@@ -3991,7 +4053,7 @@ function ProjectTable({ rows, closed, onOpen, noun }){
     return list;
   };
   const gq = q.trim().toLowerCase();
-  const filtered = rows.filter(p => {
+  const filtered = scopeRows.filter(p => {
     if (gq && ![p.pn,p.customer,p.product,p.dosageForm,p.pm,p.rep,p.stage,p.notes]
         .some(v => String(v||'').toLowerCase().includes(gq))) return false;
     return cols.every(c => {
@@ -4046,7 +4108,14 @@ function ProjectTable({ rows, closed, onOpen, noun }){
           {q && <span className="tbl-search-x" onClick={()=>setQ('')}>✕</span>}
         </div>
         <button className="fbtn sec sm" onClick={resetAll} disabled={pristine}>✕ Reset all filters &amp; sorters</button>
-        <span className="fsmall">{sorted.length} of {rows.length} {noun!==undefined?noun:(closed?'closed':'open')} project{rows.length===1?'':'s'}{activeFilters?` · ${activeFilters} filter${activeFilters>1?'s':''}`:''}</span>
+        {commitToggle && (
+          <div className="scope-seg" title="Active = committed jobs (MFSO / NDA / SO-PO / paying). Archive = uncommitted leads (kept, never deleted).">
+            <button className={scope==='active'?'on':''} onClick={()=>setScope('active')}>Active <b>{nActive}</b></button>
+            <button className={scope==='archive'?'on':''} onClick={()=>setScope('archive')}>Archive <b>{nArchive}</b></button>
+            <button className={scope==='all'?'on':''} onClick={()=>setScope('all')}>All <b>{rows.length}</b></button>
+          </div>
+        )}
+        <span className="fsmall">{sorted.length} of {scopeRows.length} {noun!==undefined?noun:(closed?'closed':'open')} project{scopeRows.length===1?'':'s'}{activeFilters?` · ${activeFilters} filter${activeFilters>1?'s':''}`:''}</span>
         <span className="spacer"/>
         <button className="fbtn sec sm" onClick={exportCSV}>⬇ Export CSV</button>
       </div>
@@ -4231,6 +4300,10 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
     if (n==null) delete cur[alt]; else cur[alt] = n; upd({ costOverride: cur }); };
   // Append an audit entry through the shared onUpdate (Project Page has no setProjects).
   const auditUpd = (action, detail, extra) => { if (onUpdate) onUpdate(p.pn, { ...(extra||{}), auditLog:[...(p.auditLog||[]), auditEntry(action, detail)].slice(-500) }); };
+  // §49 commitment editor helpers (single-record, audited writes — these "promote" a project).
+  const setCommit    = (patch, action) => auditUpd('Commitment', action, { commit: { ...(p.commit||{}), ...patch, ts:new Date().toISOString() } });
+  const setArchived  = (val) => auditUpd('Commitment', val?'Archived (moved to Leads)':'Restored to active', { archived:val, keepActive:false });
+  const setKeepActive= (val) => auditUpd('Commitment', val?'Promoted to active pipeline':'Unpinned', { keepActive:val, archived:false });
   const cb = p.cogsBreakdown || null;
   const audit = Array.isArray(p.auditLog) ? p.auditLog : [];
   const qty = Number(p.batchUnits)||0;
@@ -4361,6 +4434,32 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
             <EditableField label="Batch Qty" value={p.batchUnits||''} type="number" placeholder="Add batch qty"
               format={()=> qty ? qty.toLocaleString() : '—'}
               onSave={onUpdate && (v=>upd({batchUnits:Number(v)||0}))}/>
+          </div>
+          <div className="pp-card">
+            <div className="pp-card-h">Commitment</div>
+            <div className="pp-f"><span className="pp-l">Pipeline</span><span className="pp-v">
+              {isActiveProj(p) ? <span className="fbadge ok">● Active job</span> : <span className="fbadge" style={{background:'#eef2f5',color:'#5a6b7a'}}>Archived lead</span>}
+            </span></div>
+            <div className="pp-f"><span className="pp-l">Signals</span><span className="pp-v"><CommitBadges p={p}/></span></div>
+            <label className="pp-f pp-chk"><span className="pp-l">NDA signed</span>
+              <input type="checkbox" checked={!!(p.commit&&p.commit.nda)} disabled={!onUpdate}
+                onChange={e=>setCommit({nda:e.target.checked, ndaDate: e.target.checked ? ((p.commit&&p.commit.ndaDate)||new Date().toISOString().slice(0,10)) : null}, 'NDA '+(e.target.checked?'signed':'cleared'))}/></label>
+            {p.commit&&p.commit.nda && <div className="pp-f"><span className="pp-l">NDA date</span>
+              <input type="date" className="pp-inp" value={(p.commit&&p.commit.ndaDate)||''} disabled={!onUpdate} onChange={e=>setCommit({ndaDate:e.target.value||null},'NDA date set')}/></div>}
+            <div className="pp-f"><span className="pp-l">PO / SO #</span>
+              <input key={'po'+p.pn} className="pp-inp" placeholder="PO or SO number" defaultValue={(p.commit&&p.commit.poNumber)||''} disabled={!onUpdate}
+                onBlur={e=>setCommit({poNumber:e.target.value, soIssued:(!!e.target.value.trim())||!!(p.commit&&p.commit.soIssued)},'PO/SO number set')}/></div>
+            <label className="pp-f pp-chk"><span className="pp-l">SO / PO issued</span>
+              <input type="checkbox" checked={!!(p.commit&&p.commit.soIssued)} disabled={!onUpdate} onChange={e=>setCommit({soIssued:e.target.checked},'SO/PO '+(e.target.checked?'issued':'cleared'))}/></label>
+            <label className="pp-f pp-chk"><span className="pp-l">Paying customer</span>
+              <input type="checkbox" checked={!!(p.commit&&p.commit.paying)} disabled={!onUpdate} onChange={e=>setCommit({paying:e.target.checked},'Paying '+(e.target.checked?'flagged':'cleared'))}/></label>
+            <div className="pp-f"><span className="pp-l">MFSO</span><span className="pp-v">{p.mfsoSigned&&p.mfsoSigned.signed ? <span className="fbadge ok">Signed</span> : <span style={{color:'#8794a0'}}>Not signed</span>}</span></div>
+            {onUpdate && <div style={{display:'flex',gap:6,marginTop:8,flexWrap:'wrap'}}>
+              {isArchivedProj(p)
+                ? <button className="btn sec" onClick={()=>setKeepActive(true)} title="Pin to the active pipeline even without a signal">⬆ Promote to active</button>
+                : (!isCommitted(p) && <button className="btn sec" onClick={()=>setArchived(true)} title="Move to archived Leads — searchable and reversible">Archive</button>)}
+              {(p.archived||p.keepActive) && <button className="btn sec" onClick={()=>auditUpd('Commitment','Reset to auto classification',{archived:false,keepActive:false})}>Reset to auto</button>}
+            </div>}
           </div>
         </div>
 
@@ -4551,6 +4650,7 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
   const [search, setSearch]     = useState('');
   const [pmFilter, setPmFilter] = useState('All');
   const [formFilter, setFormFilter] = useState('All');
+  const [activeOnly, setActiveOnly] = useState(true);   // §49 default the board to committed jobs only
   const [modal, setModal]       = useState(null);
   const [dragId, setDragId]     = useState(null);
   const [dragOver, setDragOver] = useState(null);
@@ -4628,8 +4728,9 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
     const matchF = formFilter === 'All' || p.dosageForm?.includes(formFilter);
     const matchDateFrom = !dateFrom || (p.dateReceived && p.dateReceived >= dateFrom);
     const matchDateTo   = !dateTo   || (p.dateReceived && p.dateReceived <= dateTo);
-    return matchQ && matchR && matchF && matchDateFrom && matchDateTo;
-  }), [projects, search, pmFilter, formFilter, dateFrom, dateTo]);
+    const matchActive = !activeOnly || isActiveProj(p);
+    return matchQ && matchR && matchF && matchDateFrom && matchDateTo && matchActive;
+  }), [projects, search, pmFilter, formFilter, dateFrom, dateTo, activeOnly]);
 
   const byStage = useMemo(() => {
     const m = {};
@@ -5036,7 +5137,7 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
         </div>
       )}
 
-      {view==='open'   && <ProjectTable rows={projects.filter(p=>!isClosedStage(p.stage))} closed={false} onOpen={p=>setPagePn(p.pn)} />}
+      {view==='open'   && <ProjectTable rows={projects.filter(p=>!isClosedStage(p.stage))} closed={false} commitToggle onOpen={p=>setPagePn(p.pn)} />}
       {view==='closed' && <ProjectTable rows={projects.filter(p=>isClosedStage(p.stage))}  closed={true}  onOpen={p=>setPagePn(p.pn)} />}
       <CardInfoTooltip data={infoCard} onHoverEnter={cancelClose} onHoverLeave={scheduleClose} />
 
@@ -5047,6 +5148,9 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
         <div className="cbar-row">
           <input className="search" placeholder="🔍 Search project #, customer, product…"
             value={search} onChange={e => setSearch(e.target.value)}/>
+          <div className="sep"/>
+          <button className={`flt-btn ${activeOnly?'active':''}`} onClick={()=>setActiveOnly(a=>!a)}
+            title="Show only committed jobs (MFSO / NDA / SO-PO / paying). Uncommitted leads are hidden.">{activeOnly?'★ Active only':'All projects'}</button>
           <div className="sep"/>
           <span className="filter-label">Form</span>
           {['All','Capsules','Powder','Liquid','Stickpacks','Gummies','Tablets'].map(f => (
@@ -7161,7 +7265,7 @@ function ProjectsPage({ projects, onToggleNav, onFormulate, onOpenMFSO, onSendRe
         <div className="gen-title">Projects</div>
         <span className="fsmall" style={{marginLeft:'auto',whiteSpace:'nowrap'}}>{projects.length} projects</span>
       </div>
-      <ProjectTable rows={projects} closed={false} noun="total" onOpen={p=>setPagePn(p.pn)} />
+      <ProjectTable rows={projects} closed={false} noun="total" commitToggle onOpen={p=>setPagePn(p.pn)} />
     </div>
   );
 }

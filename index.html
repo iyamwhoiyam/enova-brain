@@ -1606,21 +1606,13 @@ table.ptbl tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--teal);}
   background:var(--teal-soft);border-color:var(--teal);
   border-style:dashed;
 }
-/* ── Collapsible columns: click the header to roll a column up to a thin vertical strip ── */
+/* ── Collapsible columns: click the header to hide the cards. The header stays HORIZONTAL and the
+   SAME size as when expanded (no vertical/rotated text) — only the card body collapses. ── */
 .col-head.clickable{cursor:pointer;transition:background .12s;}
 .col-head.clickable:hover{background:#f4f7fa;}
 .col-head.clickable:active{background:#eef2f6;}
-.col.col-collapsed{width:40px;}
 .col.col-collapsed .col-body{display:none;}
-.col.col-collapsed .col-head{
-  writing-mode:vertical-rl;text-orientation:mixed;
-  min-height:190px;height:auto;align-items:center;justify-content:space-between;
-  padding:12px 8px;margin-bottom:0;border-radius:var(--r);
-}
-.col.col-collapsed .col-head .col-head-label{
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-height:150px;
-}
-.col.col-collapsed .col-head .col-count{writing-mode:horizontal-tb;margin-top:0;}
+.col.col-collapsed .col-head{margin-bottom:0;border-radius:var(--r);}
 
 /* Column stage accent — thin colored top stripe on the white header */
 .ch-Inquiry{border-top-color:#7b8794;}
@@ -2214,6 +2206,20 @@ input.fcell:focus{border-color:var(--teal);outline:none;background:#fff;}
 .rdy-mini.ok{background:var(--ok-bg);color:var(--ok);} .rdy-mini.warn{background:var(--warn-bg);color:var(--warn);} .rdy-mini.bad{background:var(--bad-bg);color:var(--bad);}
 .rdy-fe{margin-top:6px;font-size:11px;padding:3px 6px;border-radius:4px;}
 .rdy-fe.ok{background:var(--ok-bg);color:var(--ok);} .rdy-fe.warn{background:var(--warn-bg);color:var(--warn);} .rdy-fe.bad{background:var(--bad-bg);color:var(--bad);}
+/* clickable KPI filters */
+.rdy-kpi.clickable{cursor:pointer;transition:box-shadow .12s,transform .06s;}
+.rdy-kpi.clickable:hover{box-shadow:0 3px 10px rgba(0,0,0,.10);transform:translateY(-1px);}
+.rdy-kpi.active{outline:2px solid var(--navy);outline-offset:-1px;box-shadow:0 2px 8px rgba(47,143,196,.18);}
+/* collapsible readiness columns — header stays HORIZONTAL, same size; only the body collapses */
+.rdy-col-head.clickable{cursor:pointer;}
+.rdy-col.rdy-collapsed{min-height:0;align-self:flex-start;}
+.rdy-col.rdy-collapsed .rdy-col-body{display:none;}
+.rdy-col.rdy-collapsed .rdy-col-head{border-radius:6px;}
+/* drag & drop between columns */
+.rdy-col-body.rdy-drop{background:var(--teal-soft);outline:2px dashed var(--teal);outline-offset:-4px;}
+.rdy-card.rdy-dragging{opacity:.45;}
+.rdy-card-override{font-size:9px;color:var(--amber);font-weight:700;margin-left:4px;}
+.rdy-revert{font-size:11px;border:1px solid var(--line);background:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--amber);}
 .rdy-drawer-bg{position:fixed;inset:0;background:rgba(20,30,40,.45);z-index:1000;display:flex;justify-content:flex-end;}
 .rdy-drawer{width:min(660px,96vw);background:var(--paper);height:100%;overflow:auto;box-shadow:-4px 0 20px rgba(0,0,0,.2);padding:16px;}
 .rdy-drawer-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px;}
@@ -2230,6 +2236,22 @@ input.fcell:focus{border-color:var(--teal);outline:none;background:#fff;}
 .rdy-visit-cell{flex-direction:row!important;align-items:center;gap:8px!important;}
 .rdy-visit-cell input{width:auto;}
 .rdy-visit-note{grid-column:1/3;}
+.rdy-filter-note{font-size:12px;color:#5a6b7a;display:flex;align-items:center;gap:8px;margin:-4px 0 2px;}
+/* project + documents panel in the detail drawer */
+.rdy-proj{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px;margin-bottom:12px;}
+.rdy-proj-head{font-weight:700;color:var(--ink);font-size:13px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.03em;}
+.rdy-proj-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px 12px;}
+.rdy-proj-grid>div{display:flex;flex-direction:column;gap:1px;}
+.rdy-proj-grid span{font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#8a97a3;}
+.rdy-proj-grid b{font-size:12.5px;color:var(--ink);font-weight:600;}
+.rdy-proj-notes{margin-top:10px;}
+.rdy-proj-notes span{font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#8a97a3;}
+.rdy-proj-notes div{font-size:12px;color:var(--ink);white-space:pre-wrap;max-height:120px;overflow:auto;background:#f7f9fb;border:1px solid var(--line);border-radius:5px;padding:7px 9px;margin-top:3px;}
+.rdy-docs{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:12px;border-top:1px solid var(--line);padding-top:10px;}
+.rdy-docs-l{font-size:11px;font-weight:700;color:#5a6b7a;text-transform:uppercase;letter-spacing:.03em;}
+.rdy-doc-btn{padding:5px 12px;border:1px solid var(--navy);background:#fff;color:var(--navy);border-radius:var(--r);font:inherit;font-size:12px;font-weight:600;cursor:pointer;}
+.rdy-doc-btn:hover{background:var(--teal-soft);}
+.rdy-doc-btn.ghost{border-color:var(--line);color:#5a6b7a;}
 .rdy-lane{background:var(--card);border:1px solid var(--line);border-radius:6px;margin-bottom:10px;overflow:hidden;}
 .rdy-lane-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#f0f4f7;font-weight:600;font-size:13px;color:var(--ink);}
 .rdy-gate{display:flex;align-items:center;gap:9px;padding:8px 12px;border-top:1px solid var(--line);}
@@ -2526,6 +2548,7 @@ function readinessByDept(r, gates){
 // DERIVE the board phase from gate completion + project stage (readiness-truthful, not drag-set).
 function derivePhase(p){
   const r = projReadiness(p);
+  if (r && r.phaseOverride) return r.phaseOverride;   // §48b manual drag placement wins over derivation
   const st = normalizeStage(p && p.stage);
   if (st === "In Production") return "production";
   if (typeof isClosedStage === "function" && isClosedStage(st)) return "released";
@@ -8475,14 +8498,17 @@ function inReadinessPipeline(p){
 }
 function fmtRdyDate(ts){ try { return new Date(ts).toLocaleDateString('en-US',{month:'short',day:'numeric'}); } catch(e){ return ''; } }
 
-function ReadinessCard({ p, gates, nowMs, onOpen }){
+function ReadinessCard({ p, gates, nowMs, onOpen, onDragStart, onDragEnd, dragging }){
   const r = projReadiness(p);
   const sc = readinessScore(r, gates);
   const fe = scheduleFeasibility(p, nowMs);
   return (
-    <div className="rdy-card" onClick={onOpen} title="Open readiness detail">
+    <div className={`rdy-card ${dragging?'rdy-dragging':''}`} draggable
+      onDragStart={e=>onDragStart&&onDragStart(p.pn,e)} onDragEnd={onDragEnd}
+      onClick={onOpen} title="Open readiness detail · drag to move between columns">
       <div className="rdy-card-top">
         <span className="rdy-card-pn">{p.pn}</span>
+        {r && r.phaseOverride ? <span className="rdy-card-override" title="Manually placed — open the card to reset to auto">⇄ moved</span> : null}
         {r && r.soNumber ? <span className="rdy-badge so">SO {r.soNumber}</span> : null}
         {r && r.customerVisit ? <span className="rdy-badge visit" title={r.customerVisitNote||'Customer visit'}>👁 Visit</span> : null}
       </div>
@@ -8558,7 +8584,7 @@ function GateConfigModal({ gateConfig, isAdmin, onClose }){
   );
 }
 
-function ReadinessDetail({ p, gates, nowMs, onClose, setGate, setMeta, addException, decideException, removeException, onOpenMFSO }){
+function ReadinessDetail({ p, gates, nowMs, onClose, setGate, setMeta, addException, decideException, removeException, onOpenMFSO, onOpenProject, clearOverride }){
   const r = p.readiness || emptyReadiness();
   const sc = readinessScore(r, gates);
   const fe = scheduleFeasibility(p, nowMs);
@@ -8566,6 +8592,9 @@ function ReadinessDetail({ p, gates, nowMs, onClose, setGate, setMeta, addExcept
   const [exTitle, setExTitle] = useState(""); const [exDetail, setExDetail] = useState(""); const [exKind, setExKind] = useState("conditional-release");
   const grouped = READINESS_DEPTS.map(d => ({ dept:d, gates: gates.filter(g=>g.dept===d) })).filter(x=>x.gates.length);
   const moText = (r.moNumbers||[]).join(', ');
+  const openDocSafe = (fn,name)=>{ try { printDoc(fn(p)); } catch(e){ toast('Could not build '+name+': '+((e&&e.message)||e),'err'); } };
+  const cogsU = (p.cogsBreakdown && p.cogsBreakdown.cogsPerUnit!=null) ? Number(p.cogsBreakdown.cogsPerUnit) : null;
+  const dosed = (p.ingredients||[]).filter(i=>Number(i.inputMg)>0).length;
   return (
     <div className="rdy-drawer-bg" onClick={onClose}>
       <div className="rdy-drawer" onClick={e=>e.stopPropagation()}>
@@ -8575,7 +8604,8 @@ function ReadinessDetail({ p, gates, nowMs, onClose, setGate, setMeta, addExcept
             <div className="rdy-drawer-prod">{p.product||'—'} — {cleanCustomer(p.customer)}</div>
           </div>
           <div className="rdy-drawer-head-actions">
-            {onOpenMFSO && <button className="rdy-btn ghost" onClick={()=>onOpenMFSO(p.pn)}>Open MFSO</button>}
+            {onOpenProject && <button className="rdy-btn ghost" onClick={()=>onOpenProject(p.pn)}>Open Project ↗</button>}
+            {onOpenMFSO && <button className="rdy-btn ghost" onClick={()=>onOpenMFSO(p.pn)}>Open MFSO ↗</button>}
             <button className="rdy-x" onClick={onClose}>✕</button>
           </div>
         </div>
@@ -8588,6 +8618,32 @@ function ReadinessDetail({ p, gates, nowMs, onClose, setGate, setMeta, addExcept
           <label>Scheduled run<input type="date" value={r.scheduledRun||''} onChange={e=>setMeta(p.pn,'scheduledRun', e.target.value||null, 'Readiness run', 'Run date '+(e.target.value||'cleared'))} /></label>
           <label className="rdy-visit-cell"><span>Customer visit</span><input type="checkbox" checked={!!r.customerVisit} onChange={e=>setMeta(p.pn,'customerVisit', e.target.checked, 'Readiness run', 'Customer visit '+(e.target.checked?'flagged':'cleared'))} /></label>
           {r.customerVisit && <label className="rdy-visit-note">Visit note<input value={r.customerVisitNote||''} onChange={e=>setMeta(p.pn,'customerVisitNote',e.target.value)} placeholder="Customer flying in — noon run" /></label>}
+        </div>
+
+        {r.phaseOverride && <div className="rdy-fe-banner warn" style={{display:'flex',alignItems:'center',gap:8,justifyContent:'space-between'}}><span>⇄ Manually placed in <b>{(READINESS_PHASES.find(x=>x.id===r.phaseOverride)||{}).label||r.phaseOverride}</b> (overrides auto phase).</span>{clearOverride && <button className="rdy-revert" onClick={()=>clearOverride(p.pn)}>Reset to auto</button>}</div>}
+
+        <div className="rdy-proj">
+          <div className="rdy-proj-head"><span>Project &amp; product</span></div>
+          <div className="rdy-proj-grid">
+            <div><span>Form</span><b>{p.dosageForm}{p.isBulk?' · Bulk':''}</b></div>
+            <div><span>Stage</span><b>{normalizeStage(p.stage)}</b></div>
+            <div><span>Container</span><b>{p.containerType||'—'}</b></div>
+            <div><span>Serving</span><b>{p.servingSize} × {p.servingsPerUnit}/unit</b></div>
+            <div><span>Dosed actives</span><b>{dosed}</b></div>
+            <div><span>COGS / unit</span><b>{cogsU!=null?('$'+cogsU.toFixed(4)):'—'}</b></div>
+            <div><span>PM / Rep</span><b>{p.pm||'—'}{p.rep?(' · '+p.rep):''}</b></div>
+            <div><span>Received</span><b>{p.dateReceivedDisplay||'—'}</b></div>
+          </div>
+          {p.notes && <div className="rdy-proj-notes"><span>Notes</span><div>{p.notes}</div></div>}
+          <div className="rdy-docs">
+            <span className="rdy-docs-l">Documents:</span>
+            <button className="rdy-doc-btn" onClick={()=>openDocSafe(buildMFSO,'MFSO')}>MFSO</button>
+            <button className="rdy-doc-btn" onClick={()=>openDocSafe(buildSO,'SO')}>SO</button>
+            <button className="rdy-doc-btn" onClick={()=>openDocSafe(buildMO,'MO')}>MO</button>
+            <button className="rdy-doc-btn" onClick={()=>openDocSafe(buildBOM,'BOM')}>BOM</button>
+            <button className="rdy-doc-btn" onClick={()=>openDocSafe(buildMMR,'MMR')}>MMR</button>
+            {onOpenProject && <button className="rdy-doc-btn ghost" onClick={()=>onOpenProject(p.pn)}>Full Project Page ↗</button>}
+          </div>
         </div>
 
         <div className="rdy-gates">
@@ -8653,7 +8709,7 @@ function ReadinessDetail({ p, gates, nowMs, onClose, setGate, setMeta, addExcept
   );
 }
 
-function ReadinessPage({ projects, setProjects, onToggleNav, onOpenMFSO, gateConfig }){
+function ReadinessPage({ projects, setProjects, onToggleNav, onOpenMFSO, onOpenProject, gateConfig }){
   const { isAdmin } = useRole();
   const gates = (gateConfig && gateConfig.gates) || READINESS_GATES;
   const [openPn, setOpenPn] = useState(null);
@@ -8661,14 +8717,29 @@ function ReadinessPage({ projects, setProjects, onToggleNav, onOpenMFSO, gateCon
   const [startOpen, setStartOpen] = useState(false);
   const [q, setQ] = useState("");
   const [visitOnly, setVisitOnly] = useState(false);
+  const [kpiFilter, setKpiFilter] = useState(null);   // null | 'atrisk' | 'visits' | 'ready' | 'production'
+  const [collapsedCols, setCollapsedCols] = useState({});
+  const [dragPn, setDragPn] = useState(null);
+  const [dropCol, setDropCol] = useState(null);
   const nowMs = useMemo(() => Date.now(), []);
+  const toggleCol = (id) => setCollapsedCols(m => ({ ...m, [id]: !m[id] }));
+  const matchKpi = (p) => {
+    if (!kpiFilter) return true;
+    const r = projReadiness(p); const sc = readinessScore(r, gates); const fe = scheduleFeasibility(p, nowMs); const ph = derivePhase(p);
+    if (kpiFilter==='atrisk') return sc.blocked>0 || (fe && fe.level==='bad');
+    if (kpiFilter==='visits') return !!(r && r.customerVisit);
+    if (kpiFilter==='ready') return ph==='ready';
+    if (kpiFilter==='production') return ph==='production';
+    return true;
+  };
 
   const pipeline = useMemo(() => {
     let list = projects.filter(inReadinessPipeline);
     if (visitOnly) list = list.filter(p => { const r=projReadiness(p); return r && r.customerVisit; });
+    if (kpiFilter) list = list.filter(matchKpi);
     if (q.trim()){ const s=q.trim().toLowerCase(); list = list.filter(p => { const r=projReadiness(p); return [p.pn,p.customer,p.product,(r&&r.soNumber)||''].join(' ').toLowerCase().includes(s); }); }
     return list;
-  }, [projects, visitOnly, q, gates]);
+  }, [projects, visitOnly, q, gates, kpiFilter, nowMs]);
 
   const byPhase = useMemo(() => {
     const m = {}; READINESS_PHASES.forEach(ph => m[ph.id]=[]);
@@ -8708,6 +8779,12 @@ function ReadinessPage({ projects, setProjects, onToggleNav, onOpenMFSO, gateCon
   const addException = (pn, title, detail, kind) => patchR(pn, r => { r.exceptions = r.exceptions.concat([{ id:rdyId('ex'), kind:kind||'conditional-release', title, detail, requestedBy:CURRENT_ACTOR.email, requestedByName:CURRENT_ACTOR.name, requestedTs:new Date().toISOString(), approvals:{}, status:'open' }]); }, "Readiness exception", (kind||'conditional-release')+": "+title);
   const decideException = (pn, exId, dp, decision) => patchR(pn, r => { r.exceptions = r.exceptions.map(e => { if (e.id!==exId) return e; const approvals = { ...(e.approvals||{}), [dp]:{ decision, by:CURRENT_ACTOR.email, byName:CURRENT_ACTOR.name, ts:new Date().toISOString() } }; const ex2 = { ...e, approvals }; ex2.status = exceptionStatus(ex2); return ex2; }); }, "Readiness exception", dp+" "+decision+"d an exception");
   const removeException = (pn, exId) => patchR(pn, r => { r.exceptions = r.exceptions.filter(e=>e.id!==exId); }, "Readiness exception", "Exception removed");
+  // §48b manual phase override via drag-and-drop
+  const setPhaseOverride = (pn, phaseId) => patchR(pn, r => { r.phaseOverride = phaseId; }, "Readiness move", "Moved to " + ((READINESS_PHASES.find(x=>x.id===phaseId)||{}).label || phaseId));
+  const clearOverride = (pn) => patchR(pn, r => { r.phaseOverride = null; }, "Readiness move", "Reset to auto phase");
+  const onDragStart = (pn) => setDragPn(pn);
+  const onDragEnd = () => { setDragPn(null); setDropCol(null); };
+  const onColDrop = (phaseId) => { if (dragPn) setPhaseOverride(dragPn, phaseId); setDragPn(null); setDropCol(null); };
 
   return (
     <div className="app-page gen-page rdy-page" style={{background:'var(--paper)'}}>
@@ -8723,21 +8800,28 @@ function ReadinessPage({ projects, setProjects, onToggleNav, onOpenMFSO, gateCon
       </div>
       <div className="gen-body rdy-body">
         <div className="rdy-kpis">
-          <div className="rdy-kpi"><div className="rdy-kpi-n">{kpis.total}</div><div className="rdy-kpi-l">In pipeline</div></div>
-          <div className={`rdy-kpi ${kpis.atRisk?'bad':''}`}><div className="rdy-kpi-n">{kpis.atRisk}</div><div className="rdy-kpi-l">At risk</div></div>
-          <div className={`rdy-kpi ${kpis.visits?'warn':''}`}><div className="rdy-kpi-n">{kpis.visits}</div><div className="rdy-kpi-l">Customer visits</div></div>
-          <div className="rdy-kpi ok"><div className="rdy-kpi-n">{kpis.ready}</div><div className="rdy-kpi-l">Ready to run</div></div>
-          <div className="rdy-kpi"><div className="rdy-kpi-n">{kpis.running}</div><div className="rdy-kpi-l">In production</div></div>
+          <div className={`rdy-kpi clickable ${kpiFilter===null?'active':''}`} onClick={()=>setKpiFilter(null)} title="Show all runs"><div className="rdy-kpi-n">{kpis.total}</div><div className="rdy-kpi-l">In pipeline</div></div>
+          <div className={`rdy-kpi clickable ${kpis.atRisk?'bad':''} ${kpiFilter==='atrisk'?'active':''}`} onClick={()=>setKpiFilter(f=>f==='atrisk'?null:'atrisk')} title="Filter to at-risk runs"><div className="rdy-kpi-n">{kpis.atRisk}</div><div className="rdy-kpi-l">At risk</div></div>
+          <div className={`rdy-kpi clickable ${kpis.visits?'warn':''} ${kpiFilter==='visits'?'active':''}`} onClick={()=>setKpiFilter(f=>f==='visits'?null:'visits')} title="Filter to customer-visit runs"><div className="rdy-kpi-n">{kpis.visits}</div><div className="rdy-kpi-l">Customer visits</div></div>
+          <div className={`rdy-kpi clickable ok ${kpiFilter==='ready'?'active':''}`} onClick={()=>setKpiFilter(f=>f==='ready'?null:'ready')} title="Filter to ready-to-run"><div className="rdy-kpi-n">{kpis.ready}</div><div className="rdy-kpi-l">Ready to run</div></div>
+          <div className={`rdy-kpi clickable ${kpiFilter==='production'?'active':''}`} onClick={()=>setKpiFilter(f=>f==='production'?null:'production')} title="Filter to in-production"><div className="rdy-kpi-n">{kpis.running}</div><div className="rdy-kpi-l">In production</div></div>
         </div>
+        {kpiFilter && <div className="rdy-filter-note">Filtered to <b>{kpiFilter==='atrisk'?'At risk':kpiFilter==='visits'?'Customer visits':kpiFilter==='ready'?'Ready to run':'In production'}</b> · showing {pipeline.length}. <button className="rdy-revert" onClick={()=>setKpiFilter(null)}>Clear filter</button></div>}
         <div className="rdy-board">
           {READINESS_PHASES.map(ph => {
             const cards = byPhase[ph.id]||[];
+            const isCol = !!collapsedCols[ph.id];
             return (
-              <div key={ph.id} className="rdy-col">
-                <div className={`rdy-col-head ${ph.chip}`}><span>{ph.label}</span><span className="rdy-col-n">{cards.length}</span></div>
-                <div className="rdy-col-body">
-                  {cards.length===0 ? <div className="rdy-empty">—</div> :
-                    cards.map(p => <ReadinessCard key={p.pn} p={p} gates={gates} nowMs={nowMs} onOpen={()=>setOpenPn(p.pn)} />)}
+              <div key={ph.id} className={`rdy-col ${isCol?'rdy-collapsed':''}`}
+                onDragOver={e=>{ if(dragPn){ e.preventDefault(); if(dropCol!==ph.id) setDropCol(ph.id); } }}
+                onDrop={()=>onColDrop(ph.id)}>
+                <div className={`rdy-col-head clickable ${ph.chip}`} onClick={()=>toggleCol(ph.id)} title={isCol?`Expand “${ph.label}”`:`Collapse “${ph.label}”`}
+                  role="button" tabIndex={0} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggleCol(ph.id); } }}>
+                  <span>{ph.label}</span><span className="rdy-col-n">{cards.length}</span>
+                </div>
+                <div className={`rdy-col-body ${dropCol===ph.id&&dragPn?'rdy-drop':''}`} onDragLeave={()=>{ if(dropCol===ph.id) setDropCol(null); }}>
+                  {cards.length===0 ? <div className="rdy-empty">{dragPn?'Drop here':'—'}</div> :
+                    cards.map(p => <ReadinessCard key={p.pn} p={p} gates={gates} nowMs={nowMs} dragging={dragPn===p.pn} onDragStart={onDragStart} onDragEnd={onDragEnd} onOpen={()=>setOpenPn(p.pn)} />)}
                 </div>
               </div>
             );
@@ -8746,7 +8830,7 @@ function ReadinessPage({ projects, setProjects, onToggleNav, onOpenMFSO, gateCon
       </div>
       {startOpen && <StartRunModal projects={projects} onPick={startRun} onClose={()=>setStartOpen(false)} />}
       {configOpen && <GateConfigModal gateConfig={gateConfig} isAdmin={isAdmin} onClose={()=>setConfigOpen(false)} />}
-      {openProj && <ReadinessDetail p={openProj} gates={gates} nowMs={nowMs} onClose={()=>setOpenPn(null)} setGate={setGate} setMeta={setMeta} addException={addException} decideException={decideException} removeException={removeException} onOpenMFSO={onOpenMFSO} />}
+      {openProj && <ReadinessDetail p={openProj} gates={gates} nowMs={nowMs} onClose={()=>setOpenPn(null)} setGate={setGate} setMeta={setMeta} addException={addException} decideException={decideException} removeException={removeException} onOpenMFSO={onOpenMFSO} onOpenProject={onOpenProject} clearOverride={clearOverride} />}
     </div>
   );
 }
@@ -8956,7 +9040,7 @@ function App({ session }) {
         {role==='viewer' && <div className="falert warn" style={{margin:0,borderRadius:0,zIndex:150}}>👁 <strong>Viewer access</strong> — you can see everything but can't save changes. Ask an Enova admin (Carlos, Tong, Joseph, Marina, Nick, Jonathan, or Ryan) for edit access.</div>}
         {writeErr && <div className="falert err" style={{margin:0,borderRadius:0,display:'flex',alignItems:'center',gap:8,zIndex:150}}><span style={{flex:1}}>⚠ {writeErr}</span><button className="fbtn sec sm" onClick={()=>setWriteErr(null)}>Dismiss</button></div>}
         {nav === 'wip' && <WIPBoardPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onFormulate={goFormulate} onOpenMFSO={goMFSO} onSendReview={sendReview} people={ENOVA_PEOPLE} openPagePn={openPn} onPageOpened={()=>setOpenPn(null)} onUpdateProject={updateProject} onRenameProject={renameProject} onDeleteProject={deleteProject} />}
-        {nav === 'readiness' && <ReadinessPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onOpenMFSO={goMFSO} gateConfig={rdyCfg} />}
+        {nav === 'readiness' && <ReadinessPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onOpenMFSO={goMFSO} onOpenProject={openProjectPage} gateConfig={rdyCfg} />}
         {nav === 'projects' && <ProjectsPage projects={projects} onToggleNav={toggleNav} onFormulate={goFormulate} onOpenMFSO={goMFSO} onSendReview={sendReview} people={ENOVA_PEOPLE} onUpdateProject={updateProject} onRenameProject={renameProject} onDeleteProject={deleteProject} />}
         {nav === 'formulation' && <FormulationPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} targetPn={formulationPn} autoGenPn={pendingGen} onGenConsumed={()=>setPendingGen(null)} />}
         {nav === 'generate' && <GeneratePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}

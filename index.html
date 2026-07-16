@@ -670,6 +670,81 @@
     return { activeCPS: cps, activeCPU: cps * basis.servPerUnit, rows, servPerUnit: basis.servPerUnit };
   }
 
+  // ── 3a. BASE / NON-ACTIVE SYSTEMS — the house-standard turnkey base for a dose form. ─────────────
+  // A complete Enova product = the customer's ACTIVES + the delivery-system base for that form
+  // (bulking body, gelling/binding, buffer, humectant, sweetener/flavor/color, flow & anti-caking
+  // agents, coating, excipients). For GUMMIES the base is a displacement model: actives + the fixed-%
+  // / fixed-mg base rows, with the bulk sweeteners filling the remainder to the exact gummy weight.
+  // These knowledge bases are house standards (from Enova's own completed formulas) — first-class
+  // backend data, not "invented." Every row resolves to a MISys SKU + live cost; water (nc) is $0.
+  const GUMMY_SUGAR_BASE = [
+    { name: "Sugar Granulated", rm: "ALT-RP-0529", bulk: true, ratio: 0.6136, locked: true, section: "body" },
+    { name: "42/43 DE Corn Syrup / Glucose", rm: "ALT-RL-1381", bulk: true, ratio: 0.3864, locked: true, section: "body" },
+    { name: "Slow Set Pectin CS502", rm: "ALT-RP-2013", pct: 0.015, locked: true, section: "body" },
+    { name: "Citric Acid Anhydrous", rm: "ALT-RP-0003", pct: 0.007, locked: true, section: "body" },
+    { name: "Sodium Citrate", rm: "ALT-RP-1859", pct: 0.003, locked: true, section: "body" },
+    { name: "Water (R/O)", rm: "ALT-RP-0000", pct: 0.085, locked: true, nc: true, section: "body" },
+    { name: "Liquid Flavor", rm: "ALT-RL-0111", pct: 0.005, locked: false, section: "body" },
+    { name: "Liquid Color", rm: "ALT-RP-2026", pct: 0.002, locked: false, section: "body" },
+    { name: "MCT Oil — Bottom Coat", rm: "ALT-RL-1272", mgFixed: 60, locked: true, coating: true, section: "coating" },
+    { name: "Sunflower Lecithin", rm: "ALT-RP-0618-GP-VS", mgFixed: 7, locked: true, coating: true, section: "coating" },
+    { name: "Mastercoat ASFC3000", rm: "ALT-RL-2247", mgFixed: 20, locked: true, coating: true, section: "coating" },
+    { name: "MCT Oil — Top Coat", rm: "ALT-RL-1272", mgFixed: 95, locked: true, coating: true, section: "coating" },
+    { name: "Sugar — Dusting", rm: "ALT-RP-0529", mgFixed: 200, locked: true, coating: true, section: "coating" },
+  ];
+  const GUMMY_SF_BASE = [
+    { name: "Sorbitol Gran", rm: "ALT-RP-1247", bulk: true, ratio: 0.6870, locked: true, section: "body" },
+    { name: "Maltitol 80-55 Syrup", rm: "ALT-RL-1389", bulk: true, ratio: 0.3130, locked: true, section: "body" },
+    { name: "Slow Set Pectin CS509", rm: "ALT-RP-2101", pct: 0.030, locked: true, section: "body" },
+    { name: "R/O Water", rm: "ALT-RP-0000", pct: 0.12167, locked: true, nc: true, section: "body" },
+    { name: "Citric Acid Anhydrous", rm: "ALT-RP-0003", pct: 0.007, locked: true, section: "body" },
+    { name: "Vegetable Glycerin, Kosher", rm: "ALT-RL-0028", pct: 0.020, locked: true, section: "body" },
+    { name: "Sodium Citrate", rm: "ALT-RP-1859", pct: 0.003, locked: true, section: "body" },
+    { name: "Calcium Citrate 21%", rm: "ALT-RP-0126", pct: 0.006, locked: true, section: "body" },
+    { name: "MCT Oil /3595 Kosher", rm: "ALT-RL-1272", pct: 0.003, locked: true, section: "body" },
+    { name: "Sunflower Lecithin", rm: "ALT-RP-0618-GP-VS", pct: 0.0015, locked: true, section: "body" },
+    { name: "Liquid Flavor", rm: "ALT-RL-0111", pct: 0.015, locked: false, section: "body" },
+    { name: "Liquid Color", rm: "ALT-RP-2026", pct: 0.010, locked: false, section: "body" },
+    { name: "Bitter Masker 3115B", rm: "ALT-RP-1446", pct: 0.003, locked: true, section: "body" },
+    { name: "Mastercoat ASFC3000", rm: "ALT-RL-2247", pct: 0.005, locked: true, coating: true, section: "coating" },
+  ];
+  // Active mass per single gummy (mg), potency-adjusted, NO overage (label claim ÷ potency ÷ pieces/serving).
+  function gummyActivesMgPerGummy(p) {
+    const serv = num(p && p.servingSize) || 1;
+    let mgServ = 0;
+    ((p && p.ingredients) || []).forEach((r) => {
+      const pot = num(r.potencyPct) > 0 ? num(r.potencyPct) / 100 : 1;
+      mgServ += num(r.inputMg) / pot;
+    });
+    return serv > 0 ? mgServ / serv : mgServ;
+  }
+  // THE single source of truth for a gummy's complete base/process/coating system, materialized as
+  // rows scaled to gummyWt. Bulk sweeteners are the balance (fill the remainder after actives +
+  // fixed base, split by ratio) so total per gummy == gummyWt. Coating drops for bulk pack-out.
+  //   ctx = { invIx, bulk, activesMgPerGummy? }  → { rows, costPerPiece, totalMg }
+  function gummyBase(project, ctx) {
+    const p = project || {}, c = ctx || {};
+    const invIx = c.invIx || {};
+    const baseT = p.gummyType === "sugarFree" ? GUMMY_SF_BASE : GUMMY_SUGAR_BASE;
+    const gw = num(p.gummyWt) > 0 ? num(p.gummyWt) : 4500;
+    const bulk = !!c.bulk;
+    const items = baseT.filter((t) => !(t.coating && bulk));
+    const actMg = c.activesMgPerGummy != null ? num(c.activesMgPerGummy) : gummyActivesMgPerGummy(p);
+    const nonBulkMg = (t) => (t.mgFixed != null ? t.mgFixed : (num(t.pct) || 0) * gw);
+    const fixedSum = items.reduce((s, t) => s + (t.bulk ? 0 : nonBulkMg(t)), 0);
+    const remainder = Math.max(0, gw - actMg - fixedSum);
+    const ratioSum = items.reduce((s, t) => s + (t.bulk ? (num(t.ratio) || 0) : 0), 0) || 1;
+    const rows = items.map((t, idx) => {
+      const mgG = t.bulk ? remainder * ((num(t.ratio) || 0) / ratioSum) : nonBulkMg(t);
+      const sel = (p.baseItems || {})[idx];
+      const fresh = sel ? (invIx[sel.n] || null) : (t.rm ? (invIx[t.rm] || null) : null);
+      const cost = (!t.nc && fresh && fresh.u > 0) ? (mgG / 1000) * fresh.u : 0;
+      return { idx, name: t.name, rm: t.rm, section: t.section, coating: !!t.coating, bulk: !!t.bulk,
+        nc: !!t.nc, locked: !!t.locked, pct: t.pct, mgFixed: t.mgFixed, mgG, fresh, cost };
+    });
+    return { rows, costPerPiece: rows.reduce((s, r) => s + r.cost, 0), totalMg: rows.reduce((s, r) => s + r.mgG, 0) + actMg };
+  }
+
   // ── 3b. COSTING CORE — the single source of truth for a project's COGS build. ────────────────────
   // A FAITHFUL, deterministic replica of the app's FormulationEditor cost math, lifted into the
   // kernel so the browser, CI, and the server all cost a project identically. It OWNS the arithmetic
@@ -724,8 +799,13 @@
     const actCPS = calcIng.reduce((s, r) => s + r.cPS, 0);
     const actCPU = actCPS * mbServings;
 
-    // Gummy base (0 for non-gummy) — base cost per piece injected, scaled to pieces/container.
-    const baseCPU = cfg.gummy ? num(c.baseCostPerPiece) * piecesPerContainer : 0;
+    // Gummy base (0 for non-gummy) — the kernel now DERIVES the base cost/piece itself from the
+    // house-standard base KB × live inventory (displacement to gummyWt). An injected value is still
+    // honored as an override for backward-compat / a reviewer-edited base.
+    const baseCostPerPiece = cfg.gummy
+      ? (c.baseCostPerPiece != null ? num(c.baseCostPerPiece) : gummyBase(p, { invIx, bulk: isBulkPack }).costPerPiece)
+      : 0;
+    const baseCPU = baseCostPerPiece * piecesPerContainer;
 
     // Shell — override-aware, scaled to pieces/container (present only if a shell SKU is chosen).
     const shellUCost = p.shellItem ? skuCost(p.shellItem.n, p, invIx) : null;
@@ -781,6 +861,27 @@
       laborManual, overheadPct, mbBatchQty, matLossPct, blendKgPerUnit, mbRes,
     };
     return { breakdown, view };
+  }
+
+  // ── 3c. FORMULATE — the unified backend entry for a form's complete turnkey base/system. ─────────
+  // ONE call that produces the delivery-system base for ANY dose form: gummies are built natively by
+  // the kernel (displacement base KB); capsule / powder / stickpack / liquid route to the per-form
+  // system generator (EnovaFormulator: flow & anti-caking agents, bulking carrier, sweetener/flavor/
+  // acid, preservatives, excipients) which is INJECTED via ctx so the kernel stays pure. The caller
+  // supplies the engine + its input (the app's actives→target mapping). Returns a normalized shape.
+  function formulate(project, ctx) {
+    const p = project || {}, c = ctx || {};
+    const form = String(p.dosageForm || "");
+    if (isGummyForm(form)) {
+      const gb = gummyBase(p, { invIx: c.invIx || {}, bulk: !!c.bulk, activesMgPerGummy: c.activesMgPerGummy });
+      return { form: "gummy", engine: "kernel", base: gb, rows: gb.rows, costPerPiece: gb.costPerPiece, notes: [] };
+    }
+    const EF = c.formulator || null;
+    if (EF && typeof EF.build === "function" && c.formulatorInput) {
+      const out = EF.build(c.formulatorForm || form, c.formulatorInput);
+      return { form, engine: "EnovaFormulator", system: out, rows: (out && out.rows) || [], notes: (out && out.notes) || [] };
+    }
+    return { form, engine: null, rows: [], notes: ["No base generator wired for this form (inject ctx.formulator + ctx.formulatorInput)."] };
   }
 
   // ── 4. RECONCILIATION — the hardening core. Independently cross-check every stored figure. ───────
@@ -875,11 +976,13 @@
   function reconcileErrors(p, invIx) { return reconcile(p, invIx).errors.map((e) => e.message); }
 
   return {
-    VERSION: "1.1.0-kernel(pn+schema+cost+reconcile)",
+    VERSION: "1.2.0-kernel(pn+schema+base+cost+reconcile)",
     // contracts
     PN_RE, isValidPN, pnParts, pnYear, nextPN, validateSchema,
     // derivation
     skuCost, batchBasis, deriveActiveCPU,
+    // base / non-active systems + unified formula generation
+    GUMMY_SUGAR_BASE, GUMMY_SF_BASE, gummyActivesMgPerGummy, gummyBase, formulate,
     // costing core
     cost,
     // hardening
@@ -5952,73 +6055,18 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
   const unitNoun = isBulkPack ? unitNounFor(proj.dosageForm) : 'Unit';
   const piecesPerContainer = isBulkPack ? 1
     : (Number(proj.unitsPerContainer)>0 ? Number(proj.unitsPerContainer) : totalUPC);
-  // Effective servings/container consistent with the (possibly overridden) piece
-  // count — keeps Master Bid pieces & stick counts correct when the user types a
-  // non-derived units/container (e.g. a 90ct bottle or an N-stick box).
-  const mbServings = (proj.servingSize||0)>0 ? piecesPerContainer/(proj.servingSize||1) : (proj.servingsPerUnit||1);
-  // Manual labor/overhead are now only a FALLBACK (used if the Master Bid engine
-  // can't run — e.g. batch qty 0). The real numbers come from window.EnovaMasterBid.
+  // Effective servings/container consistent with the (possibly overridden) piece count comes
+  // from the kernel (mbServings = piecesPerContainer/servingSize) below.
+  // Manual labor/overhead are a FALLBACK (used only if the Master Bid engine can't run).
   const laborManual = proj.laborPerUnit != null ? proj.laborPerUnit : cfg.laborDefault;
   const overheadPct  = proj.overheadPct != null ? proj.overheadPct : 0.15;
 
-  // ── Ingredient costing ────────────────────────────────────────────────
-  const calcIng = useMemo(() => (proj.ingredients||[]).map(row => {
-    if (!row.item) return { ...row, mgPS:0, cPS:0, fresh:null };
-    const fresh = INV_IX[row.item.n];
-    const pot = row.potencyPct>0 ? row.potencyPct/100 : 1;
-    const rov = (row.overage!=null ? row.overage : (proj.overage||0));   // per-ingredient overage; defaults to the project/form overage
-    const mgPS = (row.inputMg*(1+rov))/pot;
-    // Honor a per-project manual cost override (skuCostFor) so an edited price flows into COGS.
-    const uCost = skuCostFor(row.item.n, proj); const cPS = (mgPS/1000)*(uCost!=null?uCost:0);
-    return { ...row, item: fresh||row.item, mgPS, cPS, fresh };
-  }), [proj.ingredients, proj.overage, proj.costOverride]);
-
-  const actMg  = calcIng.reduce((s,r)=>s+r.mgPS,0);
-  const actCPS = calcIng.reduce((s,r)=>s+r.cPS,0);
-  // Actives per costing unit = per-serving cost × servings in that unit. mbServings =
-  // piecesPerContainer/servingSize, so this is consistent with base/shell for BOTH retail
-  // (= servingsPerUnit) and bulk (per-piece), and correct when units/container is overridden.
-  const actCPU = actCPS * mbServings;
-
-  // ── Gummy base cost ──────────────────────────────────────────────────
-  // Gummy base cost/gummy from the SAME shared helper the panel + documents use, so the
-  // complete turnkey base (correct sugar/SF variant, bulk-sweetener balance) is in COGS.
-  const baseCPG = useMemo(() => cfg.gummy ? gummyBaseCostPerGummy(proj, {bulk:isBulkPack}) : 0,
-    [cfg.gummy, isBulkPack, proj.gummyType, proj.gummyWt, proj.baseItems, proj.ingredients, proj.servingSize]);
-  const baseCPU = cfg.gummy ? baseCPG * piecesPerContainer : 0;
-
-  // ── Shell + packaging ────────────────────────────────────────────────
-  // Shell count follows the (possibly overridden) pieces per container.
-  const shellFresh = cfg.shell && proj.shellItem ? INV_IX[proj.shellItem.n] : null;
-  const shellUCost = proj.shellItem ? skuCostFor(proj.shellItem.n, proj) : null;   // override-aware
-  const shellCPU = shellUCost!=null ? shellUCost * piecesPerContainer : 0;
-  // Split packaging into PER-UNIT slots and PER-CASE slots. A master shipper (and a retail
-  // display / inner box) holds MANY finished units, so charging its full cost to EVERY unit
-  // overstates COGS — its cost is spread across the master-case pack. Per-unit slots (bottle,
-  // closure, label, desiccant, tamper, scoop, bag, foil) are one-per-unit. For a BULK order the
-  // sellable unit is ONE piece, so EVERY packaging slot is a shared per-case cost.
+  // ── Resolved lookups the kernel doesn't own yet (injected as ctx) ─────
+  // NOTE: the gummy BASE cost is no longer injected — the kernel now DERIVES it natively from its own
+  // house-standard base KB × live inventory (EnovaBrain.gummyBase, parity-locked to gummyBaseRows).
+  const shellFresh = cfg.shell && proj.shellItem ? INV_IX[proj.shellItem.n] : null;   // shell detail for the UI
   const isStickForm = /stick/i.test(String(proj.dosageForm||''));
-  const isPerCasePkgSlot = (k) => isBulkPack || k==='shipper' || k==='display';
-  let pkgPerUnit = 0, pkgPerCase = 0;
-  pkgSlots.forEach(slot=>{
-    const sel = (proj.pkg||{})[slot.k]; if (!sel) return;
-    const f = INV_IX[sel.n];
-    // House-standard finished-goods costs override the blank-material SKU price:
-    //  • Stick pack foil IS the label at $0.15/stick — charged per stick pack in the
-    //    box (piecesPerContainer sticks), like a capsule shell, not once per box.
-    if (slot.k==='foil') { pkgPerUnit += ENOVA_STICKPACK_COST * piecesPerContainer; return; }
-    //  • Stick-pack DISPLAY box = the retail carton (the unit) — $1.00 once per unit,
-    //    SEPARATE from the master case shipper (which is still spread per case below).
-    if (slot.k==='display' && isStickForm && !isBulkPack) { pkgPerUnit += ENOVA_STICK_DISPLAY_COST; return; }
-    let u = skuCostFor(sel.n, proj); u = (u!=null?u:0);   // per-project override wins over MISys
-    //  • Any printed label is a flat $0.15, regardless of the blank label-stock price.
-    if (slot.k==='label') u = ENOVA_LABEL_COST;
-    if (isPerCasePkgSlot(slot.k)) pkgPerCase += u; else pkgPerUnit += u;
-  });
-  const pkgRaw = pkgPerUnit + pkgPerCase;   // total packaging spend per master case (display/debug)
-  // Master-case pack = finished units per master shipper. EDITABLE (proj.unitsPerCase); its
-  // default is a transparent geometry estimate from the shipper's stated W×H×D and the finished
-  // unit's fill volume, which the Enova user confirms. Bulk gummy keeps its per-gummy estimate.
+  // Master-case pack = finished units per master shipper (EDITABLE proj.unitsPerCase; else a geometry estimate).
   const shipperSel  = (proj.pkg||{}).shipper;
   const shipperDesc = shipperSel ? ((INV_IX[shipperSel.n]||shipperSel).d || '') : '';
   const casePackEst = isBulkPack
@@ -6026,38 +6074,40 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
     : estimateCasePack(shipperDesc, estimatePackFillCC(proj, piecesPerContainer)*1000);
   const casePack = Number(proj.unitsPerCase)>0 ? Number(proj.unitsPerCase)
     : (isBulkPack ? (casePackEst||1000) : (casePackEst||12));
-  // BULK: pkgPerUnit is 0, so this reduces to pkgPerCase/casePack (all packaging spread per piece).
-  // RETAIL: per-unit slots at full cost + per-case slots (shipper/display) spread across the case.
-  const pkgCPU = pkgPerUnit + pkgPerCase/(casePack||1);
-
-  const blendCPU = actCPU + baseCPU;
-  const materialsCPU = blendCPU + shellCPU + pkgCPU;   // Direct Materials / unit (not landed)
-
-  // ── Enova Master Bid cost engine (validated to the digit vs. Master Bid
-  //    Template + filled P26132). Labor & overhead come from the REAL per-form
-  //    model — Pharmacy/Blending/Encap/Inspection/Packout + Interest/Quality/
-  //    Warehousing/Supplies — not a flat %. DML = materials/unit + freight-in +
-  //    material loss. Falls back to the manual model only if the engine is absent
-  //    or batch qty is 0. ──
   const MB = (typeof window!=='undefined' && window.EnovaMasterBid) ? window.EnovaMasterBid : null;
-  const mbBatchQty = Number(proj.batchUnits)>0 ? Number(proj.batchUnits) : cfg.moq;
-  const matLossPct = proj.materialLoss != null ? proj.materialLoss : 0.02;
-  // Blend mass per serving (mg): gummy total wt already includes actives+base, so
-  // gummyWt × pieces/serving; every other form = summed ingredient input mg.
-  const blendMassMgServ = cfg.gummy ? (Number(proj.gummyWt)||0)*(proj.servingSize||1) : actMg;
-  const blendKgPerUnit  = (blendMassMgServ*mbServings)/1e6;
+
+  // ── COGS BUILD — the embedded kernel (EnovaBrain.cost) is the SINGLE SOURCE OF TRUTH ──
+  // The kernel OWNS the cost arithmetic (actives x inventory with per-ingredient overage/potency,
+  // gummy base, shell, the per-unit / per-case packaging split incl. the house-standard label/foil/
+  // display overrides, the Master Bid labor/overhead call, freight/loss, and the breakdown assembly)
+  // so the browser, CI, and any server cost a project identically. The resolved lookups it doesn't
+  // own yet (container / form cfg / mbForm / gummy base / case pack) are injected as ctx. This was
+  // penny-parity-locked to the prior inline math before the swap.
+  const _cctx = {
+    invIx: INV_IX, container, ctInfo, cfg,
+    unitNounForForm: unitNounFor(proj.dosageForm),
+    mbForm: mbFormFor(proj.dosageForm, container),
+    masterBid: MB, casePack,   // baseCostPerPiece omitted → kernel derives the gummy base itself
+    constants: { label: ENOVA_LABEL_COST, stickpack: ENOVA_STICKPACK_COST, stickDisplay: ENOVA_STICK_DISPLAY_COST },
+  };
+  const _EB = (typeof window!=='undefined' && window.EnovaBrain) ? window.EnovaBrain : (typeof EnovaBrain!=='undefined' ? EnovaBrain : null);
+  if (!_EB || typeof _EB.cost!=='function') throw new Error('EnovaBrain.cost kernel unavailable');   // embedded in-doc; ErrorBoundary catches
+  const _cost = _EB.cost(proj, _cctx);
+  const cv = _cost.view, cbd = _cost.breakdown;
+  const calcIng = cv.calcIng, actMg = cv.actMg, actCPS = cv.actCPS, actCPU = cv.actCPU;
+  const baseCPU = cv.baseCPU, shellCPU = cv.shellCPU;
+  const pkgPerUnit = cv.pkgPerUnit, pkgPerCase = cv.pkgPerCase, pkgCPU = cv.pkgCPU, pkgRaw = cv.pkgPerUnit + cv.pkgPerCase;
+  const blendCPU = cv.blendCPU, materialsCPU = cv.materialsCPU;
+  const mbServings = cv.mbServings, blendKgPerUnit = cv.blendKgPerUnit, matLossPct = cv.matLossPct;
+  const mbBatchQty = cv.mbBatchQty, mbRes = cv.mbRes, mbBlends = mbRes ? mbRes.blends : null;
+  const laborPerUnit = cbd.laborPerUnit, overheadCPU = cbd.overheadCPU, cogsPerUnit = cbd.cogsPerUnit, dmExtraCPU = cbd.dmExtraCPU;
+  // Per-TIER Master Bid COGS — the kernel cost() covers the base unit; tiers re-run the SAME engine
+  // + inputs at each volume, so tier[base] === the unit COGS.
   const mbBuild = (q) => (MB && q>0) ? MB.build(MB.MB_DEFAULTS, {
     form: mbFormFor(proj.dosageForm, container),
     caps_per_serv: proj.servingSize||1, servings: mbServings,
     dm_unit: materialsCPU, blend_size: blendKgPerUnit, base_qty: 1, loss: matLossPct
   }, q, null) : null;
-  const mbRes = mbBuild(mbBatchQty);
-  const laborPerUnit = mbRes ? mbRes.labor_per_unit : laborManual;
-  const overheadCPU  = mbRes ? mbRes.oh_per_unit    : (materialsCPU*overheadPct + laborManual*overheadPct);
-  const cogsPerUnit  = mbRes ? mbRes.cost_per_unit  : (materialsCPU + laborManual + overheadCPU);
-  const mbBlends     = mbRes ? mbRes.blends : null;
-  // Freight-in + material-loss per unit (the "landed" delta on top of materials).
-  const dmExtraCPU   = mbRes ? (mbRes.dml/mbBatchQty - materialsCPU) : 0;
 
   // ── Approval lock + cost-drift guard ──────────────────────────────────
   const lock = proj.formulaLock || null;
@@ -6067,35 +6117,15 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
   const formulaChanged = locked && formulaHash(proj) !== lock.hash;
   const readiness = validateProject(proj);   // data-quality / readiness (non-blocking)
 
-  const liveBreakdown = {
-    activeCPU: actCPU, baseCPU, shellCPU, pkgCPU, materialsCPU,
-    dmExtraCPU, laborPerUnit, overheadPct, overheadCPU, cogsPerUnit,
-    source: mbRes ? 'masterbid' : 'manual',
-    mbForm: mbRes ? mbFormFor(proj.dosageForm, container) : null,
-    container, piecesPerContainer,
-    isBulk: isBulkPack, unitNoun, casePack,
-    pkgPerUnitCPU: pkgPerUnit, pkgCaseTotal: pkgPerCase,
-    mbBatchQty: mbRes ? mbBatchQty : null, mbBlends,
-  };
-  // ── Cost-core parity shadow (TEST-ONLY; a no-op unless the harness sets the flag) ──
-  // Proves the kernel's EnovaBrain.cost() ties to THIS component's live COGS build to the penny —
-  // the migration guard for making the kernel the single source of truth (blueprint Step A). Gated
-  // by a window flag so it never runs (zero cost, no behavior change) in production; the parity
-  // harness sets `window.__ENOVA_COST_PARITY__ = {}`, recalls a project on every form, and compares
-  // app vs kernel field-by-field. Read-only: writes only to the debug global, never to state.
+  // The persisted COGS breakdown IS the kernel's output — the single source of truth every
+  // other page (Quote / Documents / Project Page) reads.
+  const liveBreakdown = cbd;
+  // ── Cost observability for the pipeline test (TEST-ONLY; a no-op unless the harness sets the
+  // flag). Read-only: stashes the already-computed kernel breakdown so a real-browser check can
+  // reconcile it end-to-end. Zero cost in production. ──
   useEffect(() => {
-    if (typeof window==='undefined' || !window.__ENOVA_COST_PARITY__) return;
-    try {
-      const EB = window.EnovaBrain; if (!EB || typeof EB.cost!=='function') return;
-      const kb = EB.cost(proj, {
-        invIx: INV_IX, container, ctInfo, cfg,
-        unitNounForForm: unitNounFor(proj.dosageForm),
-        mbForm: mbFormFor(proj.dosageForm, container),
-        masterBid: MB, baseCostPerPiece: baseCPG, casePack,
-        constants: { label: ENOVA_LABEL_COST, stickpack: ENOVA_STICKPACK_COST, stickDisplay: ENOVA_STICK_DISPLAY_COST },
-      });
-      window.__ENOVA_COST_PARITY__[proj.pn] = { app: liveBreakdown, kernel: kb.breakdown };
-    } catch(e){ try { window.__ENOVA_COST_PARITY__._err = String(e&&e.message||e); } catch(_){} }
+    if (typeof window==='undefined' || !window.__ENOVA_COST__) return;
+    try { window.__ENOVA_COST__[proj.pn] = liveBreakdown; } catch(_){}
   });
 
   // Save COGS breakdown for other pages — but NEVER overwrite an approved (locked)

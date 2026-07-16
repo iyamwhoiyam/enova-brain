@@ -1031,6 +1031,190 @@
     return { container: container, slots, pkg, meta, shell, targetCC, pieces, recallSrc: recall ? recall.src : null };
   }
 
+  // ── 3e. LABEL ENGINE — deterministic Supplement Facts panel + FDA compliance review. ────────────
+  // Builds a Supplement Facts model straight from the APPROVED formula: a supplement panel is
+  // formula-driven, not database-driven — the declared actives at their per-serving amounts, plus a
+  // %DV for the ones with an established FDA Daily Value. No licensed nutrient database needed; the
+  // "data" is the fixed FDA Daily Value table (21 CFR 101.9(c), 2016 final rule — verified against
+  // FDA's published table) + a nutrient-synonym map + the rounding/format rules. Everything a
+  // reviewer confirms/edits before sign-off; nothing invented. reviewLabel() then ties the panel back
+  // to the approved formula (same independent-reconciliation philosophy as the cost engine).
+  //
+  //   Amounts: the formula's per-serving amount (project.ingredients[].inputMg = the label CLAIM) is
+  //   taken as the declared amount in the nutrient's DV unit; %DV = amount / DV × 100. For a nutrient
+  //   whose DV unit is mcg (D, B12, folate, biotin, K, iodine, selenium, chromium, molybdenum) the
+  //   amount is treated as mcg; else mg. Unmapped actives (botanicals, amino acids) carry a dagger
+  //   (†) "Daily Value not established". Implausible %DV (>1000) is FLAGGED as a likely unit mismatch.
+  const DAILY_VALUES = {
+    "Vitamin A": { dv: 900, unit: "mcg RAE" }, "Vitamin C": { dv: 90, unit: "mg" },
+    "Vitamin D": { dv: 20, unit: "mcg" }, "Vitamin E": { dv: 15, unit: "mg" },
+    "Vitamin K": { dv: 120, unit: "mcg" }, "Thiamin": { dv: 1.2, unit: "mg" },
+    "Riboflavin": { dv: 1.3, unit: "mg" }, "Niacin": { dv: 16, unit: "mg NE" },
+    "Vitamin B6": { dv: 1.7, unit: "mg" }, "Folate": { dv: 400, unit: "mcg DFE" },
+    "Vitamin B12": { dv: 2.4, unit: "mcg" }, "Biotin": { dv: 30, unit: "mcg" },
+    "Pantothenic Acid": { dv: 5, unit: "mg" }, "Choline": { dv: 550, unit: "mg" },
+    "Calcium": { dv: 1300, unit: "mg" }, "Iron": { dv: 18, unit: "mg" },
+    "Phosphorus": { dv: 1250, unit: "mg" }, "Iodine": { dv: 150, unit: "mcg" },
+    "Magnesium": { dv: 420, unit: "mg" }, "Zinc": { dv: 11, unit: "mg" },
+    "Selenium": { dv: 55, unit: "mcg" }, "Copper": { dv: 0.9, unit: "mg" },
+    "Manganese": { dv: 2.3, unit: "mg" }, "Chromium": { dv: 35, unit: "mcg" },
+    "Molybdenum": { dv: 45, unit: "mcg" }, "Chloride": { dv: 2300, unit: "mg" },
+    "Sodium": { dv: 2300, unit: "mg" }, "Potassium": { dv: 4700, unit: "mg" },
+    // macronutrients — for functional-food supplement panels (protein/collagen/meal replacement)
+    "Total Fat": { dv: 78, unit: "g" }, "Saturated Fat": { dv: 20, unit: "g" },
+    "Cholesterol": { dv: 300, unit: "mg" }, "Total Carbohydrate": { dv: 275, unit: "g" },
+    "Dietary Fiber": { dv: 28, unit: "g" }, "Added Sugars": { dv: 50, unit: "g" },
+    "Protein": { dv: 50, unit: "g" },
+  };
+  // Legacy International Unit → DV-unit conversion factors (per FDA guidance). Form-dependent, so
+  // these are ADVISORY — the reviewer confirms the form. Exposed for the app to offer a conversion.
+  const IU_CONVERT = {
+    "Vitamin D": { perIU: 0.025, unit: "mcg", note: "40 IU = 1 mcg" },
+    "Vitamin E (natural, d-alpha)": { perIU: 0.67, unit: "mg", note: "1 IU = 0.67 mg" },
+    "Vitamin E (synthetic, dl-alpha)": { perIU: 0.45, unit: "mg", note: "1 IU = 0.45 mg" },
+    "Vitamin A (retinol)": { perIU: 0.3, unit: "mcg RAE", note: "1 IU = 0.3 mcg RAE" },
+    "Vitamin A (beta-carotene, supplement)": { perIU: 0.15, unit: "mcg RAE", note: "1 IU = 0.15 mcg RAE" },
+    "Folic acid → DFE": { factor: 1.7, unit: "mcg DFE", note: "1 mcg folic acid = 1.7 mcg DFE" },
+  };
+  // Ingredient-name → canonical DV nutrient. Vitamins are listed BEFORE minerals so a vitamin salt
+  // (e.g. "Sodium Ascorbate", "Calcium Ascorbate") maps to the VITAMIN, not the mineral. First match wins.
+  const NUTRIENT_SYNONYMS = [
+    { re: /vitamin\s*a\b|retinyl|retinol|retinoic/i, dv: "Vitamin A" },
+    { re: /vitamin\s*c\b|ascorb(ic|ate)/i, dv: "Vitamin C" },
+    { re: /vitamin\s*d\b|cholecalciferol|ergocalciferol|\bd-?3\b/i, dv: "Vitamin D" },
+    { re: /vitamin\s*e\b|tocopher|tocotrienol/i, dv: "Vitamin E" },
+    { re: /vitamin\s*k\b|phylloquinone|menaquinone|mk-?7/i, dv: "Vitamin K" },
+    { re: /thiamin|vitamin\s*b-?1\b/i, dv: "Thiamin" },
+    { re: /riboflavin|vitamin\s*b-?2\b/i, dv: "Riboflavin" },
+    { re: /niacin|niacinamide|nicotinic acid|vitamin\s*b-?3\b/i, dv: "Niacin" },
+    { re: /pyridox(ine|al)|vitamin\s*b-?6\b/i, dv: "Vitamin B6" },
+    { re: /folate|folic acid|methylfolate|5-?mthf|quatrefolic|methyltetrahydrofolate/i, dv: "Folate" },
+    { re: /cobalamin|vitamin\s*b-?12\b/i, dv: "Vitamin B12" },
+    { re: /biotin|vitamin\s*b-?7\b|vitamin\s*h\b/i, dv: "Biotin" },
+    { re: /pantothen|vitamin\s*b-?5\b/i, dv: "Pantothenic Acid" },
+    { re: /choline/i, dv: "Choline" },
+    { re: /calcium/i, dv: "Calcium" },
+    { re: /\biron\b|ferrous|ferric/i, dv: "Iron" },
+    { re: /phosphorus|phosphate/i, dv: "Phosphorus" },
+    { re: /iodine|iodide/i, dv: "Iodine" },
+    { re: /magnesium/i, dv: "Magnesium" },
+    { re: /\bzinc\b/i, dv: "Zinc" },
+    { re: /selenium|selenomethionine|selenite/i, dv: "Selenium" },
+    { re: /copper|cupric/i, dv: "Copper" },
+    { re: /manganese/i, dv: "Manganese" },
+    { re: /chromium/i, dv: "Chromium" },
+    { re: /molybdenum/i, dv: "Molybdenum" },
+    { re: /chloride/i, dv: "Chloride" },
+    { re: /\bsodium\b/i, dv: "Sodium" },
+    { re: /potassium/i, dv: "Potassium" },
+  ];
+  // FALCPA major allergens (incl. sesame, added 2023).
+  const ALLERGENS = [
+    { re: /\bmilk\b|whey|casein|lactose|\bdairy\b/i, name: "Milk" },
+    { re: /\begg\b|albumen/i, name: "Egg" },
+    { re: /\bfish\b|cod\b|tilapia|anchovy|salmon|pollock/i, name: "Fish" },
+    { re: /shellfish|shrimp|crab\b|lobster|crustacean/i, name: "Crustacean shellfish" },
+    { re: /tree nut|almond|walnut|cashew|pecan|pistachio|hazelnut|brazil nut|macadamia|\bcoconut\b/i, name: "Tree nuts" },
+    { re: /peanut/i, name: "Peanuts" },
+    { re: /\bwheat\b|\bgluten\b/i, name: "Wheat" },
+    { re: /\bsoy\b|soya|soybean/i, name: "Soy" },
+    { re: /sesame|tahini/i, name: "Sesame" },
+  ];
+  function dvForNutrient(name) {
+    const s = String(name || "");
+    for (let i = 0; i < NUTRIENT_SYNONYMS.length; i++) if (NUTRIENT_SYNONYMS[i].re.test(s)) return NUTRIENT_SYNONYMS[i].dv;
+    return null;
+  }
+  const magUnit = (u) => String(u || "").split(" ")[0];   // "mcg RAE" → "mcg"
+  function roundDVpct(pct) { pct = num(pct); if (pct <= 0) return 0; return pct < 1 ? Math.round(pct * 10) / 10 : Math.round(pct); }
+  function detectAllergens(names) {
+    const hits = [];
+    ALLERGENS.forEach((a) => { if (names.some((n) => a.re.test(String(n || "")))) hits.push(a.name); });
+    return hits;
+  }
+  const rowName = (r) => (r && (r.name || r.importedName || (r.item && r.item.n))) || "";
+  // Serving-size text per dose form.
+  function servingText(p) {
+    const ss = num(p.servingSize) || 1, form = String(p.dosageForm || "");
+    if (/gumm/i.test(form)) return ss + " Gumm" + (ss === 1 ? "y" : "ies");
+    if (/capsule/i.test(form)) return ss + " Capsule" + (ss === 1 ? "" : "s");
+    if (/tablet/i.test(form)) return ss + " Tablet" + (ss === 1 ? "" : "s");
+    if (/stick/i.test(form)) return ss + " Stick Pack" + (ss === 1 ? "" : "s");
+    if (/liquid|tincture/i.test(form)) return ss + " mL";
+    if (/powder/i.test(form)) { const g = num(p.servWtMg) > 0 ? " (~" + (num(p.servWtMg) / 1000).toFixed(1) + " g)" : ""; return "1 Scoop" + g; }
+    return ss + " Unit" + (ss === 1 ? "" : "s");
+  }
+  // Build the Supplement Facts model from the formula. ctx = { otherIngredients?, manufacturer?, distributor?, netQuantity?, claims? }.
+  function labelModel(project, ctx) {
+    const p = project || {}, c = ctx || {};
+    const rows = (p.ingredients || []).filter((r) => num(r.inputMg) > 0).map((r) => {
+      const nm = rowName(r), key = dvForNutrient(nm), amount = num(r.inputMg);
+      const dvu = key ? DAILY_VALUES[key] : null;
+      const unit = dvu ? magUnit(dvu.unit) : "mg";
+      const dvPct = dvu ? roundDVpct(amount / dvu.dv * 100) : null;
+      const display = key ? (new RegExp("^\\s*" + key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(nm) ? nm : key + " (as " + nm + ")") : nm;
+      return { name: display, source: nm, nutrient: key, amount, unit, dvUnit: dvu ? dvu.unit : null, dvPct,
+        dagger: !key,
+        // A mapped nutrient's amount+unit needs reviewer confirmation: Enova's formula stores a single
+        // "mg/serving" figure, but micronutrient DVs are in mcg and the source can mix units, so the
+        // panel is a DRAFT to confirm (same human-in-the-loop as the formulation generator).
+        confirm: !!key,
+        unitSuspect: dvPct != null && dvPct > 1000 };
+    });
+    const other = Array.isArray(c.otherIngredients) ? c.otherIngredients.slice() : [];
+    const contains = detectAllergens(rows.map((r) => r.source).concat(other));
+    const anyDagger = rows.some((r) => r.dagger);
+    const anyMacro = rows.some((r) => ["Total Fat", "Saturated Fat", "Total Carbohydrate", "Dietary Fiber", "Added Sugars", "Protein", "Cholesterol"].includes(r.nutrient));
+    return {
+      heading: "Supplement Facts",
+      servingSize: servingText(p),
+      servingsPerContainer: num(p.servingsPerUnit) || null,
+      rows,
+      otherIngredients: other,
+      contains,                          // FALCPA "Contains:" allergen list
+      footnotes: [].concat(anyDagger ? ["† Daily Value (DV) not established."] : [],
+        anyMacro ? ["Percent Daily Values are based on a 2,000 calorie diet."] : []),
+      disclaimer: "These statements have not been evaluated by the Food and Drug Administration. This product is not intended to diagnose, treat, cure, or prevent any disease.",
+      identity: { productName: p.product || "", netQuantity: c.netQuantity || "", form: p.dosageForm || "" },
+      manufacturer: c.manufacturer || "Manufactured for: (distributor) by Enova Science.",
+      distributor: c.distributor || cleanName_(p.customer),
+      claims: Array.isArray(c.claims) ? c.claims : [],
+    };
+  }
+  const cleanName_ = (s) => String(s || "").replace(/^\s*(client name|client|customer name|customer)\s*[:\-]\s*/i, "").trim();
+  // Compliance review — ties the panel to the approved formula + checks FDA structural requirements.
+  function reviewLabel(model, project, ctx) {
+    const p = project || {}, m = model || {};
+    const checks = [], errors = [], warnings = [];
+    const add = (code, ok, message, detail, sev) => { checks.push({ code, ok: !!ok, message, detail }); if (!ok) (sev === "warn" ? warnings : errors).push({ code, message, detail }); };
+    const dosed = (p.ingredients || []).filter((r) => num(r.inputMg) > 0);
+    // (a) every dosed active in the formula appears on the panel (label ties to the costed formula)
+    add("LABEL_FACTS_TIE", (m.rows || []).length >= dosed.length,
+      "Every dosed active in the formula appears in Supplement Facts.", { panelRows: (m.rows || []).length, formulaActives: dosed.length });
+    // (b) serving size + servings/container are present and (when the project sets it) match
+    const servOk = !!m.servingSize && (!(num(p.servingsPerUnit) > 0) || num(m.servingsPerContainer) === num(p.servingsPerUnit));
+    add("LABEL_SERVING_TIE", servOk, "Serving size and servings/container match the project.", { serving: m.servingSize, servings: m.servingsPerContainer, projectServings: p.servingsPerUnit });
+    // (c) %DV present for every nutrient WITH an established DV; dagger for those without
+    const dvMissing = (m.rows || []).filter((r) => r.nutrient && r.dvPct == null);
+    add("LABEL_DV", dvMissing.length === 0, "A %DV is shown for every nutrient that has an established Daily Value.", { missing: dvMissing.map((r) => r.name) });
+    const daggerMissing = (m.rows || []).filter((r) => !r.nutrient && !r.dagger);
+    add("LABEL_DAGGER", daggerMissing.length === 0, "Every no-DV ingredient carries the † footnote.", { missing: daggerMissing.map((r) => r.name) });
+    // (d) unit sanity — an implausible %DV (>1000) usually means the amount's unit is wrong (e.g. Vitamin D in mg)
+    const unitBad = (m.rows || []).filter((r) => r.unitSuspect);
+    add("LABEL_UNITS", unitBad.length === 0, "No nutrient amount looks like a unit error (%DV within a sane range).", { suspect: unitBad.map((r) => ({ name: r.name, dvPct: r.dvPct })) }, "warn");
+    // (e) allergen "Contains" statement matches the detected allergens
+    add("LABEL_ALLERGENS", true, "FALCPA allergen scan complete.", { contains: m.contains || [] }, "warn");
+    // (f) DSHEA disclaimer present when structure/function claims exist
+    add("LABEL_CLAIMS", !(m.claims && m.claims.length) || !!m.disclaimer, "Structure/function claims carry the DSHEA disclaimer.", { claims: (m.claims || []).length, hasDisclaimer: !!m.disclaimer }, "warn");
+    // (g) identity: product name + manufacturer/distributor present
+    add("LABEL_IDENTITY", !!(m.identity && m.identity.productName), "Statement of identity (product name) is present.", { productName: m.identity && m.identity.productName }, "warn");
+    add("LABEL_HEADING", m.heading === "Supplement Facts", "Panel is headed “Supplement Facts”.", { heading: m.heading });
+    return { ok: errors.length === 0, errors, warnings, checks,
+      summary: { rows: (m.rows || []).length, mapped: (m.rows || []).filter((r) => r.nutrient).length, checks: checks.length, errors: errors.length, warnings: warnings.length } };
+  }
+  // Facade: build the panel + review it in one call.
+  function label(project, ctx) { const model = labelModel(project, ctx); return { model, review: reviewLabel(model, project, ctx) }; }
+
   // ── 4. RECONCILIATION — the hardening core. Independently cross-check every stored figure. ───────
   function reconcile(p, invIx) {
     invIx = invIx || {};
@@ -1123,7 +1307,7 @@
   function reconcileErrors(p, invIx) { return reconcile(p, invIx).errors.map((e) => e.message); }
 
   return {
-    VERSION: "1.3.0-kernel(pn+schema+base+pkg+cost+reconcile)",
+    VERSION: "1.4.0-kernel(pn+schema+base+pkg+cost+label+reconcile)",
     // contracts
     PN_RE, isValidPN, pnParts, pnYear, nextPN, validateSchema,
     // derivation
@@ -1133,6 +1317,8 @@
     // packaging + shipping generator (+ shared geometry / inspection helpers)
     packaging, estimatePackFillCC, estimateCasePack, capsuleShellCC, pkgBlendGramsPerServing, unitNounFor, CAPSULE_CC,
     pkgCapacityCC, pkgNeckFinish,
+    // label engine — Supplement Facts + FDA compliance review
+    DAILY_VALUES, IU_CONVERT, NUTRIENT_SYNONYMS, dvForNutrient, roundDVpct, labelModel, reviewLabel, label,
     // costing core
     cost,
     // hardening
@@ -1420,6 +1606,21 @@ table.ptbl tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--teal);}
   background:var(--teal-soft);border-color:var(--teal);
   border-style:dashed;
 }
+/* ── Collapsible columns: click the header to roll a column up to a thin vertical strip ── */
+.col-head.clickable{cursor:pointer;transition:background .12s;}
+.col-head.clickable:hover{background:#f4f7fa;}
+.col-head.clickable:active{background:#eef2f6;}
+.col.col-collapsed{width:40px;}
+.col.col-collapsed .col-body{display:none;}
+.col.col-collapsed .col-head{
+  writing-mode:vertical-rl;text-orientation:mixed;
+  min-height:190px;height:auto;align-items:center;justify-content:space-between;
+  padding:12px 8px;margin-bottom:0;border-radius:var(--r);
+}
+.col.col-collapsed .col-head .col-head-label{
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-height:150px;
+}
+.col.col-collapsed .col-head .col-count{writing-mode:horizontal-tb;margin-top:0;}
 
 /* Column stage accent — thin colored top stripe on the white header */
 .ch-Inquiry{border-top-color:#7b8794;}
@@ -1976,6 +2177,101 @@ input.fcell:focus{border-color:var(--teal);outline:none;background:#fff;}
 .cfm-btn.ghost{background:#fff;border-color:var(--line);color:var(--navy-dk);}
 .cfm-btn.primary{background:var(--navy);border-color:var(--navy);color:#fff;}
 .cfm-btn.danger{background:var(--bad);border-color:var(--bad);color:#fff;}
+/* ══════════════ §48 Production Readiness board ══════════════ */
+.rdy-top-actions{display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap;}
+.rdy-search{padding:6px 10px;border:1px solid var(--line);border-radius:var(--r);font:inherit;min-width:180px;}
+.rdy-visit-toggle{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--ink);}
+.rdy-btn{padding:6px 12px;border:1px solid var(--navy);background:var(--navy);color:#fff;border-radius:var(--r);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap;}
+.rdy-btn:hover{background:var(--navy-lt);}
+.rdy-btn.ghost{background:#fff;color:var(--navy);}
+.rdy-btn:disabled{opacity:.6;cursor:default;}
+.rdy-body{display:flex;flex-direction:column;gap:14px;padding:14px;overflow:auto;}
+.rdy-kpis{display:flex;gap:12px;flex-wrap:wrap;}
+.rdy-kpi{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:10px 16px;min-width:110px;border-top:3px solid var(--line);}
+.rdy-kpi.bad{border-top-color:var(--bad);} .rdy-kpi.warn{border-top-color:var(--warn);} .rdy-kpi.ok{border-top-color:var(--ok);}
+.rdy-kpi-n{font-size:24px;font-weight:700;color:var(--ink);}
+.rdy-kpi-l{font-size:12px;color:#6b7a88;text-transform:uppercase;letter-spacing:.03em;}
+.rdy-board{display:flex;gap:10px;align-items:flex-start;overflow-x:auto;padding-bottom:8px;}
+.rdy-col{flex:0 0 220px;background:#eef2f5;border-radius:6px;display:flex;flex-direction:column;min-height:120px;}
+.rdy-col-head{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#fff;border-radius:6px 6px 0 0;border-top:3px solid var(--line);font-weight:600;font-size:13px;color:var(--ink);}
+.rdy-col-n{background:#eef2f5;border-radius:10px;padding:1px 8px;font-size:12px;color:#5a6b7a;}
+.rdy-col-body{padding:8px;display:flex;flex-direction:column;gap:8px;}
+.rdy-empty{color:#9aa7b2;font-size:12px;text-align:center;padding:12px 0;}
+.rdy-card{background:#fff;border:1px solid var(--line);border-radius:6px;padding:9px 10px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);}
+.rdy-card:hover{border-color:var(--navy);box-shadow:0 2px 6px rgba(0,0,0,.08);}
+.rdy-card-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.rdy-card-pn{font-weight:700;color:var(--ink);font-size:13px;}
+.rdy-badge{font-size:10px;padding:1px 6px;border-radius:8px;background:#eef2f5;color:#5a6b7a;}
+.rdy-badge.so{background:var(--teal-soft);color:var(--teal);}
+.rdy-badge.visit{background:var(--amber-soft);color:var(--amber);font-weight:600;}
+.rdy-card-prod{font-size:12px;color:var(--ink);margin-top:3px;line-height:1.25;max-height:2.5em;overflow:hidden;}
+.rdy-card-cust{font-size:11px;color:#7a8894;margin-bottom:6px;}
+.rdy-meter{height:6px;background:#e7ecf0;border-radius:4px;overflow:hidden;margin-bottom:5px;}
+.rdy-meter-fill{height:100%;background:var(--ok);}
+.rdy-meter-fill.warn{background:var(--warn);} .rdy-meter-fill.bad{background:var(--bad);} .rdy-meter-fill.ok{background:var(--ok);}
+.rdy-card-meta{display:flex;gap:6px;flex-wrap:wrap;}
+.rdy-mini{font-size:10px;padding:1px 6px;border-radius:4px;background:#eef2f5;color:#5a6b7a;white-space:nowrap;}
+.rdy-mini.ok{background:var(--ok-bg);color:var(--ok);} .rdy-mini.warn{background:var(--warn-bg);color:var(--warn);} .rdy-mini.bad{background:var(--bad-bg);color:var(--bad);}
+.rdy-fe{margin-top:6px;font-size:11px;padding:3px 6px;border-radius:4px;}
+.rdy-fe.ok{background:var(--ok-bg);color:var(--ok);} .rdy-fe.warn{background:var(--warn-bg);color:var(--warn);} .rdy-fe.bad{background:var(--bad-bg);color:var(--bad);}
+.rdy-drawer-bg{position:fixed;inset:0;background:rgba(20,30,40,.45);z-index:1000;display:flex;justify-content:flex-end;}
+.rdy-drawer{width:min(660px,96vw);background:var(--paper);height:100%;overflow:auto;box-shadow:-4px 0 20px rgba(0,0,0,.2);padding:16px;}
+.rdy-drawer-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px;}
+.rdy-drawer-pn{font-size:18px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.rdy-drawer-prod{font-size:13px;color:#5a6b7a;margin-top:2px;}
+.rdy-drawer-head-actions{display:flex;gap:8px;align-items:center;}
+.rdy-x{border:none;background:#e7ecf0;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:13px;color:#5a6b7a;}
+.rdy-x.sm{width:20px;height:20px;font-size:11px;}
+.rdy-fe-banner{padding:9px 12px;border-radius:6px;font-size:13px;font-weight:600;margin-bottom:12px;}
+.rdy-fe-banner.ok{background:var(--ok-bg);color:var(--ok);} .rdy-fe-banner.warn{background:var(--warn-bg);color:var(--warn);} .rdy-fe-banner.bad{background:var(--bad-bg);color:var(--bad);}
+.rdy-meta-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px;}
+.rdy-meta-grid label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#5a6b7a;font-weight:600;}
+.rdy-meta-grid input{padding:6px 8px;border:1px solid var(--line);border-radius:var(--r);font:inherit;font-weight:400;color:var(--ink);}
+.rdy-visit-cell{flex-direction:row!important;align-items:center;gap:8px!important;}
+.rdy-visit-cell input{width:auto;}
+.rdy-visit-note{grid-column:1/3;}
+.rdy-lane{background:var(--card);border:1px solid var(--line);border-radius:6px;margin-bottom:10px;overflow:hidden;}
+.rdy-lane-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#f0f4f7;font-weight:600;font-size:13px;color:var(--ink);}
+.rdy-gate{display:flex;align-items:center;gap:9px;padding:8px 12px;border-top:1px solid var(--line);}
+.rdy-gate-dot{width:10px;height:10px;border-radius:50%;flex:0 0 auto;}
+.rdy-gate-main{flex:1;min-width:0;}
+.rdy-gate-label{font-size:13px;color:var(--ink);}
+.rdy-gate-by{font-size:11px;color:#8a97a3;margin-top:1px;}
+.rdy-gate-sel{padding:4px 6px;border:1px solid var(--line);border-radius:var(--r);font:inherit;font-size:12px;background:#fff;}
+.rdy-gate.rdy-done{background:#f4faf4;} .rdy-gate.rdy-blocked{background:#fdf3f3;} .rdy-gate.rdy-na{opacity:.55;}
+.rdy-exc{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px;margin-top:4px;}
+.rdy-exc-head{font-weight:700;color:var(--ink);font-size:14px;display:flex;gap:8px;align-items:center;margin-bottom:8px;}
+.rdy-exc-empty{font-size:12px;color:#8a97a3;padding:6px 0;}
+.rdy-exc-item{border:1px solid var(--line);border-radius:6px;padding:9px;margin-bottom:8px;border-left:3px solid var(--warn);}
+.rdy-exc-item.approved{border-left-color:var(--ok);} .rdy-exc-item.rejected{border-left-color:var(--bad);}
+.rdy-exc-top{display:flex;align-items:center;gap:8px;}
+.rdy-exc-kind{font-size:10px;text-transform:uppercase;letter-spacing:.03em;background:#eef2f5;color:#5a6b7a;padding:1px 6px;border-radius:4px;}
+.rdy-exc-status{margin-left:auto;font-size:11px;padding:1px 8px;border-radius:8px;text-transform:capitalize;}
+.rdy-exc-status.open{background:var(--warn-bg);color:var(--warn);} .rdy-exc-status.approved{background:var(--ok-bg);color:var(--ok);} .rdy-exc-status.rejected{background:var(--bad-bg);color:var(--bad);}
+.rdy-exc-detail{font-size:12px;color:var(--ink);margin:4px 0;}
+.rdy-exc-by{font-size:11px;color:#8a97a3;}
+.rdy-exc-approvals{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;}
+.rdy-appr{display:flex;flex-direction:column;gap:3px;border:1px solid var(--line);border-radius:5px;padding:5px 8px;font-size:11px;}
+.rdy-appr-dept{font-weight:700;color:var(--ink);}
+.rdy-appr.approve{background:var(--ok-bg);} .rdy-appr.reject{background:var(--bad-bg);}
+.rdy-appr-btns button{font-size:11px;margin-right:4px;border:1px solid var(--line);background:#fff;border-radius:4px;padding:2px 6px;cursor:pointer;}
+.rdy-exc-add{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center;}
+.rdy-exc-add input{flex:1;min-width:140px;padding:6px 8px;border:1px solid var(--line);border-radius:var(--r);font:inherit;}
+.rdy-exc-add select{padding:6px;border:1px solid var(--line);border-radius:var(--r);font:inherit;}
+.rdy-modal{max-width:560px;width:96vw;}
+.rdy-cfg{max-width:820px;}
+.rdy-modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+.rdy-modal-sub{font-size:12px;color:#5a6b7a;margin-bottom:12px;}
+.rdy-cfg-list{max-height:56vh;overflow:auto;}
+.rdy-cfg-row{display:grid;grid-template-columns:54px 1fr 120px 160px 34px;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line);}
+.rdy-cfg-hdr{font-size:11px;text-transform:uppercase;color:#8a97a3;font-weight:700;}
+.rdy-cfg-move button{border:none;background:#eef2f5;border-radius:3px;cursor:pointer;font-size:9px;padding:2px 4px;margin-right:2px;}
+.rdy-cfg-label{display:flex;flex-direction:column;gap:3px;}
+.rdy-cfg-label input{padding:5px 7px;border:1px solid var(--line);border-radius:var(--r);font:inherit;font-size:13px;}
+.rdy-cfg-help{font-size:11px!important;color:#5a6b7a;}
+.rdy-cfg-row select{padding:5px;border:1px solid var(--line);border-radius:var(--r);font:inherit;font-size:12px;}
+.rdy-cfg-del{border:none;background:none;cursor:pointer;font-size:14px;}
+.rdy-cfg-foot{display:flex;gap:8px;align-items:center;margin-top:12px;}
 </style>
 </head>
 <body>
@@ -2131,6 +2427,7 @@ const STAGE_ALIASES = {
   "Tiered Pricing": "BID Process",                   // tiered pricing happens while the bid is being created
   "BID Submitted": "BID Sent",                       // renamed — Enova has sent the bid to the customer
   "BID Submitted, Complete": "BID Sent",             // retired stage — folds into "BID Sent"
+  "Formula Reviewed": "Lab/Sampling",                // renamed column (2026-07-16) — stored records fold in
 };
 function normalizeStage(s) {
   const trimmed = (s || '').trim();
@@ -2139,12 +2436,134 @@ function normalizeStage(s) {
 
 const DEFAULT_STAGES = [
   "Pending Information",
-  "Formulation/Sample Development","Formula Reviewed",
+  "Formulation/Sample Development","Lab/Sampling",
   "Sample Sent to Customer",
   "BID Process","BID Sent",
   "MFSO","PO Submitted","In Production","On Hold",
   "Completed","Cancelled",
 ];
+
+/* ══════════════ §48 PRODUCTION READINESS — cross-department command board ══════════════
+   Fixes the failure this system exists to kill: no shared view of whether a production run is
+   actually GO. Enova is QC-heavy and HALTS if anything isn't finalized/tested/confirmed. This models
+   every GATE that must be green before a batch runs, grouped by the department that owns it, with
+   per-run status SHARED across departments (rides the project blob → same Supabase realtime path as
+   mfsoSigned). The gate TEMPLATE below is the DEFAULT; it is user-configurable at runtime (add/edit/
+   remove) and the customized template is shared via studio_readiness_config. Derived from the real
+   SO#185 / Spruce Hemp Drink incident: materials received-in-building-but-not-in-system, QC's 72h
+   ID+micro window, and missing MFSO / label proof / packaging proofs / blending instructions /
+   organoleptic + brix, plus a cross-functional conditional release. */
+const READINESS_DEPTS = ["Materials","QC","Documents","Schedule","Sign-off"];
+// Board columns. A card's phase is DERIVED from gate completion + project stage (you don't drag a
+// card forward — you complete its gates and it advances), so the board always reflects TRUE readiness.
+const READINESS_PHASES = [
+  { id:"intake",     label:"Intake",               chip:"ch-Inquiry" },
+  { id:"materials",  label:"Materials Staging",     chip:"ch-Formulating" },
+  { id:"qc",         label:"QC Testing / Release",  chip:"ch-LabReview" },
+  { id:"docs",       label:"Documents",             chip:"ch-QuoteSubmitted" },
+  { id:"ready",      label:"Ready to Run",          chip:"ch-CustomerApproval" },
+  { id:"production", label:"In Production",         chip:"ch-Production" },
+  { id:"released",   label:"Released",              chip:"ch-Completed" },
+];
+const RDY_STATUS = {
+  todo:    { label:"Not started", cls:"rdy-todo",    dot:"#9aa7b2" },
+  wip:     { label:"In progress", cls:"rdy-wip",     dot:"#e0912f" },
+  blocked: { label:"Blocked",     cls:"rdy-blocked", dot:"#d9534f" },
+  done:    { label:"Done",        cls:"rdy-done",    dot:"#4a9e4f" },
+  na:      { label:"N/A",         cls:"rdy-na",      dot:"#c7cfd6" },
+};
+const RDY_STATUS_ORDER = ["todo","wip","blocked","done","na"];
+// DEFAULT gate template — the seed only; the live template is READINESS_GATES (config-overridable).
+// Each gate: { id, label, dept, phase, help }. Covers everything the SO#185 thread exposed.
+const DEFAULT_READINESS_GATES = [
+  { id:"mat_ordered",   dept:"Materials",  phase:"materials", label:"All raw materials ordered (PO placed)", help:"Every ingredient on the formula has a purchase order." },
+  { id:"mat_arrived",   dept:"Materials",  phase:"materials", label:"All materials physically arrived", help:"Confirmed at the dock / warehouse." },
+  { id:"mat_received",  dept:"Materials",  phase:"materials", label:"All materials RECEIVED in MISys", help:"Received in the SYSTEM — not just sitting in the warehouse. This is what triggers QC sampling." },
+  { id:"mat_staged",    dept:"Materials",  phase:"materials", label:"Batch materials staged / weighed out", help:"Components pulled and staged for the run." },
+  { id:"qc_sampled",    dept:"QC",         phase:"qc",        label:"Materials sampled for QC", help:"QC has pulled samples for identity + micro." },
+  { id:"qc_id",         dept:"QC",         phase:"qc",        label:"Identity (ID) testing complete", help:"Raw-material identity confirmed." },
+  { id:"qc_micro",      dept:"QC",         phase:"qc",        label:"Micro testing complete", help:"QC requires a minimum 72h window for ID + micro." },
+  { id:"qc_released",   dept:"QC",         phase:"qc",        label:"All materials QC-released (or conditional release logged)", help:"Released for production. A conditional release must be logged as a cross-functional exception." },
+  { id:"doc_mfso",      dept:"Documents",  phase:"docs",      label:"Signed MFSO (with date-coding specs)", help:"Customer-signed Master Formula Sign-Off authorizing production." },
+  { id:"doc_label",     dept:"Documents",  phase:"docs",      label:"Label proof approved", help:"Approved label proof — Receiving/QC cannot release packaging without it." },
+  { id:"doc_pkg_proof", dept:"Documents",  phase:"docs",      label:"Packaging proofs approved", help:"Artwork / component proofs approved." },
+  { id:"doc_blending",  dept:"Documents",  phase:"docs",      label:"Blending instructions issued", help:"R&D blending instructions provided to production." },
+  { id:"doc_bom",       dept:"Documents",  phase:"docs",      label:"BOM finalized", help:"Bill of materials complete and matched to inventory." },
+  { id:"doc_breq",      dept:"Documents",  phase:"docs",      label:"Batch record / BREQ ready", help:"Batch production record prepared." },
+  { id:"doc_organo",    dept:"Documents",  phase:"docs",      label:"Organoleptic spec on file", help:"Appearance / taste / smell target." },
+  { id:"doc_brix",      dept:"Documents",  phase:"docs",      label:"Brix / chemical spec on file", help:"For liquids: brix; potency / chemical specs as applicable." },
+  { id:"doc_pkg_rel",   dept:"Documents",  phase:"docs",      label:"Packaging materials received & released", help:"Components received and QC-released for use." },
+  { id:"sch_run_date",  dept:"Schedule",   phase:"ready",     label:"Production run date scheduled", help:"Firm run date on the calendar." },
+  { id:"sch_line",      dept:"Schedule",   phase:"ready",     label:"Line / room assigned", help:"Production line and staffing assigned." },
+  { id:"sch_visit",     dept:"Schedule",   phase:"ready",     label:"Customer visit coordinated (if applicable)", help:"Any customer-observed run coordinated in advance with all departments." },
+  { id:"sign_rnd",      dept:"Sign-off",   phase:"ready",     label:"R&D sign-off", help:"R&D confirms the run is ready." },
+  { id:"sign_qa",       dept:"Sign-off",   phase:"ready",     label:"QA sign-off", help:"Quality confirms the run is ready." },
+  { id:"sign_prod",     dept:"Sign-off",   phase:"ready",     label:"Production sign-off", help:"Production confirms readiness." },
+  { id:"sign_purch",    dept:"Sign-off",   phase:"ready",     label:"Purchasing sign-off", help:"Purchasing confirms all materials sourced." },
+];
+// LIVE template — mutable module ref so config edits propagate without a prop-drill. App replaces it
+// from the shared config on load (falls back to the default).
+let READINESS_GATES = DEFAULT_READINESS_GATES.slice();
+function setReadinessGates(list){ if (Array.isArray(list) && list.length) READINESS_GATES = list.slice(); }
+function rdyId(prefix){ return (prefix||'g') + '_' + Math.random().toString(36).slice(2,8); }
+// ── pure helpers (no DOM/React) ──
+function emptyReadiness(){ return { soNumber:"", moNumbers:[], scheduledRun:null, customerVisit:false, customerVisitNote:"", gates:{}, exceptions:[], updatedTs:null }; }
+function projReadiness(p){ return (p && p.readiness) ? p.readiness : null; }
+function gateStatusOf(r, gateId){ const g = r && r.gates && r.gates[gateId]; return (g && g.status) || "todo"; }
+function readinessScore(r, gates){
+  gates = gates || READINESS_GATES;
+  let done=0, total=0, blocked=0;
+  gates.forEach(g => { const s = gateStatusOf(r, g.id); if (s==="na") return; total++; if (s==="done") done++; if (s==="blocked") blocked++; });
+  const pct = total ? done/total : 0;
+  const color = blocked ? "bad" : (pct>=1 ? "ok" : (pct>=0.5 ? "warn" : "bad"));
+  return { done, total, pct, blocked, color };
+}
+function readinessByDept(r, gates){
+  gates = gates || READINESS_GATES; const m={};
+  gates.forEach(g => { const s=gateStatusOf(r,g.id); if (s==="na") return; const d=(m[g.dept]=m[g.dept]||{done:0,total:0,blocked:0}); d.total++; if (s==="done") d.done++; if (s==="blocked") d.blocked++; });
+  return m;
+}
+// DERIVE the board phase from gate completion + project stage (readiness-truthful, not drag-set).
+function derivePhase(p){
+  const r = projReadiness(p);
+  const st = normalizeStage(p && p.stage);
+  if (st === "In Production") return "production";
+  if (typeof isClosedStage === "function" && isClosedStage(st)) return "released";
+  if (!r) return "intake";
+  const gates = READINESS_GATES;
+  const catDone = (phaseId) => { const active = gates.filter(g=>g.phase===phaseId && gateStatusOf(r,g.id)!=="na"); return active.length>0 && active.every(g=>gateStatusOf(r,g.id)==="done"); };
+  const sc = readinessScore(r, gates);
+  const started = Object.keys(r.gates||{}).length>0 || r.soNumber || (r.moNumbers&&r.moNumbers.length) || r.scheduledRun;
+  if (!started) return "intake";
+  if (sc.total>0 && sc.pct>=1) return r.scheduledRun ? "ready" : "docs";
+  if (!catDone("materials")) return "materials";
+  if (!catDone("qc")) return "qc";
+  if (!catDone("docs")) return "docs";
+  return "ready";
+}
+// GO/NO-GO feasibility vs QC's 72h ID+micro window. Returns { level ∈ ok|warn|bad, msg } or null.
+const QC_LEAD_HOURS = 72;
+function scheduleFeasibility(p, nowMs){
+  const r = projReadiness(p); if (!r || !r.scheduledRun) return null;
+  const run = Date.parse(r.scheduledRun + "T00:00:00"); if (!isFinite(run)) return null;
+  const now = nowMs || Date.now();
+  const released = gateStatusOf(r,"qc_released")==="done";
+  const hrs = (run - now)/3600000;
+  if (released) return { level:"ok", msg:"Materials QC-released — clear to run." };
+  if (hrs < 0) return { level:"bad", msg:"Run date has passed and materials are NOT QC-released." };
+  if (hrs < QC_LEAD_HOURS) return { level:"bad", msg:"Run in ~" + Math.round(hrs) + "h but QC needs " + QC_LEAD_HOURS + "h for ID + micro — NOT feasible without a logged conditional release." };
+  if (hrs < QC_LEAD_HOURS*1.5) return { level:"warn", msg:"Only ~" + Math.round(hrs) + "h to the run — QC's " + QC_LEAD_HOURS + "h window is tight." };
+  return { level:"ok", msg:"~" + Math.round(hrs/24) + " day(s) to run — within QC's testing window." };
+}
+// Cross-functional exception (conditional release / deviation): required approver departments before
+// it counts as APPROVED — a cross-functional decision, not a unilateral call.
+const EXCEPTION_APPROVERS = ["QA","R&D","Production"];
+function exceptionStatus(ex){
+  if (!ex) return "open";
+  const ap = ex.approvals || {};
+  if (EXCEPTION_APPROVERS.some(d => ap[d] && ap[d].decision === "reject")) return "rejected";
+  return EXCEPTION_APPROVERS.every(d => ap[d] && ap[d].decision === "approve") ? "approved" : "open";
+}
 
 // Canonical Enova dosage-form picklist (drives the Label filter). "Cosmetic" is
 // NOT a form — cosmetics are formulated as Liquid or Powder — so it and other
@@ -2196,6 +2615,7 @@ const STAGE_COLOR_KEY = (stage) => {
   const s = (stage||'').toLowerCase();
   if (s.includes('sourcing') || s.includes('pending'))          return 'ch-Inquiry';
   if (s.includes('formulat'))                                    return 'ch-Formulating';
+  if (s.includes('lab/sampl') || s.includes('sampling'))         return 'ch-LabReview';   // Lab/Sampling column
   if (s.includes('sample') || s.includes('semple'))              return 'ch-LabReview';
   if (s.includes('bid process') || s.includes('bid review'))     return 'ch-LabReview';
   if (s.includes('bid sent') || s.includes('bid submitted') || s.includes('tiered')) return 'ch-QuoteSubmitted';
@@ -2343,6 +2763,13 @@ const FORMULATION_DEFAULTS = {
   // Wins over the live MISys cost everywhere COGS is computed (skuCostFor). Editable on the Project
   // Page + Formulation grid. Empty {} = use live MISys costs.
   costOverride:{},
+  // §48 PRODUCTION READINESS — the cross-department command board data for this project's production
+  // run(s). Null until a run is opened. Shape: { soNumber, moNumbers:[], scheduledRun (ISO date),
+  // customerVisit, customerVisitNote, gates:{gateId:{status,by,byName,ts,note}}, exceptions:[...],
+  // updatedTs }. Rides the project blob so it is SHARED across all departments via the same Supabase
+  // realtime path as mfsoSigned/mfso. Gate STATUS is the frequently-updated shared field; the gate
+  // TEMPLATE (which gates exist) is a separate shared config (READINESS_GATES / studio_readiness_config).
+  readiness:null,
 };
 
 function emptyProject(pn) {
@@ -2515,6 +2942,15 @@ function migrateProject(raw){
   if (!p.pkg || typeof p.pkg!=='object') p.pkg = {};
   if (!p.baseItems || typeof p.baseItems!=='object') p.baseItems = {};
   if (!p.approvals || typeof p.approvals!=='object') p.approvals = {};
+  // §48 readiness: keep null OR a well-formed object (never a stray scalar); normalize sub-structures.
+  if (p.readiness != null){
+    if (typeof p.readiness !== 'object') p.readiness = null;
+    else {
+      if (!p.readiness.gates || typeof p.readiness.gates!=='object') p.readiness.gates = {};
+      if (!Array.isArray(p.readiness.moNumbers)) p.readiness.moNumbers = [];
+      if (!Array.isArray(p.readiness.exceptions)) p.readiness.exceptions = [];
+    }
+  }
   // numerics (clamp: never negative)
   p.servingSize     = nOr(p.servingSize, 1);
   p.servingsPerUnit = nOr(p.servingsPerUnit, 30);
@@ -3747,10 +4183,11 @@ function PriceCell({ value, overridden, onSave, disabled, dp }){
     onFocus={()=>{ setFoc(true); setV(value==null?'':String(value)); }} onChange={e=>setV(e.target.value)}
     onBlur={commit} onKeyDown={e=>{ if(e.key==='Enter'){ e.currentTarget.blur(); } if(e.key==='Escape'){ setFoc(false); setV(value==null?'':String(value)); } }}/>;
 }
-function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendReview, onOpenMFSO, people, onUpdate }){
+function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendReview, onOpenMFSO, people, onUpdate, onRenamePn, onDelete, suggestedPn }){
   const [reviewer, setReviewer] = useState('');
   const [reviewNote, setReviewNote] = useState('');
   const [sentMsg, setSentMsg] = useState('');
+  const [pnEdit, setPnEdit] = useState(null);   // inline project-number editor (fix a malformed / relabel)
   const p = proj;
   const upd = (patch) => { if (onUpdate) onUpdate(p.pn, patch); };
   const ppLocked = isLocked(p);
@@ -3825,8 +4262,26 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
       <div className="pp-topbar">
         <button className="pp-back" onClick={onBack} title="Back to Workflow">◄ Projects</button>
         <div className="pp-title">
-          <span className="pp-pn">{p.pn}</span>
-          {!isValidPN(p.pn) && <span className="fbadge bad" title={'Malformed project number. The format is P + 2-digit year + 3 digits (e.g. P'+String(pnYear()).padStart(2,'0')+'xxx). Rename it on the Formulation page → Project #.'}>⚠ invalid #</span>}
+          {pnEdit == null ? (<>
+            <span className="pp-pn">{p.pn}</span>
+            {onRenamePn && (!isValidPN(p.pn)
+              ? <button className="fbadge bad" title="This project number is malformed — click to fix it"
+                  onClick={()=>setPnEdit(suggestedPn || p.pn)}
+                  style={{cursor:'pointer',border:'none',font:'inherit'}}>⚠ invalid # — fix</button>
+              : <button title="Edit the project number"
+                  onClick={()=>setPnEdit(p.pn)}
+                  style={{cursor:'pointer',border:'1px solid var(--line)',background:'#fff',borderRadius:6,padding:'1px 7px',fontSize:12,color:'#667'}}>✎ #</button>)}
+          </>) : (
+            <span style={{display:'inline-flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+              <input autoFocus value={pnEdit}
+                onChange={e=>setPnEdit(e.target.value.toUpperCase())}
+                onKeyDown={e=>{ if(e.key==='Enter'){ if(onRenamePn(p.pn, pnEdit)) setPnEdit(null); } else if(e.key==='Escape') setPnEdit(null); }}
+                style={{font:'inherit',fontWeight:800,fontSize:20,width:130,padding:'2px 8px',border:'1px solid var(--teal)',borderRadius:6,textTransform:'uppercase'}}/>
+              <button className="btn" onClick={()=>{ if(onRenamePn(p.pn, pnEdit)) setPnEdit(null); }}>Save</button>
+              <button className="btn sec" onClick={()=>setPnEdit(null)}>Cancel</button>
+              <span className="fsmall" style={{color:'#8794a0'}}>Format: P + 2-digit year + 3 digits — next free {suggestedPn}</span>
+            </span>
+          )}
           <span className="pp-stage" style={{background:chip}}>
             <span className="pp-dot"/>{p.stage}
           </span>
@@ -3835,6 +4290,9 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
         </div>
         <div className="pp-title-actions">
           {onEdit && <button className="btn sec" onClick={onEdit}>Edit</button>}
+          {onDelete && <button className="btn sec" title="Delete this project"
+            onClick={async()=>{ const ok = await confirmDialog({ title:'Delete project?', message:`Permanently delete ${p.pn}${p.product?` — ${p.product}`:''}? This removes it from the workspace and the database and cannot be undone.`, confirmLabel:'Delete', cancelLabel:'Keep', danger:true }); if(ok && onDelete) onDelete(p.pn); }}
+            style={{borderColor:'#c0392b',color:'#c0392b'}}>Delete</button>}
         </div>
       </div>
 
@@ -4048,8 +4506,12 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
 }
 
 /* ══════════════════ WIP BOARD PAGE ══════════════════ */
-function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenMFSO, onSendReview, people, openPagePn, onPageOpened, onUpdateProject }) {
+function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenMFSO, onSendReview, people, openPagePn, onPageOpened, onUpdateProject, onRenameProject, onDeleteProject }) {
   const [stages, setStages]     = useState(DEFAULT_STAGES);
+  // Collapsed WIP columns (stage → true). Clicking a column header rolls it up to a thin vertical
+  // strip; clicking again rolls it back down. Session-scoped; drag-and-drop still works when collapsed.
+  const [collapsedCols, setCollapsedCols] = useState({});
+  const toggleCol = (stage) => setCollapsedCols(c => ({ ...c, [stage]: !c[stage] }));
   const [zoom, setZoom]         = useState(1.0);
   const [search, setSearch]     = useState('');
   const [pmFilter, setPmFilter] = useState('All');
@@ -4255,7 +4717,7 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
   };
 
   // ── Click-and-drag background panning (Miro/Figma style) ───────────────
-  const INTERACTIVE_SEL = 'button, input, select, textarea, a, .card, .modal-bg, .zoom-ctrl';
+  const INTERACTIVE_SEL = 'button, input, select, textarea, a, .card, .modal-bg, .zoom-ctrl, .col-head';
   const onBoardPointerDown = (e) => {
     if (e.target.closest(INTERACTIVE_SEL)) return;   // don't hijack card drags or controls
     if (e.button !== undefined && e.button !== 0) return; // left-click / primary touch only
@@ -4425,7 +4887,10 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
              onBack={() => setPagePn(null)}
              onEdit={() => openEdit(pageProj)}
              onFormulate={onFormulate} onOpenMFSO={onOpenMFSO}
-             onSendReview={onSendReview} people={people} onUpdate={onUpdateProject} />;
+             onSendReview={onSendReview} people={people} onUpdate={onUpdateProject}
+             suggestedPn={nextPN(projects)}
+             onRenamePn={onRenameProject && ((o,n)=>{ const ok=onRenameProject(o,n); if(ok) setPagePn(n); return ok; })}
+             onDelete={onDeleteProject && ((pn)=>{ onDeleteProject(pn); setPagePn(null); })} />;
   }
   const openNew  = () => setModal({ type: 'new', proj: emptyProject(nextPN(projects)) });
   const closeModal = () => setModal(null);
@@ -4657,14 +5122,19 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
               const cards = byStage[stage] || [];
               const isDragTarget = dragOver === stage;
               const colorCls = STAGE_COLOR_KEY(stage);
+              const isCol = !!collapsedCols[stage];
               return (
-                <div key={stage} className="col"
+                <div key={stage} className={`col ${isCol ? 'col-collapsed' : ''}`}
                   onDragOver={e => onDragOver(stage, e)}
                   onDragLeave={onDragLeave}
                   onDrop={() => onDrop(stage)}>
-                  
-                  <div className={`col-head ${colorCls}`}>
-                    <span className="col-head-label" title={stage}>{stage}</span>
+
+                  <div className={`col-head clickable ${colorCls}`}
+                    onClick={() => toggleCol(stage)}
+                    title={isCol ? `Expand “${stage}”` : `Collapse “${stage}”`}
+                    role="button" tabIndex={0}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCol(stage); } }}>
+                    <span className="col-head-label">{stage}</span>
                     <span className="col-count">{cards.length}</span>
                   </div>
 
@@ -6637,14 +7107,17 @@ const EnovaMark = () => (
    A dedicated page (nav tab under WIP Board) listing every project — open and closed — in the
    sortable, per-column-filterable spreadsheet grid, with a global search across #, customer,
    product, PM, rep, stage, and notes. Any row opens the project detail. Recallable at any time. */
-function ProjectsPage({ projects, onToggleNav, onFormulate, onOpenMFSO, onSendReview, people, onUpdateProject }){
+function ProjectsPage({ projects, onToggleNav, onFormulate, onOpenMFSO, onSendReview, people, onUpdateProject, onRenameProject, onDeleteProject }){
   const [pagePn, setPagePn] = useState(null);   // open the full project page by PN
   const pageProj = pagePn ? projects.find(p => p.pn === pagePn) : null;
   if (pageProj) {
     const prevVisits = projects.filter(x => x.pn !== pageProj.pn &&
       cleanCustomer(x.customer) !== '—' &&
       cleanCustomer(x.customer).toLowerCase() === cleanCustomer(pageProj.customer).toLowerCase()).length;
-    return <ProjectPage proj={pageProj} prevVisits={prevVisits} onBack={() => setPagePn(null)} onFormulate={onFormulate} onOpenMFSO={onOpenMFSO} onSendReview={onSendReview} people={people} onUpdate={onUpdateProject} />;
+    return <ProjectPage proj={pageProj} prevVisits={prevVisits} onBack={() => setPagePn(null)} onFormulate={onFormulate} onOpenMFSO={onOpenMFSO} onSendReview={onSendReview} people={people} onUpdate={onUpdateProject}
+             suggestedPn={nextPN(projects)}
+             onRenamePn={onRenameProject && ((o,n)=>{ const ok=onRenameProject(o,n); if(ok) setPagePn(n); return ok; })}
+             onDelete={onDeleteProject && ((pn)=>{ onDeleteProject(pn); setPagePn(null); })} />;
   }
   return (
     <div className="app-page" style={{background:'var(--paper)'}}>
@@ -7569,6 +8042,56 @@ function useSharedInventory(email){
   return { push, status };
 }
 
+/* §48 shared, editable readiness gate TEMPLATE — mirrors useSharedInventory. Single row
+   studio_readiness_config id='current' { gates:[...], meta }. Degrades gracefully: no table / offline
+   → localStorage mirror, then the in-code DEFAULT_READINESS_GATES. Applies to the module ref
+   READINESS_GATES so every readiness computation uses the live template. The frequently-updated
+   per-run STATUS rides the project blob (already shared); this hook only shares the rare template edit. */
+const RDY_CFG_LS = 'enova_readiness_gates_v1';
+function loadLocalGates(){ try { const s = localStorage.getItem(RDY_CFG_LS); const a = s?JSON.parse(s):null; return (Array.isArray(a)&&a.length)?a:null; } catch(e){ return null; } }
+function useSharedReadinessConfig(email){
+  const [gates, setGatesState] = useState(() => { const l = loadLocalGates(); if (l) setReadinessGates(l); return READINESS_GATES; });
+  const [status, setStatus] = useState(null);
+  const selfWrite = useRef(false);
+  useEffect(() => {
+    if (!sb) { setStatus({ state:'local' }); return; }
+    let ch;
+    (async () => {
+      try {
+        const { data, error } = await sb.from('studio_readiness_config').select('gates,meta,updated_at').eq('id','current').maybeSingle();
+        if (!error && data && Array.isArray(data.gates) && data.gates.length){
+          setReadinessGates(data.gates); setGatesState(data.gates.slice());
+          try { localStorage.setItem(RDY_CFG_LS, JSON.stringify(data.gates)); } catch(e){}
+          setStatus({ state:'synced', ts:data.updated_at });
+        } else if (error) { setStatus({ state:'local', msg:error.message }); }
+        else { setStatus({ state:'synced', empty:true }); }
+      } catch(e){ setStatus({ state:'local', msg:String((e&&e.message)||e) }); }
+      try {
+        ch = sb.channel('studio_readiness_config_rt')
+          .on('postgres_changes', { event:'*', schema:'public', table:'studio_readiness_config' }, (payload) => {
+            if (selfWrite.current) { selfWrite.current = false; return; }
+            const row = payload.new;
+            if (row && Array.isArray(row.gates) && row.gates.length){ setReadinessGates(row.gates); setGatesState(row.gates.slice()); try { localStorage.setItem(RDY_CFG_LS, JSON.stringify(row.gates)); } catch(e){} }
+          }).subscribe();
+      } catch(e){}
+    })();
+    return () => { if (ch && sb) sb.removeChannel(ch); };
+  }, []);
+  // Save an edited template: apply locally immediately (always works), then best-effort share.
+  const save = useCallback((list) => {
+    if (!Array.isArray(list) || !list.length) return Promise.resolve({ ok:false, reason:'empty template' });
+    setReadinessGates(list); setGatesState(list.slice());
+    try { localStorage.setItem(RDY_CFG_LS, JSON.stringify(list)); } catch(e){}
+    if (!sb) return Promise.resolve({ ok:true, shared:false });
+    selfWrite.current = true;
+    const row = { id:'current', gates:list, meta:{ ts:new Date().toISOString() }, updated_by: email||null, updated_at: new Date().toISOString() };
+    return sb.from('studio_readiness_config').upsert(row, { onConflict:'id' })
+      .then(({error}) => { if (error){ selfWrite.current=false; return { ok:true, shared:false, reason:error.message }; } return { ok:true, shared:true }; });
+  }, [email]);
+  const resetDefault = useCallback(() => save(DEFAULT_READINESS_GATES.slice()), [save]);
+  return { gates, setGates:save, resetDefault, status };
+}
+
 /* ══════════════════ NOTIFICATIONS — in-app alerts (shared, realtime) ══════════════════ */
 // Enova people you can route a project to for review (name → login email).
 const ENOVA_PEOPLE = [
@@ -7939,6 +8462,295 @@ function InventoryPage({ onToggleNav, onCloudPush, cloudStatus }){
   );
 }
 
+/* ══════════════ §48 READINESS PAGE — production-readiness command board ══════════════
+   The cross-department view the SO#185 thread proved Enova is missing: one place where QC,
+   Production, R&D, Purchasing/Receiving and leadership see whether a run is actually GO — every
+   gate, its owner, its status — before the run date arrives. Per-run status rides the project blob
+   (shared like mfsoSigned); the gate template is shared config; every change is audited. */
+const RDY_PIPELINE_STAGES = new Set(["BID Sent","MFSO","PO Submitted","In Production","On Hold"]);
+function inReadinessPipeline(p){
+  if (projReadiness(p)) return true;
+  if (isSignedMFSO(p.stage)) return true;
+  return RDY_PIPELINE_STAGES.has(normalizeStage(p.stage));
+}
+function fmtRdyDate(ts){ try { return new Date(ts).toLocaleDateString('en-US',{month:'short',day:'numeric'}); } catch(e){ return ''; } }
+
+function ReadinessCard({ p, gates, nowMs, onOpen }){
+  const r = projReadiness(p);
+  const sc = readinessScore(r, gates);
+  const fe = scheduleFeasibility(p, nowMs);
+  return (
+    <div className="rdy-card" onClick={onOpen} title="Open readiness detail">
+      <div className="rdy-card-top">
+        <span className="rdy-card-pn">{p.pn}</span>
+        {r && r.soNumber ? <span className="rdy-badge so">SO {r.soNumber}</span> : null}
+        {r && r.customerVisit ? <span className="rdy-badge visit" title={r.customerVisitNote||'Customer visit'}>👁 Visit</span> : null}
+      </div>
+      <div className="rdy-card-prod">{p.product||'—'}</div>
+      <div className="rdy-card-cust">{cleanCustomer(p.customer)}</div>
+      <div className="rdy-meter"><div className={`rdy-meter-fill ${sc.color}`} style={{width:(sc.total?Math.round(sc.pct*100):0)+'%'}}></div></div>
+      <div className="rdy-card-meta">
+        <span className={`rdy-mini ${sc.color}`}>{sc.done}/{sc.total} gates</span>
+        {sc.blocked>0 && <span className="rdy-mini bad">{sc.blocked} blocked</span>}
+        {r && r.moNumbers && r.moNumbers.length ? <span className="rdy-mini">MO {r.moNumbers.join(', ')}</span> : null}
+      </div>
+      {fe && <div className={`rdy-fe ${fe.level}`}>{fe.level==='bad'?'⛔':fe.level==='warn'?'⚠':'✓'} {r.scheduledRun}</div>}
+    </div>
+  );
+}
+
+function StartRunModal({ projects, onPick, onClose }){
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal rdy-modal" onClick={e=>e.stopPropagation()}>
+        <div className="rdy-modal-head"><h3>Start a production-readiness run</h3><button className="rdy-x" onClick={onClose}>✕</button></div>
+        <p className="rdy-modal-sub">Recall any project to begin tracking its production readiness. Projects already in the production pipeline appear on the board automatically.</p>
+        <ProjectPicker projects={projects} activePn={null} onSelect={(pn)=>onPick(pn)} />
+      </div>
+    </div>
+  );
+}
+
+function GateConfigModal({ gateConfig, isAdmin, onClose }){
+  const [list, setList] = useState(() => ((gateConfig&&gateConfig.gates)||READINESS_GATES).map(g=>({...g})));
+  const [saving, setSaving] = useState(false);
+  const upd = (i, key, val) => setList(prev => prev.map((g,idx)=> idx===i?{...g,[key]:val}:g));
+  const add = () => setList(prev => prev.concat([{ id:rdyId('gate'), dept:'Documents', phase:'docs', label:'New gate', help:'' }]));
+  const remove = (i) => setList(prev => prev.filter((_,idx)=>idx!==i));
+  const move = (i,dir) => setList(prev => { const a=prev.slice(); const j=i+dir; if(j<0||j>=a.length) return a; const t=a[i]; a[i]=a[j]; a[j]=t; return a; });
+  const save = async () => {
+    if (!isAdmin){ toast('Only an admin can change the gate template.', 'warn'); return; }
+    if (list.some(g=>!String(g.label||'').trim())){ toast('Every gate needs a label.', 'warn'); return; }
+    const seen=new Set(); const clean=list.map(g=>{ let id=g.id; if(!id||seen.has(id)) id=rdyId('gate'); seen.add(id); return {...g,id}; });
+    setSaving(true);
+    const res = await gateConfig.setGates(clean);
+    setSaving(false);
+    toast(res && res.shared ? 'Gate template saved & shared with all users.' : 'Gate template saved (local — shared table not provisioned yet).', res && res.shared?'ok':'info');
+    onClose();
+  };
+  const resetDef = async () => { if(!(await confirmDialog({message:'Reset the gate template to the Enova default? Your customizations will be replaced.', title:'Reset gates', confirmLabel:'Reset', danger:true}))) return; await gateConfig.resetDefault(); onClose(); };
+  const PHASE_OPTS = READINESS_PHASES.filter(ph=>['materials','qc','docs','ready'].includes(ph.id));
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal rdy-modal rdy-cfg" onClick={e=>e.stopPropagation()}>
+        <div className="rdy-modal-head"><h3>Configure readiness gates</h3><button className="rdy-x" onClick={onClose}>✕</button></div>
+        <p className="rdy-modal-sub">Add, edit, remove or reorder the gates every run is checked against — grouped by the department that owns each. Shared with all departments. {!isAdmin && <b>(Admin required to save.)</b>}</p>
+        <div className="rdy-cfg-list">
+          <div className="rdy-cfg-row rdy-cfg-hdr"><span>Move</span><span>Gate</span><span>Dept</span><span>Phase</span><span></span></div>
+          {list.map((g,i)=>(
+            <div key={g.id||i} className="rdy-cfg-row">
+              <span className="rdy-cfg-move"><button onClick={()=>move(i,-1)} title="Move up">▲</button><button onClick={()=>move(i,1)} title="Move down">▼</button></span>
+              <span className="rdy-cfg-label"><input value={g.label} onChange={e=>upd(i,'label',e.target.value)} placeholder="Gate label" /><input className="rdy-cfg-help" value={g.help||''} onChange={e=>upd(i,'help',e.target.value)} placeholder="Help / description (optional)" /></span>
+              <select value={g.dept} onChange={e=>upd(i,'dept',e.target.value)}>{READINESS_DEPTS.map(d=><option key={d} value={d}>{d}</option>)}</select>
+              <select value={g.phase} onChange={e=>upd(i,'phase',e.target.value)}>{PHASE_OPTS.map(ph=><option key={ph.id} value={ph.id}>{ph.label}</option>)}</select>
+              <button className="rdy-cfg-del" onClick={()=>remove(i)} title="Remove gate">🗑</button>
+            </div>
+          ))}
+        </div>
+        <div className="rdy-cfg-foot">
+          <button className="rdy-btn ghost" onClick={add}>＋ Add gate</button>
+          <div style={{flex:1}}></div>
+          <button className="rdy-btn ghost" onClick={resetDef}>Reset to default</button>
+          <button className="rdy-btn" disabled={saving} onClick={save}>{saving?'Saving…':'Save template'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReadinessDetail({ p, gates, nowMs, onClose, setGate, setMeta, addException, decideException, removeException, onOpenMFSO }){
+  const r = p.readiness || emptyReadiness();
+  const sc = readinessScore(r, gates);
+  const fe = scheduleFeasibility(p, nowMs);
+  const dept = readinessByDept(r, gates);
+  const [exTitle, setExTitle] = useState(""); const [exDetail, setExDetail] = useState(""); const [exKind, setExKind] = useState("conditional-release");
+  const grouped = READINESS_DEPTS.map(d => ({ dept:d, gates: gates.filter(g=>g.dept===d) })).filter(x=>x.gates.length);
+  const moText = (r.moNumbers||[]).join(', ');
+  return (
+    <div className="rdy-drawer-bg" onClick={onClose}>
+      <div className="rdy-drawer" onClick={e=>e.stopPropagation()}>
+        <div className="rdy-drawer-head">
+          <div>
+            <div className="rdy-drawer-pn">{p.pn} <span className={`rdy-mini ${sc.color}`}>{sc.done}/{sc.total} gates{sc.total?(' · '+Math.round(sc.pct*100)+'%'):''}</span></div>
+            <div className="rdy-drawer-prod">{p.product||'—'} — {cleanCustomer(p.customer)}</div>
+          </div>
+          <div className="rdy-drawer-head-actions">
+            {onOpenMFSO && <button className="rdy-btn ghost" onClick={()=>onOpenMFSO(p.pn)}>Open MFSO</button>}
+            <button className="rdy-x" onClick={onClose}>✕</button>
+          </div>
+        </div>
+
+        {fe && <div className={`rdy-fe-banner ${fe.level}`}>{fe.level==='bad'?'⛔ NO-GO':fe.level==='warn'?'⚠ TIGHT':'✓ GO'} — {fe.msg}</div>}
+
+        <div className="rdy-meta-grid">
+          <label>SO #<input value={r.soNumber||''} onChange={e=>setMeta(p.pn,'soNumber',e.target.value)} placeholder="185" /></label>
+          <label>MO #(s)<input defaultValue={moText} onBlur={e=>setMeta(p.pn,'moNumbers', e.target.value.split(/[,\s]+/).map(s=>s.trim()).filter(Boolean), 'Readiness run', 'MO#s set')} placeholder="11404, 11405, 11406" /></label>
+          <label>Scheduled run<input type="date" value={r.scheduledRun||''} onChange={e=>setMeta(p.pn,'scheduledRun', e.target.value||null, 'Readiness run', 'Run date '+(e.target.value||'cleared'))} /></label>
+          <label className="rdy-visit-cell"><span>Customer visit</span><input type="checkbox" checked={!!r.customerVisit} onChange={e=>setMeta(p.pn,'customerVisit', e.target.checked, 'Readiness run', 'Customer visit '+(e.target.checked?'flagged':'cleared'))} /></label>
+          {r.customerVisit && <label className="rdy-visit-note">Visit note<input value={r.customerVisitNote||''} onChange={e=>setMeta(p.pn,'customerVisitNote',e.target.value)} placeholder="Customer flying in — noon run" /></label>}
+        </div>
+
+        <div className="rdy-gates">
+          {grouped.map(grp => {
+            const d = dept[grp.dept]||{done:0,total:0,blocked:0};
+            return (
+              <div key={grp.dept} className="rdy-lane">
+                <div className="rdy-lane-head"><span className="rdy-lane-name">{grp.dept}</span><span className={`rdy-mini ${d.blocked?'bad':(d.total&&d.done>=d.total?'ok':'warn')}`}>{d.done}/{d.total}</span></div>
+                {grp.gates.map(g => {
+                  const st = gateStatusOf(r, g.id); const cur = (r.gates&&r.gates[g.id])||null;
+                  return (
+                    <div key={g.id} className={`rdy-gate ${RDY_STATUS[st].cls}`}>
+                      <span className="rdy-gate-dot" style={{background:RDY_STATUS[st].dot}}></span>
+                      <div className="rdy-gate-main">
+                        <div className="rdy-gate-label" title={g.help||''}>{g.label}</div>
+                        {cur && cur.byName && st!=='todo' && <div className="rdy-gate-by">{RDY_STATUS[st].label} · {cur.byName}{cur.ts?(' · '+fmtRdyDate(cur.ts)):''}</div>}
+                      </div>
+                      <select className="rdy-gate-sel" value={st} onChange={e=>setGate(p.pn, g, e.target.value)}>
+                        {RDY_STATUS_ORDER.map(s=><option key={s} value={s}>{RDY_STATUS[s].label}</option>)}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="rdy-exc">
+          <div className="rdy-exc-head">Conditional releases &amp; deviations <span className="rdy-mini">cross-functional sign-off</span></div>
+          {(r.exceptions||[]).length===0 && <div className="rdy-exc-empty">No exceptions logged. Any conditional release must be logged here and approved by QA, R&amp;D and Production before the run.</div>}
+          {(r.exceptions||[]).map(ex => {
+            const stt = exceptionStatus(ex);
+            return (
+              <div key={ex.id} className={`rdy-exc-item ${stt}`}>
+                <div className="rdy-exc-top"><span className="rdy-exc-kind">{ex.kind}</span><b>{ex.title}</b><span className={`rdy-exc-status ${stt}`}>{stt}</span><button className="rdy-x sm" onClick={()=>removeException(p.pn, ex.id)} title="Remove">✕</button></div>
+                {ex.detail && <div className="rdy-exc-detail">{ex.detail}</div>}
+                <div className="rdy-exc-by">Requested by {ex.requestedByName||ex.requestedBy||'—'}{ex.requestedTs?(' · '+fmtRdyDate(ex.requestedTs)):''}</div>
+                <div className="rdy-exc-approvals">
+                  {EXCEPTION_APPROVERS.map(dp => {
+                    const a = (ex.approvals||{})[dp];
+                    return (
+                      <div key={dp} className={`rdy-appr ${a?a.decision:''}`}>
+                        <span className="rdy-appr-dept">{dp}</span>
+                        {a ? <span className="rdy-appr-dec">{a.decision==='approve'?'✓ approved':'✗ rejected'} · {a.byName||a.by||''}</span> :
+                          <span className="rdy-appr-btns"><button onClick={()=>decideException(p.pn,ex.id,dp,'approve')}>Approve</button><button onClick={()=>decideException(p.pn,ex.id,dp,'reject')}>Reject</button></span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+          <div className="rdy-exc-add">
+            <select value={exKind} onChange={e=>setExKind(e.target.value)}><option value="conditional-release">Conditional release</option><option value="deviation">Deviation</option><option value="other">Other</option></select>
+            <input value={exTitle} onChange={e=>setExTitle(e.target.value)} placeholder="Title (e.g. Conditional release — Magnesium L-Threonate)" />
+            <input value={exDetail} onChange={e=>setExDetail(e.target.value)} placeholder="Detail / justification" />
+            <button className="rdy-btn" onClick={()=>{ if(!exTitle.trim()){ toast('Add a title for the exception.','warn'); return; } addException(p.pn, exTitle.trim(), exDetail.trim(), exKind); setExTitle(''); setExDetail(''); }}>Log exception</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReadinessPage({ projects, setProjects, onToggleNav, onOpenMFSO, gateConfig }){
+  const { isAdmin } = useRole();
+  const gates = (gateConfig && gateConfig.gates) || READINESS_GATES;
+  const [openPn, setOpenPn] = useState(null);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [startOpen, setStartOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [visitOnly, setVisitOnly] = useState(false);
+  const nowMs = useMemo(() => Date.now(), []);
+
+  const pipeline = useMemo(() => {
+    let list = projects.filter(inReadinessPipeline);
+    if (visitOnly) list = list.filter(p => { const r=projReadiness(p); return r && r.customerVisit; });
+    if (q.trim()){ const s=q.trim().toLowerCase(); list = list.filter(p => { const r=projReadiness(p); return [p.pn,p.customer,p.product,(r&&r.soNumber)||''].join(' ').toLowerCase().includes(s); }); }
+    return list;
+  }, [projects, visitOnly, q, gates]);
+
+  const byPhase = useMemo(() => {
+    const m = {}; READINESS_PHASES.forEach(ph => m[ph.id]=[]);
+    pipeline.forEach(p => { const ph = derivePhase(p); (m[ph]=m[ph]||[]).push(p); });
+    return m;
+  }, [pipeline, gates]);
+
+  const kpis = useMemo(() => {
+    let atRisk=0, visits=0, ready=0, running=0;
+    pipeline.forEach(p => {
+      const r = projReadiness(p); const sc = readinessScore(r, gates); const fe = scheduleFeasibility(p, nowMs); const ph = derivePhase(p);
+      if (sc.blocked || (fe && fe.level==='bad')) atRisk++;
+      if (r && r.customerVisit) visits++;
+      if (ph==='ready') ready++;
+      if (ph==='production') running++;
+    });
+    return { total: pipeline.length, atRisk, visits, ready, running };
+  }, [pipeline, gates, nowMs]);
+
+  const openProj = projects.find(p => p.pn === openPn) || null;
+
+  const patchR = (pn, mut, action, detail) => {
+    setProjects(prev => prev.map(p => {
+      if (p.pn !== pn) return p;
+      const base = p.readiness || emptyReadiness();
+      const r = { ...base, gates:{...base.gates}, moNumbers:[...(base.moNumbers||[])], exceptions:[...(base.exceptions||[])] };
+      mut(r); r.updatedTs = new Date().toISOString();
+      let p2 = { ...p, readiness:r };
+      if (action) p2 = withAudit(p2, action, detail||"");
+      return p2;
+    }));
+    if (action) dbAudit(pn, action, detail||"");
+  };
+  const setGate = (pn, g, status) => patchR(pn, r => { r.gates[g.id] = { status, by:CURRENT_ACTOR.email, byName:CURRENT_ACTOR.name, ts:new Date().toISOString(), note:(r.gates[g.id]&&r.gates[g.id].note)||"" }; }, "Readiness gate", g.label+" → "+RDY_STATUS[status].label);
+  const setMeta = (pn, key, val, action, detail) => patchR(pn, r => { r[key]=val; }, action, detail);
+  const startRun = (pn) => { patchR(pn, ()=>{}, "Readiness run opened", "Production-readiness run started"); setOpenPn(pn); setStartOpen(false); };
+  const addException = (pn, title, detail, kind) => patchR(pn, r => { r.exceptions = r.exceptions.concat([{ id:rdyId('ex'), kind:kind||'conditional-release', title, detail, requestedBy:CURRENT_ACTOR.email, requestedByName:CURRENT_ACTOR.name, requestedTs:new Date().toISOString(), approvals:{}, status:'open' }]); }, "Readiness exception", (kind||'conditional-release')+": "+title);
+  const decideException = (pn, exId, dp, decision) => patchR(pn, r => { r.exceptions = r.exceptions.map(e => { if (e.id!==exId) return e; const approvals = { ...(e.approvals||{}), [dp]:{ decision, by:CURRENT_ACTOR.email, byName:CURRENT_ACTOR.name, ts:new Date().toISOString() } }; const ex2 = { ...e, approvals }; ex2.status = exceptionStatus(ex2); return ex2; }); }, "Readiness exception", dp+" "+decision+"d an exception");
+  const removeException = (pn, exId) => patchR(pn, r => { r.exceptions = r.exceptions.filter(e=>e.id!==exId); }, "Readiness exception", "Exception removed");
+
+  return (
+    <div className="app-page gen-page rdy-page" style={{background:'var(--paper)'}}>
+      <div className="gen-top">
+        <button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+        <div className="gen-title">Production Readiness</div>
+        <div className="rdy-top-actions">
+          <input className="rdy-search" placeholder="Search run / project…" value={q} onChange={e=>setQ(e.target.value)} />
+          <label className="rdy-visit-toggle"><input type="checkbox" checked={visitOnly} onChange={e=>setVisitOnly(e.target.checked)} /> Customer visits</label>
+          <button className="rdy-btn" onClick={()=>setStartOpen(true)}>＋ Start a run</button>
+          <button className="rdy-btn ghost" onClick={()=>setConfigOpen(true)} title="Add / edit / remove readiness gates">⚙ Configure gates</button>
+        </div>
+      </div>
+      <div className="gen-body rdy-body">
+        <div className="rdy-kpis">
+          <div className="rdy-kpi"><div className="rdy-kpi-n">{kpis.total}</div><div className="rdy-kpi-l">In pipeline</div></div>
+          <div className={`rdy-kpi ${kpis.atRisk?'bad':''}`}><div className="rdy-kpi-n">{kpis.atRisk}</div><div className="rdy-kpi-l">At risk</div></div>
+          <div className={`rdy-kpi ${kpis.visits?'warn':''}`}><div className="rdy-kpi-n">{kpis.visits}</div><div className="rdy-kpi-l">Customer visits</div></div>
+          <div className="rdy-kpi ok"><div className="rdy-kpi-n">{kpis.ready}</div><div className="rdy-kpi-l">Ready to run</div></div>
+          <div className="rdy-kpi"><div className="rdy-kpi-n">{kpis.running}</div><div className="rdy-kpi-l">In production</div></div>
+        </div>
+        <div className="rdy-board">
+          {READINESS_PHASES.map(ph => {
+            const cards = byPhase[ph.id]||[];
+            return (
+              <div key={ph.id} className="rdy-col">
+                <div className={`rdy-col-head ${ph.chip}`}><span>{ph.label}</span><span className="rdy-col-n">{cards.length}</span></div>
+                <div className="rdy-col-body">
+                  {cards.length===0 ? <div className="rdy-empty">—</div> :
+                    cards.map(p => <ReadinessCard key={p.pn} p={p} gates={gates} nowMs={nowMs} onOpen={()=>setOpenPn(p.pn)} />)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {startOpen && <StartRunModal projects={projects} onPick={startRun} onClose={()=>setStartOpen(false)} />}
+      {configOpen && <GateConfigModal gateConfig={gateConfig} isAdmin={isAdmin} onClose={()=>setConfigOpen(false)} />}
+      {openProj && <ReadinessDetail p={openProj} gates={gates} nowMs={nowMs} onClose={()=>setOpenPn(null)} setGate={setGate} setMeta={setMeta} addException={addException} decideException={decideException} removeException={removeException} onOpenMFSO={onOpenMFSO} />}
+    </div>
+  );
+}
+
 // Role context so any page can read the signed-in user's access level without prop-threading.
 const RoleContext = React.createContext({ isAdmin:true, role:'admin' });
 function useRole(){ return React.useContext(RoleContext); }
@@ -8034,6 +8846,7 @@ function App({ session }) {
   const toggleNav = () => setCollapsed(c => !c);
   const [projects, setProjects] = useSupabaseProjects(email);
   const sharedInv = useSharedInventory(email);                // MISys item master shared across users
+  const rdyCfg = useSharedReadinessConfig(email);             // §48 shared, editable readiness gate template
   const [formulationPn, setFormulationPn] = useState(null);   // project to focus on the Formulation page
   const [pendingGen, setPendingGen] = useState(null);         // one-shot: auto-start the generator for this pn
   const [openPn, setOpenPn] = useState(null);                 // one-shot: open a project's full page (from an alert)
@@ -8043,6 +8856,27 @@ function App({ session }) {
   const sendReview = (pn, recipientEmail, note) => notif.send(recipientEmail, pn, note);
   // Inline edits from the project page (Customer/Product/Assignment cards) → save + sync.
   const updateProject = (pn, patch) => setProjects(prev => prev.map(p => p.pn === pn ? { ...p, ...patch } : p));
+  // Fix / relabel a project number (e.g. a malformed P262112 → a valid P26xxx). SAME strict rules as
+  // every assignment: canonical P{YY}{NNN} and not already taken. Routes through the setProjects
+  // choke-point (which DB-deletes the old pn + inserts the new). Returns true on success.
+  const renameProject = (oldPn, rawNew) => {
+    const next = String(rawNew || '').trim().toUpperCase();
+    if (!next || next === oldPn) return false;
+    if (!isValidPN(next)) { toast(`"${next}" is not a valid project number. Use P + 2-digit year + 3 digits, e.g. ${nextPN(projects)}.`, 'err'); return false; }
+    const clash = (projects || []).find(p => p.pn !== oldPn && p.pn === next);
+    if (clash) { toast(`Project number ${next} is already assigned${clash.customer ? ` to ${cleanCustomer(clash.customer)}` : ''}. You can only assign a number that hasn't been used yet — next free is ${nextPN(projects)}.`, 'err'); return false; }
+    setProjects(prev => prev.map(p => p.pn === oldPn ? withAudit({ ...p, pn: next, pnRenamedFrom: oldPn }, 'Project number changed', `${oldPn} → ${next}`) : p));
+    try { dbAudit(next, 'Project number changed', `${oldPn} → ${next}`); } catch (e) {}
+    toast(`Project number changed: ${oldPn} → ${next}`, 'ok');
+    return true;
+  };
+  // Delete a project entirely (start from scratch). The UI confirms before calling this; the
+  // setProjects choke-point removes it locally AND from the database.
+  const deleteProject = (pn) => {
+    setProjects(prev => prev.filter(p => p.pn !== pn));
+    try { dbAudit(pn, 'Project deleted', 'Removed from the workspace'); } catch (e) {}
+    toast(`Project ${pn} deleted.`, 'ok');
+  };
   // Open a project's full page (used when clicking a notification).
   const openProjectPage = (pn) => { setNav('wip'); setOpenPn(pn); };
 
@@ -8072,6 +8906,7 @@ function App({ session }) {
 
   const NAV_ITEMS = [
     { id:'wip',         label:'WIP Board',   icon:'📋', ready:true },
+    { id:'readiness',   label:'Readiness',   icon:'🚦', ready:true },
     { id:'projects',    label:'Projects',    icon:'🗃', ready:true },
     { id:'formulation', label:'Formulation', icon:'🧪', ready:true },
     { id:'generate',    label:'Generate',    icon:'⚙️', ready:true },
@@ -8120,8 +8955,9 @@ function App({ session }) {
       <div className="app-page">
         {role==='viewer' && <div className="falert warn" style={{margin:0,borderRadius:0,zIndex:150}}>👁 <strong>Viewer access</strong> — you can see everything but can't save changes. Ask an Enova admin (Carlos, Tong, Joseph, Marina, Nick, Jonathan, or Ryan) for edit access.</div>}
         {writeErr && <div className="falert err" style={{margin:0,borderRadius:0,display:'flex',alignItems:'center',gap:8,zIndex:150}}><span style={{flex:1}}>⚠ {writeErr}</span><button className="fbtn sec sm" onClick={()=>setWriteErr(null)}>Dismiss</button></div>}
-        {nav === 'wip' && <WIPBoardPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onFormulate={goFormulate} onOpenMFSO={goMFSO} onSendReview={sendReview} people={ENOVA_PEOPLE} openPagePn={openPn} onPageOpened={()=>setOpenPn(null)} onUpdateProject={updateProject} />}
-        {nav === 'projects' && <ProjectsPage projects={projects} onToggleNav={toggleNav} onFormulate={goFormulate} onOpenMFSO={goMFSO} onSendReview={sendReview} people={ENOVA_PEOPLE} onUpdateProject={updateProject} />}
+        {nav === 'wip' && <WIPBoardPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onFormulate={goFormulate} onOpenMFSO={goMFSO} onSendReview={sendReview} people={ENOVA_PEOPLE} openPagePn={openPn} onPageOpened={()=>setOpenPn(null)} onUpdateProject={updateProject} onRenameProject={renameProject} onDeleteProject={deleteProject} />}
+        {nav === 'readiness' && <ReadinessPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onOpenMFSO={goMFSO} gateConfig={rdyCfg} />}
+        {nav === 'projects' && <ProjectsPage projects={projects} onToggleNav={toggleNav} onFormulate={goFormulate} onOpenMFSO={goMFSO} onSendReview={sendReview} people={ENOVA_PEOPLE} onUpdateProject={updateProject} onRenameProject={renameProject} onDeleteProject={deleteProject} />}
         {nav === 'formulation' && <FormulationPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} targetPn={formulationPn} autoGenPn={pendingGen} onGenConsumed={()=>setPendingGen(null)} />}
         {nav === 'generate' && <GeneratePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}
         {nav === 'quote' && <QuotePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}

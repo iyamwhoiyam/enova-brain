@@ -884,6 +884,153 @@
     return { form, engine: null, rows: [], notes: ["No base generator wired for this form (inject ctx.formulator + ctx.formulatorInput)."] };
   }
 
+  // ── 3d. PACKAGING + SHIPPING GENERATOR — deterministic, inventory-grounded. ──────────────────────
+  // Auto-selects a COMPLETE, quote-ready packaging set from LIVE inventory: sizes the container to the
+  // finished-unit fill, neck-matches the closure, and fills label / desiccant / tamper / scoop / master
+  // shipper (+ a default capsule shell) with sensible house standards. PREFERS a prior same-spec
+  // project's picks (recall) when one exists. Every pick is a real MISys SKU with a real cost, so the
+  // packaging cost in the quote is accurate. Pure: inventory + prior projects are injected via ctx.
+  const CAPSULE_CC = { "000": 1.37, "00": 0.91, "0": 0.68, "1": 0.50, "2": 0.37, "3": 0.30, "4": 0.20, "5": 0.13 };
+  function capsuleShellCC(shellItem) {
+    const d = (shellItem && (shellItem.d || shellItem.n)) || "";
+    const m = /["“”'\s](000|00|0|1|2|3|4|5)["“”'\s]/.exec(" " + d + " ");
+    return CAPSULE_CC[m ? m[1] : "00"] || CAPSULE_CC["00"];
+  }
+  function pkgCapacityCC(desc) {
+    if (!desc) return null;
+    let m = /(\d+(?:\.\d+)?)\s*cc\b/i.exec(desc); if (m) return parseFloat(m[1]);
+    m = /(\d+(?:\.\d+)?)\s*oz\b/i.exec(desc); if (m) return parseFloat(m[1]) * 29.5735;   // fl oz → cc
+    m = /(\d+(?:\.\d+)?)\s*ml\b/i.exec(desc); if (m) return parseFloat(m[1]);
+    m = /(\d+(?:\.\d+)?)\s*(?:l|liter|litre)\b/i.exec(desc); if (m) return parseFloat(m[1]) * 1000;
+    return null;
+  }
+  function pkgNeckFinish(desc) {
+    if (!desc) return null;
+    let m = /\b(\d{2,3}\/\d{3})\b/.exec(desc); if (m) return m[1];        // 45/400
+    m = /\b(\d{2,3})\s*mm\b/i.exec(desc); if (m) return m[1] + "mm";     // 70mm / 28mm
+    return null;
+  }
+  function pkgBlendGramsPerServing(p) {
+    if (/gumm/i.test(p.dosageForm || "")) return ((num(p.gummyWt)) * (num(p.servingSize) || 1)) / 1000;
+    let mg = 0; (p.ingredients || []).forEach((r) => { mg += num(r.inputMg); });
+    return mg / 1000;
+  }
+  // Container volume (cc) to hold ONE finished unit (with fill headspace).
+  function estimatePackFillCC(p, pieces) {
+    const form = p.dosageForm || "", spu = num(p.servingsPerUnit) || 1;
+    if (/gumm/i.test(form)) return ((num(p.gummyWt) || 4500) / 1000 * pieces) * 1.4;
+    if (/capsule|tablet/i.test(form)) return pieces * capsuleShellCC(p.shellItem) * 1.5;
+    if (/powder/i.test(form)) return ((pkgBlendGramsPerServing(p) || 5) * spu / 0.6) * 1.25;
+    if (/liquid/i.test(form)) return ((num(p.servingSize) || 1) * spu) * 1.12;
+    return pieces * 1.0;
+  }
+  // Sellable "each" noun for a dose form (bulk orders are priced per piece).
+  function unitNounFor(form) {
+    const f = String(form || "");
+    if (/gumm/i.test(f)) return "Gummy";
+    if (/capsule/i.test(f)) return "Capsule";
+    if (/tablet/i.test(f)) return "Tablet";
+    if (/stick/i.test(f)) return "Stick Pack";
+    if (/liquid|tincture/i.test(f)) return "mL";
+    if (/powder/i.test(f)) return "Serving";
+    return "Unit";
+  }
+  // Pieces per master case from the shipper's WxHxD (inches) + piece volume (~1 g/cc) @ ~55% packing.
+  function estimateCasePack(shipperDesc, pieceWtMg) {
+    const m = /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i.exec(String(shipperDesc || ""));
+    if (!m || !(num(pieceWtMg) > 0)) return null;
+    const pieceCc = Math.max(0.4, num(pieceWtMg) / 1000);
+    const cc = (+m[1]) * (+m[2]) * (+m[3]) * 16.387;   // in³ → cc
+    return Math.max(1, Math.round((cc * 0.55) / pieceCc));
+  }
+  function pkgPool(inventory, cat) { return (Array.isArray(inventory) ? inventory : []).filter((i) => i.c === cat && i.u > 0); }
+  function pkgIsContainerSlot(slot) { return slot.k === "container" || slot.k === "bag" || slot.k === "foil"; }
+  function pkgPickContainer(pool, targetCC, p) {
+    const wantGlass = /liquid|tincture/i.test(p.dosageForm || "");
+    const cand = pool.map((i) => ({ i, cc: pkgCapacityCC(i.d), neck: pkgNeckFinish(i.d) })).filter((x) => x.cc > 0 && x.neck);
+    if (!cand.length) { const any = pool.slice().sort((a, b) => a.u - b.u)[0]; return { item: any || null, reason: any ? "no sized match — verify" : "" }; }
+    const score = (x) => { let s = 0; const d = x.i.d.toLowerCase();
+      if (wantGlass) { if (/glass|pet/.test(d)) s += 3; } else { if (/hdpe/.test(d)) s += 3; if (/white/.test(d)) s += 1; } return s; };
+    const fit = cand.filter((x) => x.cc >= targetCC * 0.98);
+    let chosen;
+    if (fit.length) {
+      const minCC = Math.min.apply(null, fit.map((x) => x.cc));
+      const tight = fit.filter((x) => x.cc <= minCC * 1.25);
+      tight.sort((a, b) => (score(b) - score(a)) || (a.cc - b.cc) || (a.i.u - b.i.u));
+      chosen = tight[0];
+    } else { cand.sort((a, b) => b.cc - a.cc); chosen = cand[0]; }
+    return { item: chosen.i, reason: Math.round(chosen.cc) + "cc for ~" + Math.round(targetCC) + "cc fill · neck " + chosen.neck };
+  }
+  function pkgPickClosure(pool, container) {
+    const neck = container ? pkgNeckFinish(container.d) : null;
+    const pref = (i) => { let s = 0; const d = i.d.toLowerCase(); if (/crc|child/.test(d)) s += 3; if (/induction|heat|seal|liner/.test(d)) s += 2; if (/white/.test(d)) s += 1; return s; };
+    const match = neck ? pool.filter((i) => pkgNeckFinish(i.d) === neck) : [];
+    if (match.length) { match.sort((a, b) => pref(b) - pref(a) || a.u - b.u); return { item: match[0], reason: "neck " + neck + " match" }; }
+    const any = pool.slice().sort((a, b) => a.u - b.u)[0];
+    return { item: any || null, reason: neck ? ("no " + neck + " closure in stock — verify") : "verify neck finish" };
+  }
+  function pkgPickScoop(pool, p) {
+    const g = pkgBlendGramsPerServing(p), targetCC = g > 0 ? g / 0.6 : null;
+    const cand = pool.map((i) => ({ i, cc: pkgCapacityCC(i.d) })).filter((x) => x.cc > 0);
+    if (targetCC && cand.length) { cand.sort((a, b) => Math.abs(a.cc - targetCC) - Math.abs(b.cc - targetCC)); return { item: cand[0].i, reason: cand[0].cc + "cc ≈ " + g.toFixed(1) + " g/serving" }; }
+    const any = pool[0]; return { item: any || null, reason: any ? "standard scoop" : "" };
+  }
+  function pkgPickByKeywords(pool, kws, label) {
+    for (let j = 0; j < kws.length; j++) { const hit = pool.find((i) => new RegExp(kws[j], "i").test(i.d)); if (hit) return { item: hit, reason: label || "standard" }; }
+    const any = pool.slice().sort((a, b) => a.u - b.u)[0];
+    return { item: any || null, reason: any ? (label || "standard") : "" };
+  }
+  // Recall the closest prior project (with real packaging) for the same product spec.
+  function pkgRecall(p, projects, pieces) {
+    if (!Array.isArray(projects)) return null;
+    let best = null, bestScore = 0;
+    projects.forEach((q) => {
+      if (!q || q.pn === p.pn || !q.pkg || !Object.keys(q.pkg).length) return;
+      if ((q.dosageForm || "") !== (p.dosageForm || "")) return;
+      let s = 3;
+      if ((q.containerType || "") === (p.containerType || "")) s += 2;
+      const pc = num(q.unitsPerContainer) > 0 ? num(q.unitsPerContainer) : (num(q.servingSize) || 1) * (num(q.servingsPerUnit) || 1);
+      if (pc && pieces) s += 2 * (Math.min(pc, pieces) / Math.max(pc, pieces));
+      if (String(q.gummyType || "") === String(p.gummyType || "")) s += 0.5;
+      if (s > bestScore) { bestScore = s; best = q; }
+    });
+    return (best && bestScore >= 3) ? { pkg: best.pkg, src: best.pn, shellItem: best.shellItem } : null;
+  }
+  // THE generator. ctx = { inventory, invIx, projects, container, slots, needsShell }.
+  function packaging(project, ctx) {
+    const p = project || {}, c = ctx || {};
+    const inventory = c.inventory || [], invIx = c.invIx || {};
+    const container = c.container, slots = c.slots || [];
+    const pieces = num(p.unitsPerContainer) > 0 ? num(p.unitsPerContainer) : (num(p.servingSize) || 1) * (num(p.servingsPerUnit) || 1);
+    const targetCC = estimatePackFillCC(p, pieces);
+    const recall = pkgRecall(p, c.projects, pieces);
+    const pkg = {}, meta = {};
+    let chosenContainer = null;
+    slots.forEach((slot) => {
+      if (recall && recall.pkg[slot.k]) {
+        const fresh = invIx[recall.pkg[slot.k].n];
+        if (fresh) { pkg[slot.k] = fresh; meta[slot.k] = { source: "recalled", reason: "from " + recall.src }; if (pkgIsContainerSlot(slot)) chosenContainer = fresh; return; }
+      }
+      const pool = pkgPool(inventory, slot.cat); if (!pool.length) return;
+      let r;
+      if (pkgIsContainerSlot(slot)) { r = pkgPickContainer(pool, targetCC, p); chosenContainer = r.item; }
+      else if (slot.k === "closure") { r = pkgPickClosure(pool, chosenContainer); }
+      else if (slot.k === "scoop") { r = pkgPickScoop(pool, p); }
+      else if (slot.cat === "Label") { r = pkgPickByKeywords(pool, ["white plain", "laser", "plain", "wrap", "bopp"], "standard label"); }
+      else if (slot.cat === "Desiccant") { r = pkgPickByKeywords(pool, ["2 gram silica", "silica gel", "desiccant"], "moisture control"); }
+      else if (/Tamper/.test(slot.cat)) { r = pkgPickByKeywords(pool, ["clear.*perf", "clear"], "shrink band"); }
+      else if (/Shipper/.test(slot.cat)) { r = pkgPickByKeywords(pool, ["12 x", "13 x", "10 x", "box"], "master case"); }
+      else { r = { item: pool.slice().sort((a, b) => a.u - b.u)[0], reason: "standard" }; }
+      if (r && r.item) { pkg[slot.k] = r.item; meta[slot.k] = { source: recall ? "sized (recall n/a)" : "sized", reason: r.reason }; }
+    });
+    let shell = null;
+    if (c.needsShell && !p.shellItem) {
+      const sp = pkgPool(inventory, "Capsule Shell");
+      shell = pkgPickByKeywords(sp, ['00.*veggie|veggie.*00', '"00".*hpmc', "00.*hpmc", "veggie", "00"], 'default "00" veggie').item || null;
+    }
+    return { container: container, slots, pkg, meta, shell, targetCC, pieces, recallSrc: recall ? recall.src : null };
+  }
+
   // ── 4. RECONCILIATION — the hardening core. Independently cross-check every stored figure. ───────
   function reconcile(p, invIx) {
     invIx = invIx || {};
@@ -976,13 +1123,16 @@
   function reconcileErrors(p, invIx) { return reconcile(p, invIx).errors.map((e) => e.message); }
 
   return {
-    VERSION: "1.2.0-kernel(pn+schema+base+cost+reconcile)",
+    VERSION: "1.3.0-kernel(pn+schema+base+pkg+cost+reconcile)",
     // contracts
     PN_RE, isValidPN, pnParts, pnYear, nextPN, validateSchema,
     // derivation
     skuCost, batchBasis, deriveActiveCPU,
     // base / non-active systems + unified formula generation
     GUMMY_SUGAR_BASE, GUMMY_SF_BASE, gummyActivesMgPerGummy, gummyBase, formulate,
+    // packaging + shipping generator (+ shared geometry / inspection helpers)
+    packaging, estimatePackFillCC, estimateCasePack, capsuleShellCC, pkgBlendGramsPerServing, unitNounFor, CAPSULE_CC,
+    pkgCapacityCC, pkgNeckFinish,
     // costing core
     cost,
     // hardening
@@ -4880,157 +5030,27 @@ function coerceContainerForForm(proj){
   }
   return ct || defaultContainerFor(form, bulk);
 }
-// ══════════════════ PACKAGING GENERATOR (deterministic, inventory-grounded) ══════════════════
-// Auto-selects a COMPLETE, quote-ready packaging set from LIVE inventory: sizes the container
-// to the finished-unit fill, matches the closure to the container's neck finish, and fills
-// label / desiccant / tamper / master shipper (+ scoop for powder, capsule shell for capsules)
-// with sensible standards. PREFERS packaging recalled from a prior project with the same
-// product spec when one exists (grows as Enova fills packaging; shared via Supabase). Every
-// pick is a real MISys SKU with a real cost → accurate packaging cost for the customer quote.
-const CAPSULE_CC = { '000':1.37, '00':0.91, '0':0.68, '1':0.50, '2':0.37, '3':0.30, '4':0.20, '5':0.13 };
-function capsuleShellCC(shellItem){
-  const d = (shellItem && (shellItem.d || shellItem.n)) || '';
-  const m = /["“”'\s](000|00|0|1|2|3|4|5)["“”'\s]/.exec(' '+d+' ');
-  return CAPSULE_CC[m ? m[1] : '00'] || CAPSULE_CC['00'];
-}
-function pkgCapacityCC(desc){
-  if (!desc) return null;
-  let m = /(\d+(?:\.\d+)?)\s*cc\b/i.exec(desc); if (m) return parseFloat(m[1]);
-  m = /(\d+(?:\.\d+)?)\s*oz\b/i.exec(desc);      if (m) return parseFloat(m[1])*29.5735;   // fl oz → cc
-  m = /(\d+(?:\.\d+)?)\s*ml\b/i.exec(desc);      if (m) return parseFloat(m[1]);
-  m = /(\d+(?:\.\d+)?)\s*(?:l|liter|litre)\b/i.exec(desc); if (m) return parseFloat(m[1])*1000;
-  return null;
-}
-function pkgNeckFinish(desc){
-  if (!desc) return null;
-  let m = /\b(\d{2,3}\/\d{3})\b/.exec(desc); if (m) return m[1];        // 45/400
-  m = /\b(\d{2,3})\s*mm\b/i.exec(desc);       if (m) return m[1]+'mm';  // 70mm / 28mm
-  return null;
-}
-function pkgBlendGramsPerServing(proj){
-  if (/gumm/i.test(proj.dosageForm||'')) return ((Number(proj.gummyWt)||0)*(Number(proj.servingSize)||1))/1000;
-  let mg=0; (proj.ingredients||[]).forEach(r=>{ mg += Number(r.inputMg)||0; });
-  return mg/1000;
-}
-// Container volume (cc) needed to hold ONE finished unit (with fill headspace).
-function estimatePackFillCC(proj, pieces){
-  const form = proj.dosageForm||'', spu = Number(proj.servingsPerUnit)||1;
-  if (/gumm/i.test(form))          return ((Number(proj.gummyWt)||4500)/1000 * pieces) * 1.4;   // 60×3g=180g → ~250cc (validated)
-  if (/capsule|tablet/i.test(form)) return pieces * capsuleShellCC(proj.shellItem) * 1.5;        // count × shell cc × headspace
-  if (/powder/i.test(form))        return ((pkgBlendGramsPerServing(proj)||5) * spu / 0.6) * 1.25; // density ~0.6 g/cc
-  if (/liquid/i.test(form))        return ((Number(proj.servingSize)||1) * spu) * 1.12;           // mL/serving × servings
-  return pieces * 1.0;
-}
-// Sellable "each" noun for a dose form — used when a BULK order is priced per piece
-// (a bulk gummy order's unit is one gummy, not a 60-count bottle).
-function unitNounFor(form){
-  const f = String(form||'');
-  if (/gumm/i.test(f)) return 'Gummy';
-  if (/capsule/i.test(f)) return 'Capsule';
-  if (/tablet/i.test(f)) return 'Tablet';
-  if (/stick/i.test(f)) return 'Stick Pack';
-  if (/liquid|tincture/i.test(f)) return 'mL';
-  if (/powder/i.test(f)) return 'Serving';
-  return 'Unit';
-}
-// Estimate how many pieces fit in a master case from the shipper's W×H×D (inches) and the
-// piece volume (~1 g/cc) at ~55% packing efficiency. Transparent geometry — NOT an invented
-// fixed count; it seeds an EDITABLE field the Enova user confirms. Null if it can't be sized.
-function estimateCasePack(shipperDesc, pieceWtMg){
-  const m = /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i.exec(String(shipperDesc||''));
-  if (!m || !(Number(pieceWtMg)>0)) return null;
-  const pieceCc = Math.max(0.4, Number(pieceWtMg)/1000);
-  const cc = (+m[1])*(+m[2])*(+m[3]) * 16.387;   // in³ → cc
-  return Math.max(1, Math.round((cc * 0.55) / pieceCc));
-}
-function pkgPool(cat){ return (typeof INVENTORY!=='undefined'?INVENTORY:[]).filter(i => i.c===cat && i.u>0); }
-function pkgIsContainerSlot(slot){ return slot.k==='container' || slot.k==='bag' || slot.k==='foil'; }
-function pkgPickContainer(pool, targetCC, proj){
-  const wantGlass = /liquid|tincture/i.test(proj.dosageForm||'');
-  const cand = pool.map(i=>({ i, cc:pkgCapacityCC(i.d), neck:pkgNeckFinish(i.d) })).filter(x=>x.cc>0 && x.neck);
-  if (!cand.length){ const any=pool.slice().sort((a,b)=>a.u-b.u)[0]; return { item:any||null, reason: any?'no sized match — verify':'' }; }
-  const score = (x)=>{ let s=0; const d=x.i.d.toLowerCase();
-    if (wantGlass){ if(/glass|pet/.test(d)) s+=3; } else { if(/hdpe/.test(d)) s+=3; if(/white/.test(d)) s+=1; }
-    return s; };
-  const fit = cand.filter(x=>x.cc >= targetCC*0.98);
-  let chosen;
-  if (fit.length){
-    const minCC = Math.min(...fit.map(x=>x.cc));
-    const tight = fit.filter(x=>x.cc <= minCC*1.25);                  // within 25% of the tightest fit
-    tight.sort((a,b)=> (score(b)-score(a)) || (a.cc-b.cc) || (a.i.u-b.i.u));
-    chosen = tight[0];
-  } else { cand.sort((a,b)=>b.cc-a.cc); chosen = cand[0]; }            // nothing big enough → largest
-  return { item:chosen.i, reason:`${Math.round(chosen.cc)}cc for ~${Math.round(targetCC)}cc fill · neck ${chosen.neck}` };
-}
-function pkgPickClosure(pool, container){
-  const neck = container ? pkgNeckFinish(container.d) : null;
-  const pref = (i)=>{ let s=0; const d=i.d.toLowerCase(); if(/crc|child/.test(d)) s+=3; if(/induction|heat|seal|liner/.test(d)) s+=2; if(/white/.test(d)) s+=1; return s; };
-  const match = neck ? pool.filter(i=>pkgNeckFinish(i.d)===neck) : [];
-  if (match.length){ match.sort((a,b)=>pref(b)-pref(a)||a.u-b.u); return { item:match[0], reason:`neck ${neck} match` }; }
-  const any = pool.slice().sort((a,b)=>a.u-b.u)[0];
-  return { item:any||null, reason: neck?`no ${neck} closure in stock — verify`:'verify neck finish' };
-}
-function pkgPickScoop(pool, proj){
-  const g = pkgBlendGramsPerServing(proj), targetCC = g>0 ? g/0.6 : null;
-  const cand = pool.map(i=>({ i, cc:pkgCapacityCC(i.d) })).filter(x=>x.cc>0);
-  if (targetCC && cand.length){ cand.sort((a,b)=>Math.abs(a.cc-targetCC)-Math.abs(b.cc-targetCC)); return { item:cand[0].i, reason:`${cand[0].cc}cc ≈ ${g.toFixed(1)} g/serving` }; }
-  const any=pool[0]; return { item:any||null, reason:any?'standard scoop':'' };
-}
-function pkgPickByKeywords(pool, kws, label){
-  for (const kw of kws){ const hit = pool.find(i=>new RegExp(kw,'i').test(i.d)); if (hit) return { item:hit, reason:label||'standard' }; }
-  const any = pool.slice().sort((a,b)=>a.u-b.u)[0];
-  return { item:any||null, reason: any?(label||'standard'):'' };
-}
-// Recall the closest prior project (with real packaging selected) for the same product spec.
-function pkgRecall(proj, projects, pieces){
-  if (!Array.isArray(projects)) return null;
-  let best=null, bestScore=0;
-  projects.forEach(p=>{
-    if (!p || p.pn===proj.pn || !p.pkg || !Object.keys(p.pkg).length) return;
-    if ((p.dosageForm||'') !== (proj.dosageForm||'')) return;                 // form must match
-    let s = 3;
-    if ((p.containerType||'') === (proj.containerType||'')) s += 2;
-    const pc = Number(p.unitsPerContainer)>0 ? Number(p.unitsPerContainer) : (Number(p.servingSize)||1)*(Number(p.servingsPerUnit)||1);
-    if (pc && pieces) s += 2 * (Math.min(pc,pieces)/Math.max(pc,pieces));
-    if (String(p.gummyType||'') === String(proj.gummyType||'')) s += 0.5;
-    if (s > bestScore){ bestScore=s; best=p; }
-  });
-  return (best && bestScore>=3) ? { pkg:best.pkg, src:best.pn, shellItem:best.shellItem } : null;
-}
-// THE generator: returns { pkg (slotKey→SKU), meta (slotKey→{source,reason}), shell, ... }.
+// ══════════════════ PACKAGING + SHIPPING — delegated to the kernel ══════════════════
+// The packaging generator + ALL its picking/sizing logic now live in the kernel (EnovaBrain.packaging
+// / estimatePackFillCC / estimateCasePack / unitNounFor / capsuleShellCC — migrated §45). These
+// app-side functions are THIN ADAPTERS: they inject the live INVENTORY / INV_IX / prior projects and
+// the app-resolved container + slots (CONTAINER_TYPES stays app-side config), so the intake, the
+// Project Page, the live COGS, and the documents all read ONE packaging engine (single source of truth).
+function _EBK(){ return (typeof window!=='undefined' && window.EnovaBrain) ? window.EnovaBrain : (typeof EnovaBrain!=='undefined' ? EnovaBrain : null); }
+function estimatePackFillCC(proj, pieces){ const EB=_EBK(); if(!EB||!EB.estimatePackFillCC) throw new Error('EnovaBrain packaging kernel unavailable'); return EB.estimatePackFillCC(proj, pieces); }
+function estimateCasePack(shipperDesc, pieceWtMg){ const EB=_EBK(); if(!EB||!EB.estimateCasePack) throw new Error('EnovaBrain packaging kernel unavailable'); return EB.estimateCasePack(shipperDesc, pieceWtMg); }
+function unitNounFor(form){ const EB=_EBK(); if(!EB||!EB.unitNounFor) throw new Error('EnovaBrain packaging kernel unavailable'); return EB.unitNounFor(form); }
+// THE generator (delegates): { container, slots, pkg, meta, shell, targetCC, pieces, recallSrc }.
 function generatePackaging(proj, projects){
+  const EB=_EBK(); if(!EB||!EB.packaging) throw new Error('EnovaBrain.packaging kernel unavailable');
   const container = coerceContainerForForm(proj);
   const ctInfo = CONTAINER_TYPES[container] || CONTAINER_TYPES['Bottle'];
-  const slots = ctInfo.pkg || [];
-  const pieces = Number(proj.unitsPerContainer)>0 ? Number(proj.unitsPerContainer) : (Number(proj.servingSize)||1)*(Number(proj.servingsPerUnit)||1);
-  const targetCC = estimatePackFillCC(proj, pieces);
-  const recall = pkgRecall(proj, projects, pieces);
-  const pkg = {}, meta = {};
-  let chosenContainer = null;
-  slots.forEach(slot => {
-    if (recall && recall.pkg[slot.k]){                                        // 1) recall a prior project's pick
-      const fresh = INV_IX[recall.pkg[slot.k].n];
-      if (fresh){ pkg[slot.k]=fresh; meta[slot.k]={source:'recalled', reason:`from ${recall.src}`}; if (pkgIsContainerSlot(slot)) chosenContainer=fresh; return; }
-    }
-    const pool = pkgPool(slot.cat); if (!pool.length) return;
-    let r;
-    if (pkgIsContainerSlot(slot))       { r = pkgPickContainer(pool, targetCC, proj); chosenContainer = r.item; }
-    else if (slot.k==='closure')        { r = pkgPickClosure(pool, chosenContainer); }
-    else if (slot.k==='scoop')          { r = pkgPickScoop(pool, proj); }
-    else if (slot.cat==='Label')        { r = pkgPickByKeywords(pool, ['white plain','laser','plain','wrap','bopp'], 'standard label'); }
-    else if (slot.cat==='Desiccant')    { r = pkgPickByKeywords(pool, ['2 gram silica','silica gel','desiccant'], 'moisture control'); }
-    else if (/Tamper/.test(slot.cat))   { r = pkgPickByKeywords(pool, ['clear.*perf','clear'], 'shrink band'); }
-    else if (/Shipper/.test(slot.cat))  { r = pkgPickByKeywords(pool, ['12 x','13 x','10 x','box'], 'master case'); }
-    else                                { r = { item: pool.slice().sort((a,b)=>a.u-b.u)[0], reason:'standard' }; }
-    if (r && r.item){ pkg[slot.k]=r.item; meta[slot.k]={source: recall?'sized (recall n/a)':'sized', reason:r.reason}; }
+  const needsShell = (FORM_CFG[proj.dosageForm]||{}).shell;
+  return EB.packaging(proj, {
+    inventory: (typeof INVENTORY!=='undefined'?INVENTORY:[]),
+    invIx: (typeof INV_IX!=='undefined'?INV_IX:{}),
+    projects, container, slots: ctInfo.pkg||[], needsShell,
   });
-  // Capsule shell (part of the BOM) — default a "00" veggie shell if none chosen.
-  let shell = null;
-  if ((FORM_CFG[proj.dosageForm]||{}).shell && !proj.shellItem){
-    const sp = pkgPool('Capsule Shell');
-    shell = pkgPickByKeywords(sp, ['00.*veggie|veggie.*00','"00".*hpmc','00.*hpmc','veggie','00'], 'default "00" veggie').item || null;
-  }
-  return { container, slots, pkg, meta, shell, targetCC, pieces, recallSrc: recall?recall.src:null };
 }
 
 // Map dose form + container → the Master Bid Template form key (drives the
@@ -5058,77 +5078,21 @@ function mbFormFor(dosageForm, container){
 //    the gummy weight after the actives + fixed-% base, split by `ratio` (so the total
 //    always equals gummyWt — the real Enova displacement method). Everything traces to
 //    a MISys ALT SKU (flavor/color default to representative SKUs, user-overridable). ──
-const SUGAR_BASE = [
-  {name:"Sugar Granulated",rm:"ALT-RP-0529",bulk:true,ratio:.6136,locked:true,section:"body"},
-  {name:"42/43 DE Corn Syrup / Glucose",rm:"ALT-RL-1381",bulk:true,ratio:.3864,locked:true,section:"body"},
-  {name:"Slow Set Pectin CS502",rm:"ALT-RP-2013",pct:.015,locked:true,section:"body"},
-  {name:"Citric Acid Anhydrous",rm:"ALT-RP-0003",pct:.007,locked:true,section:"body"},
-  {name:"Sodium Citrate",rm:"ALT-RP-1859",pct:.003,locked:true,section:"body"},
-  {name:"Water (R/O)",rm:"ALT-RP-0000",pct:.085,locked:true,nc:true,section:"body"},
-  {name:"Liquid Flavor",rm:"ALT-RL-0111",pct:.005,locked:false,section:"body"},
-  {name:"Liquid Color",rm:"ALT-RP-2026",pct:.002,locked:false,section:"body"},
-  {name:"MCT Oil — Bottom Coat",rm:"ALT-RL-1272",mgFixed:60,locked:true,coating:true,section:"coating"},
-  {name:"Sunflower Lecithin",rm:"ALT-RP-0618-GP-VS",mgFixed:7,locked:true,coating:true,section:"coating"},
-  {name:"Mastercoat ASFC3000",rm:"ALT-RL-2247",mgFixed:20,locked:true,coating:true,section:"coating"},
-  {name:"MCT Oil — Top Coat",rm:"ALT-RL-1272",mgFixed:95,locked:true,coating:true,section:"coating"},
-  {name:"Sugar — Dusting",rm:"ALT-RP-0529",mgFixed:200,locked:true,coating:true,section:"coating"},
-];
-const SF_BASE = [
-  {name:"Sorbitol Gran",rm:"ALT-RP-1247",bulk:true,ratio:.6870,locked:true,section:"body"},
-  {name:"Maltitol 80-55 Syrup",rm:"ALT-RL-1389",bulk:true,ratio:.3130,locked:true,section:"body"},
-  {name:"Slow Set Pectin CS509",rm:"ALT-RP-2101",pct:.030,locked:true,section:"body"},
-  {name:"R/O Water",rm:"ALT-RP-0000",pct:.12167,locked:true,nc:true,section:"body"},
-  {name:"Citric Acid Anhydrous",rm:"ALT-RP-0003",pct:.007,locked:true,section:"body"},
-  {name:"Vegetable Glycerin, Kosher",rm:"ALT-RL-0028",pct:.020,locked:true,section:"body"},
-  {name:"Sodium Citrate",rm:"ALT-RP-1859",pct:.003,locked:true,section:"body"},
-  {name:"Calcium Citrate 21%",rm:"ALT-RP-0126",pct:.006,locked:true,section:"body"},
-  {name:"MCT Oil /3595 Kosher",rm:"ALT-RL-1272",pct:.003,locked:true,section:"body"},
-  {name:"Sunflower Lecithin",rm:"ALT-RP-0618-GP-VS",pct:.0015,locked:true,section:"body"},
-  {name:"Liquid Flavor",rm:"ALT-RL-0111",pct:.015,locked:false,section:"body"},
-  {name:"Liquid Color",rm:"ALT-RP-2026",pct:.010,locked:false,section:"body"},
-  {name:"Bitter Masker 3115B",rm:"ALT-RP-1446",pct:.003,locked:true,section:"body"},
-  {name:"Mastercoat ASFC3000",rm:"ALT-RL-2247",pct:.005,locked:true,coating:true,section:"coating"},
-];
-
-// Active mass per single gummy (mg), potency-adjusted, NO overage — matches the Enova
-// gummy calc (label claim ÷ potency ÷ pieces-per-serving). Drives base displacement.
-function gummyActivesMgPerGummy(proj){
-  const serv = Number(proj.servingSize)||1;      // gummies per serving
-  let mgServ = 0;
-  (proj.ingredients||[]).forEach(r=>{
-    const pot = r.potencyPct>0 ? r.potencyPct/100 : 1;
-    mgServ += (Number(r.inputMg)||0)/pot;
-  });
-  return serv>0 ? mgServ/serv : mgServ;
-}
-// THE single source of truth for a gummy's complete base/process/coating system,
-// materialized as rows scaled to gummyWt. Bulk sweeteners are the balance (fill the
-// remainder after actives + fixed-% base, split by ratio) so total per gummy == gummyWt.
-// Coating is dropped for bulk pack-out. Every row resolves to its MISys SKU + cost.
-// Used by the Gummy Base panel, the live COGS, AND the generated documents.
+// The gummy base is now OWNED BY THE KERNEL: EnovaBrain.gummyBase (house-standard base KBs +
+// displacement model, migrated in §43). This app-side function is a THIN ADAPTER — it resolves the
+// bulk flag from the project/container/form exactly as before, then delegates to the kernel, so the
+// Gummy Base panel, the live COGS, AND the generated documents all read ONE base (single source of
+// truth). Row shape is identical (idx/name/rm/section/coating/bulk/nc/locked/pct/mgFixed/mgG/fresh/cost).
 function gummyBaseRows(proj, opts){
   opts = opts || {};
   if (!proj) return [];
-  const baseT = proj.gummyType === "sugarFree" ? SF_BASE : SUGAR_BASE;
-  const gw = Number(proj.gummyWt) > 0 ? Number(proj.gummyWt) : 4500;
   const bulk = opts.bulk != null ? opts.bulk
     : !!(proj.isBulk
         || (typeof CONTAINER_TYPES !== 'undefined' && CONTAINER_TYPES[proj.containerType] && CONTAINER_TYPES[proj.containerType].bulk)
-        || (FORM_CFG[proj.dosageForm] && FORM_CFG[proj.dosageForm].bulk));
-  const items = baseT.filter(t => !(t.coating && bulk));
-  const actMg = opts.activesMgPerGummy != null ? opts.activesMgPerGummy : gummyActivesMgPerGummy(proj);
-  const nonBulkMg = (t) => t.mgFixed != null ? t.mgFixed : (Number(t.pct) || 0) * gw;
-  const fixedSum = items.reduce((s, t) => s + (t.bulk ? 0 : nonBulkMg(t)), 0);
-  const remainder = Math.max(0, gw - actMg - fixedSum);
-  const ratioSum = items.reduce((s, t) => s + (t.bulk ? (Number(t.ratio) || 0) : 0), 0) || 1;
-  return items.map((t, idx) => {
-    const mgG = t.bulk ? remainder * ((Number(t.ratio) || 0) / ratioSum) : nonBulkMg(t);
-    const sel = (proj.baseItems || {})[idx];
-    const fresh = sel ? INV_IX[sel.n] : (t.rm ? (INV_IX[t.rm] || null) : null);
-    const cost = (!t.nc && fresh && fresh.u > 0) ? (mgG / 1000) * fresh.u : 0;
-    return { idx, name:t.name, rm:t.rm, section:t.section, coating:!!t.coating, bulk:!!t.bulk,
-             nc:!!t.nc, locked:!!t.locked, pct:t.pct, mgFixed:t.mgFixed, mgG, fresh, cost };
-  });
+        || (typeof FORM_CFG !== 'undefined' && FORM_CFG[proj.dosageForm] && FORM_CFG[proj.dosageForm].bulk));
+  const EB = (typeof window!=='undefined' && window.EnovaBrain) ? window.EnovaBrain : (typeof EnovaBrain!=='undefined' ? EnovaBrain : null);
+  if (!EB || typeof EB.gummyBase!=='function') throw new Error('EnovaBrain.gummyBase kernel unavailable');
+  return EB.gummyBase(proj, { invIx: INV_IX, bulk, activesMgPerGummy: opts.activesMgPerGummy }).rows;
 }
 // Base cost per gummy (Σ of the materialized base rows).
 function gummyBaseCostPerGummy(proj, opts){ return gummyBaseRows(proj, opts).reduce((s,r)=>s+r.cost, 0); }

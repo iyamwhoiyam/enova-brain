@@ -4229,58 +4229,6 @@ function CardInfoTooltip({ data, onHoverEnter, onHoverLeave }){
   return ReactDOM.createPortal(node, document.body);
 }
 
-function ProjectDetail({ proj, onClose }){
-  const p=proj; const closed=isClosedStage(p.stage);
-  const sell=projUnitPrice(p); const qty=Number(p.batchUnits)||0;
-  const cogs=p.cogsBreakdown&&p.cogsBreakdown.cogsPerUnit!=null?p.cogsBreakdown.cogsPerUnit:null;
-  const ext=(x)=> x!=null ? _m2(x*qty) : '—';
-  const u=(x)=> x!=null ? f$(x) : '—';
-  return (
-    <div className="modal-bg" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div className="modal" style={{width:'min(720px,100%)'}}>
-        <h3>{p.pn} — {p.product||'Untitled'}</h3>
-        <div className="pd-grid">
-          <div className="pd-f"><span className="l">Customer</span><span className="v">{p.customer||'—'}</span></div>
-          <div className="pd-f"><span className="l">Status</span><span className="v"><span style={{display:'inline-flex',alignItems:'center',gap:6}}><span style={{width:8,height:8,borderRadius:'50%',background:stageHex(p.stage)}}/>{p.stage}</span></span></div>
-          <div className="pd-f"><span className="l">Form</span><span className="v">{p.dosageForm||'—'}</span></div>
-          <div className="pd-f"><span className="l">Received</span><span className="v">{p.dateReceivedDisplay||p.dateReceived||'—'}</span></div>
-          <div className="pd-f"><span className="l">PM</span><span className="v">{p.pm||'—'}</span></div>
-          <div className="pd-f"><span className="l">Rep</span><span className="v">{p.rep||'—'}</span></div>
-          <div className="pd-f"><span className="l">Serving / Servings per Unit</span><span className="v">{p.servingSize||'—'} · {p.servingsPerUnit||'—'}</span></div>
-          <div className="pd-f"><span className="l">Batch Qty</span><span className="v">{qty?qty.toLocaleString():'—'}</span></div>
-        </div>
-        <div className="pd-sec">Formula — {(p.ingredients||[]).length} ingredient{(p.ingredients||[]).length===1?'':'s'}</div>
-        {(p.ingredients||[]).length ? (
-          <table className="ftbl"><thead><tr><th>Ingredient</th><th>ALT</th><th style={{textAlign:'right'}}>mg / serving</th></tr></thead>
-            <tbody>{(p.ingredients||[]).map((r,i)=>(
-              <tr key={i}><td>{r.importedName||(r.item&&r.item.d)||'—'}</td>
-                <td className="fsmall">{r.importedAlt||(r.item&&r.item.n)||<span style={{color:'#d9534f'}}>unmatched</span>}</td>
-                <td style={{textAlign:'right',fontFamily:'var(--mono)'}}>{r.inputMg||0}</td></tr>
-            ))}</tbody></table>
-        ) : <div className="fsmall">No formula captured yet — import a workbook or build it on the Formulation page.</div>}
-        <div className="pd-sec">Cost / Revenue</div>
-        <div className="pd-grid">
-          <div className="pd-f"><span className="l">COGS / unit</span><span className="v">{u(cogs)}</span></div>
-          <div className="pd-f"><span className="l">Sell / unit</span><span className="v">{u(sell)}</span></div>
-          <div className="pd-f"><span className="l">Extended Cost</span><span className="v">{ext(cogs)}</span></div>
-          <div className="pd-f"><span className="l">Extended Revenue</span><span className="v">{ext(sell)}</span></div>
-        </div>
-        {closed && (
-          <div className="pd-ar">
-            <div className="pd-sec" style={{marginTop:0,color:'var(--amber)',borderBottom:'none',paddingBottom:0}}>Accounts Receivable</div>
-            <div className="row"><span>Extended Revenue (invoiced)</span><span>{ext(sell)}</span></div>
-            <div className="row"><span>Extended Cost (COGS)</span><span>{ext(cogs)}</span></div>
-            <div className="row tot"><span>Balance Due</span><span style={{color:'var(--amber)'}}>{ext(sell)}</span></div>
-            <div className="fsmall" style={{marginTop:6}}>Sits in receivables until paid. Payment / partial-payment tracking pending QuickBooks link.</div>
-          </div>
-        )}
-        {p.notes && (<><div className="pd-sec">Notes / Request</div><div className="fsmall" style={{whiteSpace:'pre-wrap',lineHeight:1.5,maxHeight:160,overflowY:'auto'}}>{p.notes}</div></>)}
-        <div className="btn-row"><button className="btn sec" onClick={onClose}>Close</button></div>
-      </div>
-    </div>
-  );
-}
-
 // Inline click-to-edit field for the Project Page cards. Shows as plain text; click to
 // edit (Enter/blur saves, Esc cancels). Read-only when no onSave is given.
 function EditableField({ label, value, onSave, type, options, placeholder, format }){
@@ -4713,7 +4661,6 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
   const [isPanning, setIsPanning] = useState(false);
   const fileRef   = useRef(null);
   const [showImport, setShowImport] = useState(false);
-  const [view, setView] = useState('workflow');   // workflow | open | closed
   const [infoCard, setInfoCard] = useState(null);  // hover-info tooltip anchor
   const infoTimer = useRef(null);                  // delayed-close timer for the hover popup
   // Open immediately; close on a short delay so the cursor can travel from the
@@ -4721,7 +4668,6 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
   const openInfo    = (proj, rect) => { if (infoTimer.current) clearTimeout(infoTimer.current); setInfoCard({ proj, rect }); };
   const cancelClose = () => { if (infoTimer.current) { clearTimeout(infoTimer.current); infoTimer.current = null; } };
   const scheduleClose = () => { if (infoTimer.current) clearTimeout(infoTimer.current); infoTimer.current = setTimeout(() => setInfoCard(null), 220); };
-  const [detailProj, setDetailProj] = useState(null);
   const [pagePn, setPagePn] = useState(null);       // open full Project Page by PN (live-linked)
   // Live-linked project for the full page: looked up by PN so cost/revenue
   // updates elsewhere flow in automatically (no stale snapshot).
@@ -5094,11 +5040,7 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
       {/* ── Topbar (tabs left · actions right, one band) ── */}
       <div className="topbar">
         <div className="wip-tabs">
-          <div className={`wip-tab ${view==='workflow'?'active':''}`} onClick={()=>setView('workflow')}>🗂 Workflow</div>
-          <div className={`wip-tab ${view==='open'?'active':''}`} onClick={()=>setView('open')}>
-            📂 Open Projects<span className="tcount">{projects.filter(p=>!isClosedStage(p.stage)).length}</span></div>
-          <div className={`wip-tab ${view==='closed'?'active':''}`} onClick={()=>setView('closed')}>
-            ✅ Closed Projects<span className="tcount">{projects.filter(p=>isClosedStage(p.stage)).length}</span></div>
+          <div className="wip-tab active" style={{cursor:'default'}} title="Browse projects as a sortable table on the Projects tab">🗂 Workflow Board</div>
         </div>
         <div className="top-right" style={{flexDirection:'column',alignItems:'flex-end',gap:4,marginLeft:'auto',alignSelf:'flex-start'}}>
           <div style={{display:'flex',alignItems:'center',gap:6}}>
@@ -5180,11 +5122,9 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
         </div>
       )}
 
-      {view==='open'   && <ProjectTable rows={projects.filter(p=>!isClosedStage(p.stage))} closed={false} commitToggle onOpen={p=>setPagePn(p.pn)} />}
-      {view==='closed' && <ProjectTable rows={projects.filter(p=>isClosedStage(p.stage))}  closed={true}  onOpen={p=>setPagePn(p.pn)} />}
       <CardInfoTooltip data={infoCard} onHoverEnter={cancelClose} onHoverLeave={scheduleClose} />
 
-      {view==='workflow' && (<>
+      {(<>
       {/* ── Controls ── */}
       <div className="cbar">
         {/* Row 1: search + form filter + KPIs */}
@@ -7337,6 +7277,7 @@ const EnovaMark = () => (
    product, PM, rep, stage, and notes. Any row opens the project detail. Recallable at any time. */
 function ProjectsPage({ projects, onToggleNav, onFormulate, onOpenMFSO, onSendReview, people, onUpdateProject, onRenameProject, onDeleteProject }){
   const [pagePn, setPagePn] = useState(null);   // open the full project page by PN
+  const [life, setLife] = useState('open');     // open | closed | all — absorbs WIP's old Open/Closed table views
   const pageProj = pagePn ? projects.find(p => p.pn === pagePn) : null;
   if (pageProj) {
     const prevVisits = projects.filter(x => x.pn !== pageProj.pn &&
@@ -7347,14 +7288,24 @@ function ProjectsPage({ projects, onToggleNav, onFormulate, onOpenMFSO, onSendRe
              onRenamePn={onRenameProject && ((o,n)=>{ const ok=onRenameProject(o,n); if(ok) setPagePn(n); return ok; })}
              onDelete={onDeleteProject && ((pn)=>{ onDeleteProject(pn); setPagePn(null); })} />;
   }
+  const openN   = projects.filter(p=>!isClosedStage(p.stage)).length;
+  const closedN = projects.filter(p=>isClosedStage(p.stage)).length;
+  const lifeRows = life==='all' ? projects
+    : life==='closed' ? projects.filter(p=>isClosedStage(p.stage))
+    : projects.filter(p=>!isClosedStage(p.stage));
   return (
     <div className="app-page" style={{background:'var(--paper)'}}>
       <div className="gen-top">
         <button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
         <div className="gen-title">Projects</div>
+        <div className="wip-tabs" style={{marginLeft:16}}>
+          <div className={`wip-tab ${life==='open'?'active':''}`} onClick={()=>setLife('open')}>📂 Open<span className="tcount">{openN}</span></div>
+          <div className={`wip-tab ${life==='closed'?'active':''}`} onClick={()=>setLife('closed')}>✅ Closed<span className="tcount">{closedN}</span></div>
+          <div className={`wip-tab ${life==='all'?'active':''}`} onClick={()=>setLife('all')}>🗂 All<span className="tcount">{projects.length}</span></div>
+        </div>
         <span className="fsmall" style={{marginLeft:'auto',whiteSpace:'nowrap'}}>{projects.length} projects</span>
       </div>
-      <ProjectTable rows={projects} closed={false} noun="total" commitToggle onOpen={p=>setPagePn(p.pn)} />
+      <ProjectTable rows={lifeRows} closed={life==='closed'} noun={life==='all'?'total':undefined} commitToggle={life!=='closed'} onOpen={p=>setPagePn(p.pn)} />
     </div>
   );
 }
@@ -9324,7 +9275,6 @@ function App({ session }) {
     { id:'readiness',   label:'Readiness',   icon:'🚦', ready:true },
     { id:'projects',    label:'Projects',    icon:'🗃', ready:true },
     { id:'formulation', label:'Formulation', icon:'🧪', ready:true },
-    { id:'generate',    label:'Generate',    icon:'⚙️', ready:true },
     { id:'quote',       label:'Quote',       icon:'💰', ready:true },
     { id:'documents',   label:'Documents',   icon:'📄', ready:true },
     { id:'inventory',   label:'Inventory',   icon:'📦', ready:true },
@@ -9375,7 +9325,6 @@ function App({ session }) {
         {nav === 'readiness' && <ReadinessPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onOpenMFSO={goMFSO} onOpenProject={openProjectPage} gateConfig={rdyCfg} />}
         {nav === 'projects' && <ProjectsPage projects={projects} onToggleNav={toggleNav} onFormulate={goFormulate} onOpenMFSO={goMFSO} onSendReview={sendReview} people={ENOVA_PEOPLE} onUpdateProject={updateProject} onRenameProject={renameProject} onDeleteProject={deleteProject} />}
         {nav === 'formulation' && <FormulationPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} targetPn={formulationPn} autoGenPn={pendingGen} onGenConsumed={()=>setPendingGen(null)} />}
-        {nav === 'generate' && <GeneratePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}
         {nav === 'quote' && <QuotePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}
         {nav === 'documents' && <DocumentsPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} targetPn={documentsPn} onTargetConsumed={()=>setDocumentsPn(null)} />}
         {nav === 'inventory' && <InventoryPage onToggleNav={toggleNav} onCloudPush={sharedInv.push} cloudStatus={sharedInv.status} />}

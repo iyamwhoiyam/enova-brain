@@ -2516,6 +2516,21 @@ const DEFAULT_STAGES = [
   "Completed","Cancelled",
 ];
 
+// ── §53 Dashboard scope + two operational fronts ──────────────────────────────
+// Default dashboard scope: only projects received 2025-05-01 → today. Older ones are
+// HIDDEN, never deleted; pin an older still-in-production job with keepVisible (the
+// Project-page "Keep in view" toggle) or flip the board's "＋ Older" switch to show all.
+const SCOPE_START = '2025-05-01';
+function inDateScope(p){ if (p && p.keepVisible) return true; const d = (p && p.dateReceived) || ''; return !!d && d >= SCOPE_START; }
+// Two operational fronts, split at the MFSO / Sales-Order line so each department stages
+// its own work instead of chasing an email string (the SO#185 failure mode).
+//   Front 1 · Commercial: Inquiry → Enova tasks → MFSO → Sales Order (PO Submitted)
+//   Front 2 · Production:  In Production → QC / purchasing / warehouse / shipment → close
+const COMMERCIAL_STAGES = new Set(["Pending Information","Formulation/Sample Development","Lab/Sampling","Sample Sent to Customer","BID Process","BID Sent","MFSO","PO Submitted"]);
+const PRODUCTION_STAGES  = new Set(["In Production","On Hold","Completed","Cancelled"]);
+function frontOf(p){ return PRODUCTION_STAGES.has(normalizeStage(p && p.stage)) ? 'production' : 'commercial'; }
+function stageFront(s){ return PRODUCTION_STAGES.has(s) ? 'production' : 'commercial'; }
+
 /* ══════════════ §48 PRODUCTION READINESS — cross-department command board ══════════════
    Fixes the failure this system exists to kill: no shared view of whether a production run is
    actually GO. Enova is QC-heavy and HALTS if anything isn't finalized/tested/confirmed. This models
@@ -2852,6 +2867,7 @@ const FORMULATION_DEFAULTS = {
   commit:{ nda:false, ndaDate:null, poNumber:'', soIssued:false, paying:false, payingNote:'', ts:null },
   archived:false,    // manual force-archive (hide from the active pipeline)
   keepActive:false,  // manual force-keep (pin to the active pipeline even without a signal)
+  keepVisible:false, // §53 pin an older (pre-2025-05) project so it stays in the dashboard scope
 };
 
 function emptyProject(pn) {
@@ -3026,7 +3042,7 @@ function migrateProject(raw){
   if (!p.approvals || typeof p.approvals!=='object') p.approvals = {};
   // §49 commitment: ensure the commit object exists (backfills every legacy record on load).
   if (!p.commit || typeof p.commit!=='object') p.commit = { nda:false, ndaDate:null, poNumber:'', soIssued:false, paying:false, payingNote:'', ts:null };
-  p.archived = !!p.archived; p.keepActive = !!p.keepActive;
+  p.archived = !!p.archived; p.keepActive = !!p.keepActive; p.keepVisible = !!p.keepVisible;
   // §48 readiness: keep null OR a well-formed object (never a stray scalar); normalize sub-structures.
   if (p.readiness != null){
     if (typeof p.readiness !== 'object') p.readiness = null;
@@ -4295,6 +4311,7 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
   const setCommit    = (patch, action) => auditUpd('Commitment', action, { commit: { ...(p.commit||{}), ...patch, ts:new Date().toISOString() } });
   const setArchived  = (val) => auditUpd('Commitment', val?'Archived (moved to Leads)':'Restored to active', { archived:val, keepActive:false });
   const setKeepActive= (val) => auditUpd('Commitment', val?'Promoted to active pipeline':'Unpinned', { keepActive:val, archived:false });
+  const setKeepVisible=(val) => auditUpd('Scope', val?'Kept in view (older project pinned to dashboard scope)':'Unpinned from scope', { keepVisible:val });
   const cb = p.cogsBreakdown || null;
   const audit = Array.isArray(p.auditLog) ? p.auditLog : [];
   const qty = Number(p.batchUnits)||0;
@@ -4445,6 +4462,8 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
             <label className="pp-f pp-chk"><span className="pp-l">Paying customer</span>
               <input type="checkbox" checked={!!(p.commit&&p.commit.paying)} disabled={!onUpdate} onChange={e=>setCommit({paying:e.target.checked},'Paying '+(e.target.checked?'flagged':'cleared'))}/></label>
             <div className="pp-f"><span className="pp-l">MFSO</span><span className="pp-v">{p.mfsoSigned&&p.mfsoSigned.signed ? <span className="fbadge ok">Signed</span> : <span style={{color:'#8794a0'}}>Not signed</span>}</span></div>
+            <label className="pp-f pp-chk" title="Projects received before May 2025 are hidden from the dashboard by default. Check this to keep this older job in view."><span className="pp-l">Keep in view (older)</span>
+              <input type="checkbox" checked={!!p.keepVisible} disabled={!onUpdate} onChange={e=>setKeepVisible(e.target.checked)}/></label>
             {onUpdate && <div style={{display:'flex',gap:6,marginTop:8,flexWrap:'wrap'}}>
               {isArchivedProj(p)
                 ? <button className="btn sec" onClick={()=>setKeepActive(true)} title="Pin to the active pipeline even without a signal">⬆ Promote to active</button>
@@ -4642,6 +4661,8 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
   const [pmFilter, setPmFilter] = useState('All');
   const [formFilter, setFormFilter] = useState('All');
   const [activeOnly, setActiveOnly] = useState(true);   // §49 default the board to committed jobs only
+  const [front, setFront]       = useState('all');      // §53 operational front: all | commercial | production
+  const [showOlder, setShowOlder] = useState(false);    // §53 include projects received before 2025-05
   const [modal, setModal]       = useState(null);
   const [dragId, setDragId]     = useState(null);
   const [dragOver, setDragOver] = useState(null);
@@ -4718,8 +4739,10 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
     const matchDateFrom = !dateFrom || (p.dateReceived && p.dateReceived >= dateFrom);
     const matchDateTo   = !dateTo   || (p.dateReceived && p.dateReceived <= dateTo);
     const matchActive = !activeOnly || isActiveProj(p);
-    return matchQ && matchR && matchF && matchDateFrom && matchDateTo && matchActive;
-  }), [projects, search, pmFilter, formFilter, dateFrom, dateTo, activeOnly]);
+    const matchScope  = showOlder || inDateScope(p);       // §53 default: 2025-05 → today
+    const matchFront  = front==='all' || frontOf(p)===front; // §53 commercial vs production
+    return matchQ && matchR && matchF && matchDateFrom && matchDateTo && matchActive && matchScope && matchFront;
+  }), [projects, search, pmFilter, formFilter, dateFrom, dateTo, activeOnly, front, showOlder]);
 
   const byStage = useMemo(() => {
     const m = {};
@@ -5132,6 +5155,14 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
           <input className="search" placeholder="🔍 Search project #, customer, product…"
             value={search} onChange={e => setSearch(e.target.value)}/>
           <div className="sep"/>
+          <span className="filter-label">Front</span>
+          {[['all','All'],['commercial','① Commercial'],['production','② Production']].map(([v,l])=>(
+            <button key={v} className={`flt-btn ${front===v?'active':''}`} onClick={()=>setFront(v)}
+              title={v==='commercial'?'Inquiry → Enova tasks → MFSO → Sales Order':v==='production'?'In Production → QC / purchasing / warehouse / shipment':'Both fronts'}>{l}</button>
+          ))}
+          <button className={`flt-btn ${showOlder?'active':''}`} onClick={()=>setShowOlder(o=>!o)}
+            title="Default scope is projects received May 2025 → today. Toggle to include older projects (kept, never deleted).">{showOlder?'＋ Older: shown':'📅 May 2025→now'}</button>
+          <div className="sep"/>
           <button className={`flt-btn ${activeOnly?'active':''}`} onClick={()=>setActiveOnly(a=>!a)}
             title="Show only committed jobs (MFSO / NDA / SO-PO / paying). Uncommitted leads are hidden.">{activeOnly?'★ Active only':'All projects'}</button>
           <div className="sep"/>
@@ -5240,7 +5271,7 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
         <div className="board-scale" ref={boardRef} style={{ transform: `scale(${zoom})` }}>
           <div className="board">
             {/* Completed & Cancelled are NOT columns here — they live in Closed Projects. */}
-            {stages.filter(s => s !== 'Completed' && s !== 'Cancelled').map(stage => {
+            {stages.filter(s => s !== 'Completed' && s !== 'Cancelled').filter(s => front==='all' || stageFront(s)===front).map(stage => {
               const cards = byStage[stage] || [];
               const isDragTarget = dragOver === stage;
               const colorCls = STAGE_COLOR_KEY(stage);
@@ -7278,6 +7309,7 @@ const EnovaMark = () => (
 function ProjectsPage({ projects, onToggleNav, onFormulate, onOpenMFSO, onSendReview, people, onUpdateProject, onRenameProject, onDeleteProject }){
   const [pagePn, setPagePn] = useState(null);   // open the full project page by PN
   const [life, setLife] = useState('open');     // open | closed | all — absorbs WIP's old Open/Closed table views
+  const [scopeOlder, setScopeOlder] = useState(false); // §53 include projects received before 2025-05
   const pageProj = pagePn ? projects.find(p => p.pn === pagePn) : null;
   if (pageProj) {
     const prevVisits = projects.filter(x => x.pn !== pageProj.pn &&
@@ -7288,11 +7320,12 @@ function ProjectsPage({ projects, onToggleNav, onFormulate, onOpenMFSO, onSendRe
              onRenamePn={onRenameProject && ((o,n)=>{ const ok=onRenameProject(o,n); if(ok) setPagePn(n); return ok; })}
              onDelete={onDeleteProject && ((pn)=>{ onDeleteProject(pn); setPagePn(null); })} />;
   }
-  const openN   = projects.filter(p=>!isClosedStage(p.stage)).length;
-  const closedN = projects.filter(p=>isClosedStage(p.stage)).length;
-  const lifeRows = life==='all' ? projects
-    : life==='closed' ? projects.filter(p=>isClosedStage(p.stage))
-    : projects.filter(p=>!isClosedStage(p.stage));
+  const scoped  = scopeOlder ? projects : projects.filter(inDateScope);
+  const openN   = scoped.filter(p=>!isClosedStage(p.stage)).length;
+  const closedN = scoped.filter(p=>isClosedStage(p.stage)).length;
+  const lifeRows = life==='all' ? scoped
+    : life==='closed' ? scoped.filter(p=>isClosedStage(p.stage))
+    : scoped.filter(p=>!isClosedStage(p.stage));
   return (
     <div className="app-page" style={{background:'var(--paper)'}}>
       <div className="gen-top">
@@ -7301,9 +7334,10 @@ function ProjectsPage({ projects, onToggleNav, onFormulate, onOpenMFSO, onSendRe
         <div className="wip-tabs" style={{marginLeft:16}}>
           <div className={`wip-tab ${life==='open'?'active':''}`} onClick={()=>setLife('open')}>📂 Open<span className="tcount">{openN}</span></div>
           <div className={`wip-tab ${life==='closed'?'active':''}`} onClick={()=>setLife('closed')}>✅ Closed<span className="tcount">{closedN}</span></div>
-          <div className={`wip-tab ${life==='all'?'active':''}`} onClick={()=>setLife('all')}>🗂 All<span className="tcount">{projects.length}</span></div>
+          <div className={`wip-tab ${life==='all'?'active':''}`} onClick={()=>setLife('all')}>🗂 All<span className="tcount">{scoped.length}</span></div>
+          <div className={`wip-tab ${scopeOlder?'active':''}`} style={{marginLeft:8}} onClick={()=>setScopeOlder(o=>!o)} title="Default scope: projects received May 2025 → today. Toggle to include older ones (kept, never deleted).">{scopeOlder?'＋ Older: shown':'📅 May 2025→now'}</div>
         </div>
-        <span className="fsmall" style={{marginLeft:'auto',whiteSpace:'nowrap'}}>{projects.length} projects</span>
+        <span className="fsmall" style={{marginLeft:'auto',whiteSpace:'nowrap'}}>{scoped.length} shown{scopeOlder?'':` · ${projects.length-scoped.length} older hidden`}</span>
       </div>
       <ProjectTable rows={lifeRows} closed={life==='closed'} noun={life==='all'?'total':undefined} commitToggle={life!=='closed'} onOpen={p=>setPagePn(p.pn)} />
     </div>
@@ -8955,7 +8989,7 @@ function ReadinessPage({ projects, setProjects, onToggleNav, onOpenMFSO, onOpenP
   };
 
   const pipeline = useMemo(() => {
-    let list = projects.filter(inReadinessPipeline);
+    let list = projects.filter(p => inReadinessPipeline(p) && inDateScope(p));  // §53 May-2025 scope; older kept via keepVisible
     if (visitOnly) list = list.filter(p => { const r=projReadiness(p); return r && r.customerVisit; });
     if (kpiFilter) list = list.filter(matchKpi);
     if (q.trim()){ const s=q.trim().toLowerCase(); list = list.filter(p => { const r=projReadiness(p); return [p.pn,p.customer,p.product,(r&&r.soNumber)||''].join(' ').toLowerCase().includes(s); }); }

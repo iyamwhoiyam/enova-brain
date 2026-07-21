@@ -786,11 +786,22 @@
 
     // Actives — mirrors calcIng EXACTLY: keyed by row.item.n, override-aware, per-ingredient overage.
     const calcIng = (p.ingredients || []).map((row) => {
-      if (!row || !row.item) return Object.assign({}, row, { mgPS: 0, cPS: 0, fresh: null });
-      const fresh = invIx[row.item.n] || null;
+      if (!row) return { mgPS: 0, cPS: 0, fresh: null };
       const pot = num(row.potencyPct) > 0 ? num(row.potencyPct) / 100 : 1;
       const rov = row.overage != null ? num(row.overage) : num(p.overage);
       const mgPS = (num(row.inputMg) * (1 + rov)) / pot;
+      // Slice 1 (no-$0 / traceability): a row with no matched MISys item can still carry a REAL
+      // manual/sheet cost keyed on importedAlt (e.g. a non-stocked sourced ingredient priced on the
+      // Project Page or captured at import). When such a cost resolves, the ingredient's mass AND
+      // cost must flow into COGS — otherwise it silently contributes $0 (the P26175 understatement).
+      // Rows that remain genuinely unpriced stay at zero, so matched formulas are penny-identical.
+      if (!row.item) {
+        const alt = row.importedAlt || null;
+        const uCost = alt ? skuCost(alt, p, invIx) : null;
+        if (uCost == null) return Object.assign({}, row, { mgPS: 0, cPS: 0, fresh: null });
+        return Object.assign({}, row, { mgPS, cPS: (mgPS / 1000) * uCost, fresh: null });
+      }
+      const fresh = invIx[row.item.n] || null;
       const uCost = skuCost(row.item.n, p, invIx);
       const cPS = (mgPS / 1000) * (uCost != null ? uCost : 0);
       return Object.assign({}, row, { item: fresh || row.item, mgPS, cPS, fresh });
@@ -2312,6 +2323,89 @@ input.fcell:focus{border-color:var(--teal);outline:none;background:#fff;}
 .src-f input{padding:5px 8px;border:1px solid var(--line);border-radius:var(--r);font:inherit;font-weight:400;color:var(--ink);min-width:120px;}
 .src-cost{width:90px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;font:inherit;font-size:12px;text-align:right;}
 .src-cost:focus{border-color:var(--teal);outline:none;}
+/* §54 Production Board — live erp_v_* read model (next-action lanes) */
+.pb-kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:12px;}
+.pb-kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;border-top:3px solid var(--navy);}
+.pb-kpi .n{font-size:20px;font-weight:800;color:var(--navy-dk);letter-spacing:-.5px;}
+.pb-kpi .l{font-size:10px;color:#7b8794;margin-top:2px;text-transform:uppercase;letter-spacing:.4px;}
+.pb-kpi.warn{border-top-color:var(--amber);} .pb-kpi.warn .n{color:var(--amber);}
+.pb-kpi.bad{border-top-color:var(--bad);} .pb-kpi.bad .n{color:var(--bad);}
+.pb-kpi.ok{border-top-color:var(--ok);} .pb-kpi.ok .n{color:var(--ok);}
+.pb-board{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;align-items:start;margin-bottom:16px;}
+.pb-col{background:#eef1f4;border:1px solid var(--line);border-radius:var(--r);display:flex;flex-direction:column;min-height:100px;}
+.pb-col-h{background:#fff;border-top:3px solid var(--navy);border-bottom:1px solid var(--line);border-radius:var(--r) var(--r) 0 0;padding:8px 10px;}
+.pb-col-t{font-size:12px;font-weight:700;color:var(--navy-dk);}
+.pb-col-m{display:flex;align-items:center;gap:8px;margin-top:2px;}
+.pb-col-m .cnt{font-size:17px;font-weight:800;color:var(--navy-dk);}
+.pb-col-blk{font-size:10px;font-weight:700;color:var(--bad);background:var(--bad-bg);padding:1px 6px;border-radius:10px;}
+.pb-col-amt{margin-left:auto;font-size:11px;font-weight:700;color:var(--ok);}
+.pb-col-own{font-size:10px;color:#7b8794;margin-top:2px;}
+.pb-col-body{padding:7px;display:flex;flex-direction:column;gap:7px;max-height:600px;overflow-y:auto;}
+.pb-card{background:#fff;border:1px solid var(--line);border-left:3px solid #9aa5b1;border-radius:var(--r);padding:7px 9px;box-shadow:0 1px 1px rgba(0,0,0,.03);}
+.pb-card.blk{border-left-color:var(--bad);} .pb-card.act{border-left-color:var(--navy);} .pb-card.done{border-left-color:var(--ok);}
+.pb-c-top{display:flex;justify-content:space-between;align-items:baseline;gap:6px;}
+.pb-so{font-size:11px;font-weight:700;color:var(--amber);font-family:"SF Mono",Menlo,monospace;}
+.pb-amt{font-size:12px;font-weight:800;color:var(--navy-dk);} .pb-amt.zero{color:#b7c0c9;}
+.pb-prod{font-size:12px;font-weight:600;margin-top:3px;line-height:1.25;}
+.pb-cust{font-size:11px;color:#5a6b7a;margin-top:1px;}
+.pb-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}
+.pb-chip{font-size:9.5px;font-weight:600;padding:1px 6px;border-radius:9px;white-space:nowrap;}
+.pb-chip.dep-ok{background:var(--ok-bg);color:var(--ok);} .pb-chip.dep-no{background:#eef1f4;color:#7b8794;}
+.pb-chip.docs{background:var(--warn-bg);color:var(--warn);}
+.pb-chip.mo{background:var(--teal-soft);color:var(--navy);font-family:"SF Mono",Menlo,monospace;}
+.pb-chip.mo.none{background:var(--bad-bg);color:var(--bad);}
+.pb-chip.pn{background:var(--amber-soft);color:var(--amber);font-family:"SF Mono",Menlo,monospace;cursor:pointer;}
+.pb-why{font-size:10.5px;color:#5a6b7a;margin-top:6px;line-height:1.3;background:var(--paper);border-radius:3px;padding:4px 6px;}
+.pb-why.blk{background:var(--bad-bg);color:#9e3b38;}
+.pb-c-foot{display:flex;justify-content:space-between;margin-top:6px;font-size:10px;color:#7b8794;}
+.pb-c-foot .nxt{font-family:"SF Mono",Menlo,monospace;} .pb-c-foot .pct{font-weight:700;}
+.pb-panels{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;}
+.pb-panel{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;}
+.pb-panel.full{grid-column:1/-1;}
+.pb-panel h3{margin:0 0 10px;font-size:13px;color:var(--navy-dk);}
+.pb-ob{display:grid;grid-template-columns:150px 1fr 78px;align-items:center;gap:10px;margin-bottom:7px;}
+.pb-ob-l{font-size:11px;font-weight:600;}
+.pb-ob-bar{position:relative;height:18px;background:var(--paper);border-radius:3px;display:flex;align-items:center;}
+.pb-ob-fill{height:18px;background:linear-gradient(90deg,var(--amber),#f7935e);border-radius:3px;position:absolute;left:0;top:0;}
+.pb-ob-n{position:relative;font-size:10px;font-weight:600;color:var(--navy-dk);padding-left:7px;}
+.pb-ob-amt{font-size:11px;font-weight:700;color:var(--ok);text-align:right;}
+.pb-s-bar{position:relative;height:15px;background:var(--paper);border-radius:3px;min-width:70px;}
+.pb-s-fill{height:15px;background:var(--ok);border-radius:3px;}
+.pb-s-bar span{position:absolute;left:6px;top:0;font-size:9.5px;line-height:15px;font-weight:700;color:var(--navy-dk);}
+.pb-bal{color:var(--bad);font-weight:700;}
+.pb-flag{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line);font-size:11px;}
+.pb-flag .sev{font-size:9px;font-weight:700;padding:1px 6px;border-radius:9px;text-transform:uppercase;flex-shrink:0;margin-top:1px;}
+.pb-flag .sev.warn{background:var(--warn-bg);color:var(--warn);} .pb-flag .sev.review{background:var(--teal-soft);color:var(--navy);} .pb-flag .sev.error{background:var(--bad-bg);color:var(--bad);}
+.pb-loading{padding:40px;text-align:center;color:#7b8794;font-size:13px;}
+/* §55 Generator Review Queue — confidence + exposure lanes */
+.rq-strip{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px;}
+.rq-lane{margin-bottom:18px;}
+.rq-lane-h{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--navy-dk);margin:0 0 8px;}
+.rq-lane-h .cnt{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:1px 9px;font-size:12px;color:#5a6b7a;font-weight:700;}
+.rq-clear-toggle{cursor:pointer;user-select:none;}
+.rq-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;}
+.rq-card{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:6px;padding:10px 12px;}
+.rq-card.blocked{border-left-color:var(--bad);}
+.rq-c-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.rq-pn{font-family:"SF Mono",Menlo,Consolas,monospace;color:var(--amber);font-weight:700;font-size:12px;white-space:nowrap;}
+.rq-badge{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:2px 7px;border-radius:9px;white-space:nowrap;}
+.rq-badge.review{background:var(--warn-bg);color:var(--warn);}
+.rq-badge.blocked{background:var(--bad-bg);color:var(--bad);}
+.rq-prod{font-size:12.5px;font-weight:600;color:var(--ink);margin:5px 0 1px;}
+.rq-cust{font-size:11px;color:#7b8794;margin-bottom:8px;}
+.rq-metrics{display:flex;gap:16px;margin-bottom:8px;flex-wrap:wrap;}
+.rq-metrics .m .v{font-weight:700;color:var(--ink);font-family:"SF Mono",Menlo,monospace;font-size:12.5px;}
+.rq-metrics .m.exp .v{color:var(--bad);}
+.rq-metrics .m .k{color:#7b8794;font-size:9px;text-transform:uppercase;letter-spacing:.3px;margin-top:1px;}
+.rq-skus{margin-top:2px;}
+.rq-skus-h{font-size:9.5px;text-transform:uppercase;letter-spacing:.3px;color:#7b8794;margin-bottom:4px;}
+.rq-chips{display:flex;flex-wrap:wrap;gap:4px;}
+.rq-chip{background:var(--paper);border:1px solid var(--line);border-radius:4px;padding:2px 6px;font-size:10.5px;color:#5a6b7a;}
+.rq-none{font-size:12px;color:#7b8794;padding:22px;text-align:center;background:var(--card);border:1px dashed var(--line);border-radius:6px;}
+.rq-clear-list{margin-top:8px;background:var(--card);border:1px solid var(--line);border-radius:6px;overflow:hidden;}
+.rq-clear-row{display:flex;align-items:center;gap:10px;padding:6px 10px;border-bottom:1px solid var(--line);font-size:11.5px;}
+.rq-clear-row:last-child{border-bottom:none;}
+.rq-dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex-shrink:0;}
 </style>
 </head>
 <body>
@@ -4305,6 +4399,22 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
   // Set / clear a per-project manual cost override (by ALT). n==null removes the override.
   const setCost = (alt, n) => { if (!alt || !onUpdate) return; const cur = { ...(p.costOverride||{}) };
     if (n==null) delete cur[alt]; else cur[alt] = n; upd({ costOverride: cur }); };
+  // Slice 1 (traceability / no-$0): let a human price an UNMATCHED ingredient row that has no ALT
+  // right here in the grid. A keyless row can't hold an override AND can't be read by the cost
+  // engine (which keys on r.importedAlt), so we mint the same stable synthetic SRC- key the importer
+  // uses, stamp it onto the row's importedAlt, and write the override — atomically, in one update —
+  // so the manual price flows through COGS everywhere and is fully traceable (audited).
+  const setRowCost = (rowIndex, name, alt, n) => {
+    if (!onUpdate) return;
+    if (alt) { setCost(alt, n); return; }                 // already keyed → normal override path
+    if (n==null) return;                                  // nothing to clear on a keyless row
+    const slug = String(name||('X'+rowIndex)).replace(/[^a-z0-9]+/gi,'').slice(0,12).toUpperCase();
+    const key = 'SRC-' + slug + '-' + rowIndex;
+    const nextIngs = (p.ingredients||[]).map((r,i)=> i===rowIndex ? { ...r, importedAlt:key } : r);
+    const cur = { ...(p.costOverride||{}) }; cur[key] = Number(n);
+    upd({ ingredients: nextIngs, costOverride: cur,
+          auditLog:[...(p.auditLog||[]), auditEntry('Cost', 'Manual cost set for unmatched ingredient "'+(name||'—')+'" → $'+Number(n).toFixed(4)+' ('+key+')')].slice(-500) });
+  };
   // Append an audit entry through the shared onUpdate (Project Page has no setProjects).
   const auditUpd = (action, detail, extra) => { if (onUpdate) onUpdate(p.pn, { ...(extra||{}), auditLog:[...(p.auditLog||[]), auditEntry(action, detail)].slice(-500) }); };
   // §49 commitment editor helpers (single-record, audited writes — these "promote" a project).
@@ -4495,7 +4605,9 @@ function ProjectPage({ proj, prevVisits, onBack, onEdit, onFormulate, onSendRevi
                   <td>{r.name}</td>
                   <td className="mono sm">{r.alt || <span style={{color:'var(--bad)'}}>—</span>}</td>
                   <td className="r mono">{r.mg||0}</td>
-                  <td className="r mono">{r.alt ? <PriceCell value={r.unitCost} overridden={r.overridden} disabled={ppLocked} onSave={n=>setCost(r.alt,n)}/> : (r.unitCost!=null ? f$(r.unitCost,4) : '—')}</td>
+                  <td className="r mono">{r.alt
+                    ? <PriceCell value={r.unitCost} overridden={r.overridden} disabled={ppLocked} onSave={n=>setCost(r.alt,n)}/>
+                    : <PriceCell value={r.unitCost} overridden={false} disabled={ppLocked} onSave={n=>setRowCost(r.key, r.name, null, n)}/>}</td>
                   <td className="r mono">{r.onHand!=null ? Number(r.onHand).toLocaleString() : '—'}</td>
                 </tr>
               )) : (
@@ -6055,6 +6167,9 @@ function parseMasterFormulaWorkbook(wb){
   if(!ingredients.length) return null;
 
   // Serving math (per-form: powder counts scoops, liquid is 1 dose, count forms use the serving count).
+  // servingsPerUnit reads the MASTER FORMULA "Servings/ Unit:" cell — the authoritative COSTING unit
+  // count. Do NOT source this from the Bid sheet: the Bid states CONSUMER servings (e.g. a 30-dose
+  // dropper is 1 costing unit but 30 doses), which is a different quantity and drifts from the formula.
   const isPowder=/powder/i.test(formRaw), isLiquid=/liquid|syrup|tincture|shot/i.test(formRaw);
   const servingsPerUnit = num(valRight(/servings?\s*\/\s*unit|servings?\s*per\s*unit/i)) || 1;
   let servingSize;
@@ -9091,6 +9206,404 @@ function ReadinessPage({ projects, setProjects, onToggleNav, onOpenMFSO, onOpenP
 }
 
 /* ══════════════ §51 SOURCING PAGE — the team-maintained ingredient knowledge base ══════════════ */
+// §54 Production Board — live read model over the Supabase erp_v_* views + base tables.
+// Renders the Contract-Order-Delivery-Schedule pipeline grouped by NEXT ACTION (the desk that
+// must act next), not furthest-reached stage, so orders blocked at Purchasing don't hide in
+// Fulfillment behind a residual final-payment balance. Read-only; the sheet/importer is the
+// system of record. All figures trace to erp_production_orders / erp_order_gates / erp_shipments.
+const PB_LANES = [
+  { key:1, name:'Sales · Intake',        owner:'Carlos',    accent:'#7b8794' },
+  { key:2, name:'R&D · Docs',            owner:'Marina',    accent:'#2f8fc4' },
+  { key:4, name:'Purchasing · Material', owner:'Christine', accent:'#e0912f' },
+  { key:7, name:'QA · Release',          owner:'Ariel',     accent:'#8e5bb5' },
+  { key:8, name:'Warehouse · Fulfill',   owner:'Patrick',   accent:'#2b7a9e' },
+];
+const PB_DEPT_OWNER = { Sales:'Carlos', 'R&D':'Marina', Finance:'Vivian', Purchasing:'Christine', QA:'Ariel', Production:'Jose', Warehouse:'Patrick' };
+const pbMoney = (n) => (n==null ? '' : '$' + Math.round(n).toLocaleString());
+const pbClip = (s,n) => { s = String(s==null?'':s); return s.length>n ? s.slice(0,n-1)+'…' : s; };
+
+function ProductionBoardPage({ onToggleNav }){
+  const [state, setState] = useState({ loading:true, err:null });
+  const [rows, setRows] = useState([]);
+  const [ordMap, setOrdMap] = useState({});   // ref -> {project_pn, docs, method}
+  const [blkMap, setBlkMap] = useState({});    // ref -> [{gate_key,note}]
+  const [ships, setShips] = useState([]);
+  const [flags, setFlags] = useState([]);
+
+  const load = React.useCallback(async () => {
+    if (!sb) { setState({ loading:false, err:'offline' }); return; }
+    setState({ loading:true, err:null });
+    try {
+      const [board, ord, blk, sh, fl] = await Promise.all([
+        sb.from('erp_v_production_board').select('*'),
+        sb.from('erp_production_orders').select('ref,project_pn,docs_outstanding,project_match_method'),
+        sb.from('erp_order_gates').select('order_ref,gate_key,note').eq('status','blocked'),
+        sb.from('erp_v_shipment_status').select('*'),
+        sb.from('erp_data_quality_flags').select('*').eq('status','open').order('severity',{ascending:false}),
+      ]);
+      const firstErr = [board,ord,blk,sh,fl].map(r=>r.error).find(Boolean);
+      if (firstErr) throw firstErr;
+      const om = {}; (ord.data||[]).forEach(o => { om[o.ref] = { project_pn:o.project_pn, docs:o.docs_outstanding||[], method:o.project_match_method }; });
+      const bm = {}; (blk.data||[]).forEach(g => { (bm[g.order_ref] = bm[g.order_ref] || []).push({ gate_key:g.gate_key, note:g.note }); });
+      setRows(board.data||[]); setOrdMap(om); setBlkMap(bm); setShips(sh.data||[]); setFlags(fl.data||[]);
+      setState({ loading:false, err:null });
+    } catch (e) {
+      setState({ loading:false, err:(e && e.message) || 'load failed' });
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  // enrich each order with its real blocker note + P-link, and derive the working owner
+  const orders = useMemo(() => (rows||[]).map(o => {
+    const enr = ordMap[o.ref] || {};
+    const blist = blkMap[o.ref] || [];
+    const hit = blist.find(g => g.gate_key === o.next_gate) || blist[0];
+    const why = (hit && hit.note) ? hit.note : (o.order_issues || null);
+    const workOwner = o.next_owner || PB_DEPT_OWNER[o.next_dept] || '—';
+    return { ...o, _why:why, _pn:enr.project_pn||null, _docs:(enr.docs&&enr.docs.length)?enr.docs.length:(o.docs_outstanding_n||0), _workOwner:workOwner };
+  }), [rows, ordMap, blkMap]);
+
+  const kpi = useMemo(() => {
+    const open = orders.length;
+    const val = orders.reduce((s,o)=>s+(Number(o.amount)||0),0);
+    const blocked = orders.filter(o=>o.blocked).length;
+    const depIn = orders.filter(o=>o.deposit_received).length;
+    const cashOut = orders.reduce((s,o)=> s + (o.amount ? (o.deposit_received ? Number(o.amount)*0.5 : Number(o.amount)) : 0), 0);
+    const linked = orders.filter(o=>o._pn).length;
+    return { open, val, blocked, depIn, cashOut, linked };
+  }, [orders]);
+
+  const laneOrders = (k) => orders.filter(o => (o.next_stage||1) === k)
+    .sort((a,b)=> (Number(b.blocked)-Number(a.blocked)) || (Number(b.amount||0)-Number(a.amount||0)));
+
+  const ownerRows = useMemo(() => {
+    const m = {};
+    orders.forEach(o => { const key=o._workOwner+' · '+(o.next_dept||'—'); const e=m[key]||{n:0,blk:0,amt:0}; e.n++; if(o.blocked)e.blk++; e.amt+=Number(o.amount||0); m[key]=e; });
+    return Object.entries(m).map(([k,v])=>({k,...v})).sort((a,b)=>b.n-a.n);
+  }, [orders]);
+
+  const shipTable = useMemo(() => (ships||[])
+    .filter(s => (Number(s.total_units)||0)>0 || (Number(s.units_ordered)||0)>0)
+    .sort((a,b)=>(Number(b.balance)||0)-(Number(a.balance)||0)), [ships]);
+  const blockers = useMemo(() => orders.filter(o=>o.blocked).sort((a,b)=>Number(b.amount||0)-Number(a.amount||0)), [orders]);
+
+  if (state.loading) return (
+    <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+      <div className="gen-top"><button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar">☰</button><div className="gen-title">Production Board</div></div>
+      <div className="pb-loading">Loading live production data from Supabase…</div>
+    </div>
+  );
+  if (state.err === 'offline') return (
+    <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+      <div className="gen-top"><button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar">☰</button><div className="gen-title">Production Board</div></div>
+      <div className="pb-loading">The Production Board reads live orders from Supabase. Sign in to view it.</div>
+    </div>
+  );
+  if (state.err) return (
+    <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+      <div className="gen-top"><button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar">☰</button><div className="gen-title">Production Board</div>
+        <div className="rdy-top-actions"><button className="rdy-btn" onClick={load}>↻ Retry</button></div></div>
+      <div className="pb-loading">Couldn't load production data: {state.err}</div>
+    </div>
+  );
+
+  return (
+    <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+      <div className="gen-top">
+        <button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+        <div className="gen-title">Production Board</div>
+        <div className="rdy-top-actions">
+          <span className="fsmall" style={{color:'#7b8794'}}>Live · Contract Order Delivery Schedule → erp_v_production_board</span>
+          <button className="rdy-btn" onClick={load}>↻ Refresh</button>
+        </div>
+      </div>
+      <div className="gen-body" style={{padding:14, overflow:'auto'}}>
+        <div className="pb-kpis">
+          <div className="pb-kpi"><div className="n">{kpi.open}</div><div className="l">Open Orders</div></div>
+          <div className="pb-kpi ok"><div className="n">{pbMoney(kpi.val)}</div><div className="l">Open Order Value</div></div>
+          <div className="pb-kpi bad"><div className="n">{kpi.blocked}</div><div className="l">Blocked</div></div>
+          <div className="pb-kpi warn"><div className="n">{kpi.depIn}/{kpi.open}</div><div className="l">Deposits In</div></div>
+          <div className="pb-kpi warn"><div className="n">{pbMoney(kpi.cashOut)}</div><div className="l">Cash Outstanding (est)</div></div>
+          <div className="pb-kpi"><div className="n">{kpi.linked}</div><div className="l">Linked to Formula</div></div>
+        </div>
+
+        <div className="pb-board">
+          {PB_LANES.map(L => {
+            const os = laneOrders(L.key);
+            const blk = os.filter(o=>o.blocked).length;
+            const amt = os.reduce((s,o)=>s+Number(o.amount||0),0);
+            return (
+              <div className="pb-col" key={L.key}>
+                <div className="pb-col-h" style={{borderTopColor:L.accent}}>
+                  <div className="pb-col-t">{L.name}</div>
+                  <div className="pb-col-m"><span className="cnt">{os.length}</span>
+                    {blk>0 && <span className="pb-col-blk">{blk} blocked</span>}
+                    <span className="pb-col-amt">{pbMoney(amt)}</span></div>
+                  <div className="pb-col-own">{L.owner}</div>
+                </div>
+                <div className="pb-col-body">
+                  {os.map(o => {
+                    const flag = o.blocked ? 'blk' : (o.status==='closed'?'done':'act');
+                    const so = o.so_no ? 'SO '+o.so_no : o.ref;
+                    return (
+                      <div className={'pb-card '+flag} key={o.ref}>
+                        <div className="pb-c-top"><span className="pb-so">{so}</span>
+                          <span className={'pb-amt '+(o.amount?'':'zero')}>{o.amount?pbMoney(o.amount):'—'}</span></div>
+                        <div className="pb-prod">{pbClip(o.product||'(unnamed)',64)}</div>
+                        <div className="pb-cust">{o.customer||'—'}</div>
+                        <div className="pb-chips">
+                          {o.deposit_received ? <span className="pb-chip dep-ok">deposit in</span> : <span className="pb-chip dep-no">no deposit</span>}
+                          {o._docs>0 && <span className="pb-chip docs">{o._docs} docs due</span>}
+                          {o.mo_refs ? <span className="pb-chip mo">{pbClip(o.mo_refs,24)}</span> : <span className="pb-chip mo none">no MO#</span>}
+                          {o._pn && <span className="pb-chip pn" title="Linked formulation project">{o._pn}</span>}
+                        </div>
+                        {o._why && <div className={'pb-why '+(o.blocked?'blk':'')}>{pbClip(o._why,150)}</div>}
+                        <div className="pb-c-foot"><span className="nxt">→ {o.next_gate||'—'}</span><span className="pct">{o.pct||0}%</span></div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="pb-panels">
+          <div className="pb-panel">
+            <h3>Bottleneck — workload by next-action owner</h3>
+            {ownerRows.map(r => {
+              const w = Math.round(100*r.n/Math.max(1,kpi.open));
+              return (
+                <div className="pb-ob" key={r.k}>
+                  <div className="pb-ob-l">{r.k}</div>
+                  <div className="pb-ob-bar"><div className="pb-ob-fill" style={{width:Math.max(6,w*3)+'px'}}></div>
+                    <span className="pb-ob-n">{r.n} orders{r.blk?' · '+r.blk+' blocked':''}</span></div>
+                  <div className="pb-ob-amt">{pbMoney(r.amt)}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="pb-panel">
+            <h3>Cash forecast</h3>
+            <div className="pb-ob"><div className="pb-ob-l">Deposits received</div>
+              <div className="pb-ob-bar"><div className="pb-ob-fill" style={{width:Math.max(6,Math.round(100*kpi.depIn/Math.max(1,kpi.open))*3)+'px',background:'linear-gradient(90deg,var(--ok),#6fbf73)'}}></div><span className="pb-ob-n">{kpi.depIn} orders</span></div><div className="pb-ob-amt"></div></div>
+            <div className="pb-ob"><div className="pb-ob-l">Awaiting deposit</div>
+              <div className="pb-ob-bar"><div className="pb-ob-fill" style={{width:Math.max(6,Math.round(100*(kpi.open-kpi.depIn)/Math.max(1,kpi.open))*3)+'px'}}></div><span className="pb-ob-n">{kpi.open-kpi.depIn} orders</span></div><div className="pb-ob-amt"></div></div>
+            <table className="ptbl" style={{marginTop:10}}>
+              <tbody>
+                <tr><td>Open order value (contract)</td><td className="pcell-num">{pbMoney(kpi.val)}</td></tr>
+                <tr><td>Cash outstanding (est. deposit + final)</td><td className="pcell-num pb-bal">{pbMoney(kpi.cashOut)}</td></tr>
+                <tr><td>Orders with deposit received</td><td className="pcell-num">{kpi.depIn}</td></tr>
+              </tbody>
+            </table>
+            <p className="fsmall" style={{color:'#7b8794',marginTop:8}}>Estimate treats deposit-in orders as ~50% collected and no-deposit orders as fully outstanding. Tier/actual splits are manual per the Master Bid.</p>
+          </div>
+
+          {flags.length>0 && (
+            <div className="pb-panel full">
+              <h3>Data-quality flags <span className="fsmall" style={{fontWeight:400,color:'#7b8794'}}>— open items for ops to confirm (source values unchanged)</span></h3>
+              {flags.map(f => (
+                <div className="pb-flag" key={f.id}>
+                  <span className={'sev '+(f.severity||'review')}>{f.severity||'review'}</span>
+                  <div style={{flex:1}}>
+                    <b>{f.source_ref}</b> · <span className="mono sm">{f.field}</span> — observed <b>{f.observed_value}</b>{f.suggested_value?<span> → suggested <b>{f.suggested_value}</b></span>:null}
+                    <div style={{color:'#7b8794',marginTop:2}}>{f.reason}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="pb-panel full">
+            <h3>Shipments — fulfillment progress &amp; open balances</h3>
+            <table className="ptbl">
+              <thead><tr><th>Customer</th><th>Product</th><th className="pcell-num">Shipped</th><th className="pcell-num">Ordered</th><th className="pcell-num">Balance</th><th>Progress</th><th>Tracking</th></tr></thead>
+              <tbody>
+                {shipTable.map((s,i) => {
+                  const pct = (Number(s.units_ordered)||0)>0 ? Math.min(100, Math.round(100*(Number(s.total_units)||0)/Number(s.units_ordered))) : (s.pct_shipped!=null?s.pct_shipped:null);
+                  return (
+                    <tr key={(s.tracking||'')+'|'+i}>
+                      <td>{s.customer}</td>
+                      <td>{pbClip(s.description||'—',34)}</td>
+                      <td className="pcell-num mono">{s.total_units?Number(s.total_units).toLocaleString():'—'}</td>
+                      <td className="pcell-num mono">{s.units_ordered?Number(s.units_ordered).toLocaleString():'—'}</td>
+                      <td className={'pcell-num mono '+((Number(s.balance)||0)>0?'pb-bal':'')}>{s.balance?Number(s.balance).toLocaleString():'0'}</td>
+                      <td>{pct==null? <span style={{color:'#b7c0c9'}}>—</span> : <div className="pb-s-bar"><div className="pb-s-fill" style={{width:pct+'%'}}></div><span>{pct}%</span></div>}</td>
+                      <td className="mono sm" style={{color:'#7b8794'}}>{pbClip(s.tracking||'—',18)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="pb-panel full">
+            <h3>Active blockers <span className="fsmall" style={{fontWeight:400,color:'#7b8794'}}>— {blockers.length} orders, highest value first</span></h3>
+            <table className="ptbl">
+              <thead><tr><th>Ref</th><th>Product</th><th>Owner</th><th className="pcell-num">Value</th><th>Reason</th></tr></thead>
+              <tbody>
+                {blockers.map(o => (
+                  <tr key={o.ref}>
+                    <td className="mono sm" style={{color:'var(--amber)',fontWeight:700,whiteSpace:'nowrap'}}>{o.so_no?'SO '+o.so_no:o.ref}</td>
+                    <td>{pbClip(o.product||'—',40)}</td>
+                    <td>{o.next_owner||o._workOwner||'—'}</td>
+                    <td className="pcell-num mono">{pbMoney(o.amount)}</td>
+                    <td style={{color:'#9e3b38'}}>{pbClip(o._why||o.next_gate||'—',110)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════ §55 GENERATOR REVIEW QUEUE — confidence + $-exposure lane ══════════════ */
+// Reads the live erp_v_generator_queue view (per-project confidence rollup). Surfaces ONLY the
+// formulas the generator couldn't fully cost itself — the exceptions an Enova employee must price
+// or match. Everything else auto-cleared (matched / override / customer-supplied / within margin
+// budget). The exposure $ is a worst-case RISK estimate only; it never enters COGS.
+function ReviewQueuePage({ onToggleNav }){
+  const [state, setState] = useState({ loading:true, err:null });
+  const [rows, setRows] = useState([]);
+  const [showClear, setShowClear] = useState(false);
+
+  const load = React.useCallback(async () => {
+    if (!sb) { setState({ loading:false, err:'offline' }); return; }
+    setState({ loading:true, err:null });
+    try {
+      const r = await sb.from('erp_v_generator_queue').select('*');
+      if (r.error) throw r.error;
+      setRows(r.data || []);
+      setState({ loading:false, err:null });
+    } catch (e) { setState({ loading:false, err:(e && e.message) || 'load failed' }); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const money = (n) => (n==null ? '—' : '$' + Number(n).toFixed(2));
+  const skusOf = (v) => { if (!v) return []; if (Array.isArray(v)) return v; try { return JSON.parse(v) || []; } catch(e) { return []; } };
+  const cogsMult = (r) => { const x = r.exposure_pct_cogs==null ? null : Number(r.exposure_pct_cogs); return x==null ? '—' : (x>=1 ? x.toFixed(1)+'× COGS' : Math.round(x*100)+'% COGS'); };
+
+  const blocked = useMemo(() => rows.filter(r=>r.verdict==='BLOCKED').sort((a,b)=>Number(b.exposure_usd||0)-Number(a.exposure_usd||0)), [rows]);
+  const review  = useMemo(() => rows.filter(r=>r.verdict==='NEEDS_REVIEW').sort((a,b)=>Number(b.exposure_usd||0)-Number(a.exposure_usd||0)), [rows]);
+  const clear   = useMemo(() => rows.filter(r=>r.verdict==='AUTO_CLEAR').sort((a,b)=>String(a.pn).localeCompare(String(b.pn))), [rows]);
+  const kpi = useMemo(() => ({
+    total: rows.length, clear: clear.length, review: review.length, blocked: blocked.length,
+    exposure: blocked.concat(review).reduce((s,r)=>s+Number(r.exposure_usd||0),0),
+  }), [rows, blocked, review, clear]);
+
+  const card = (r) => {
+    const skus = skusOf(r.unpriced_skus);
+    const badPrice = r.lead_price!=null && Number(r.lead_price)<=0.02;
+    return (
+      <div className={'rq-card '+(r.verdict==='BLOCKED'?'blocked':'')} key={r.pn}>
+        <div className="rq-c-top">
+          <span className="rq-pn">{r.pn}</span>
+          <span className={'rq-badge '+(r.verdict==='BLOCKED'?'blocked':'review')}>{r.verdict==='BLOCKED'?'Blocked':'Needs review'}</span>
+        </div>
+        <div className="rq-prod">{pbClip(r.product||'(unnamed)',54)}</div>
+        <div className="rq-cust">{r.customer_name||'—'}{r.mfso_signed?' · MFSO signed':''}</div>
+        <div className="rq-metrics">
+          <div className="m"><div className="v">{money(r.cogs)}</div><div className="k">Kernel COGS</div></div>
+          <div className="m exp"><div className="v">{money(r.exposure_usd)}</div><div className="k">Worst-case unknown</div></div>
+          {r.lead_price!=null
+            ? <div className="m"><div className="v">{money(r.margin_usd)}</div><div className="k">Margin @ lead</div></div>
+            : <div className="m"><div className="v">{cogsMult(r)}</div><div className="k">Exposure</div></div>}
+        </div>
+        {skus.length>0 && (
+          <div className="rq-skus">
+            <div className="rq-skus-h">{skus.length} line{skus.length>1?'s':''} to price or match</div>
+            <div className="rq-chips">
+              {skus.slice(0,8).map((s,i)=><span className="rq-chip" key={i}>{pbClip(s,30)}</span>)}
+              {skus.length>8 && <span className="rq-chip">+{skus.length-8} more</span>}
+            </div>
+          </div>
+        )}
+        {badPrice && <div className="rq-skus-h" style={{color:'var(--bad)',marginTop:8}}>⚠ Lead price {money(r.lead_price)} looks like a placeholder — set a real tier price.</div>}
+      </div>
+    );
+  };
+
+  if (state.loading) return (
+    <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+      <div className="gen-top"><button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar">☰</button><div className="gen-title">Generator Review Queue</div></div>
+      <div className="pb-loading">Loading the confidence queue from Supabase…</div>
+    </div>
+  );
+  if (state.err === 'offline') return (
+    <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+      <div className="gen-top"><button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar">☰</button><div className="gen-title">Generator Review Queue</div></div>
+      <div className="pb-loading">The Review Queue reads the live generator confidence model from Supabase. Sign in to view it.</div>
+    </div>
+  );
+  if (state.err) return (
+    <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+      <div className="gen-top"><button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar">☰</button><div className="gen-title">Generator Review Queue</div>
+        <div className="rdy-top-actions"><button className="rdy-btn" onClick={load}>↻ Retry</button></div></div>
+      <div className="pb-loading">Couldn't load the review queue: {state.err}</div>
+    </div>
+  );
+
+  return (
+    <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+      <div className="gen-top">
+        <button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+        <div className="gen-title">Generator Review Queue</div>
+        <div className="rdy-top-actions">
+          <span className="fsmall" style={{color:'#7b8794'}}>Live · confidence + exposure → erp_v_generator_queue</span>
+          <button className="rdy-btn" onClick={load}>↻ Refresh</button>
+        </div>
+      </div>
+      <div className="gen-body" style={{padding:14, overflow:'auto'}}>
+        <p className="fsmall" style={{color:'#5a6b7a',margin:'0 0 12px',maxWidth:840,lineHeight:1.5}}>
+          Only the formulas the generator couldn't fully cost on its own. Everything else auto-cleared — matched to inventory, covered by a manual cost, customer-supplied, or within the margin variance budget. Each card names the exact lines to price or match. The worst-case exposure is a risk estimate only and never enters a COGS.
+        </p>
+        <div className="rq-strip">
+          <div className="pb-kpi"><div className="n">{kpi.total}</div><div className="l">Scored</div></div>
+          <div className="pb-kpi ok"><div className="n">{kpi.clear}</div><div className="l">Auto-cleared</div></div>
+          <div className="pb-kpi warn"><div className="n">{kpi.review}</div><div className="l">Needs review</div></div>
+          <div className="pb-kpi bad"><div className="n">{kpi.blocked}</div><div className="l">Blocked</div></div>
+          <div className="pb-kpi"><div className="n">{money(kpi.exposure)}</div><div className="l">Queue exposure</div></div>
+        </div>
+
+        {blocked.length>0 && (
+          <div className="rq-lane">
+            <div className="rq-lane-h">🚫 Blocked — do not quote until resolved <span className="cnt">{blocked.length}</span></div>
+            <div className="rq-cards">{blocked.map(card)}</div>
+          </div>
+        )}
+
+        <div className="rq-lane">
+          <div className="rq-lane-h">🔎 Needs review — price or match the flagged lines <span className="cnt">{review.length}</span></div>
+          {review.length>0
+            ? <div className="rq-cards">{review.map(card)}</div>
+            : <div className="rq-none">Nothing waiting — every costable formula cleared.</div>}
+        </div>
+
+        <div className="rq-lane">
+          <div className="rq-lane-h rq-clear-toggle" onClick={()=>setShowClear(v=>!v)}>
+            {showClear?'▾':'▸'} ✅ Auto-cleared <span className="cnt">{clear.length}</span>
+          </div>
+          {showClear && (
+            <div className="rq-clear-list">
+              {clear.map(r => (
+                <div className="rq-clear-row" key={r.pn}>
+                  <span className="rq-dot"></span>
+                  <span className="rq-pn" style={{minWidth:84}}>{r.pn}</span>
+                  <span style={{flex:1}}>{pbClip(r.product||'—',52)}</span>
+                  <span className="mono sm" style={{color:'#7b8794'}}>{money(r.cogs)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SourcingPage({ onToggleNav, sourcing }){
   const [q, setQ] = useState('');
   const [addOpen, setAddOpen] = useState(false);
@@ -9311,6 +9824,8 @@ function App({ session }) {
     { id:'formulation', label:'Formulation', icon:'🧪', ready:true },
     { id:'quote',       label:'Quote',       icon:'💰', ready:true },
     { id:'documents',   label:'Documents',   icon:'📄', ready:true },
+    { id:'production',  label:'Production',   icon:'🏭', ready:true },
+    { id:'review',      label:'Review Queue', icon:'🔎', ready:true },
     { id:'inventory',   label:'Inventory',   icon:'📦', ready:true },
     { id:'sourcing',    label:'Sourcing',    icon:'🌱', ready:true },
     { id:'labels',      label:'Label Review',icon:'🏷', ready:false },
@@ -9361,6 +9876,8 @@ function App({ session }) {
         {nav === 'formulation' && <FormulationPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} targetPn={formulationPn} autoGenPn={pendingGen} onGenConsumed={()=>setPendingGen(null)} />}
         {nav === 'quote' && <QuotePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}
         {nav === 'documents' && <DocumentsPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} targetPn={documentsPn} onTargetConsumed={()=>setDocumentsPn(null)} />}
+        {nav === 'production' && <ProductionBoardPage onToggleNav={toggleNav} />}
+        {nav === 'review' && <ReviewQueuePage onToggleNav={toggleNav} />}
         {nav === 'inventory' && <InventoryPage onToggleNav={toggleNav} onCloudPush={sharedInv.push} cloudStatus={sharedInv.status} />}
         {nav === 'sourcing' && <SourcingPage onToggleNav={toggleNav} sourcing={sourcing} />}
       </div>

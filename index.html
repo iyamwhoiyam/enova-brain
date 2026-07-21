@@ -1552,6 +1552,44 @@ table.ptbl tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--teal);}
 .doc-card.locked{opacity:.55;background:var(--paper);}
 .doc-card-h{font-weight:700;color:var(--navy);font-size:13px;}
 .doc-card-d{font-size:11px;color:#7c8a96;line-height:1.45;flex:1;}
+/* ── Golden-thread status strip (Documents page MFSO panel) ── */
+.gt-strip{display:flex;align-items:center;gap:8px;padding:7px 11px;border-radius:4px;font-size:12px;margin-bottom:8px;border:1px solid;}
+.gt-strip.ok{background:var(--ok-bg);border-color:#bfe0c1;color:#2f7a34;}
+.gt-strip.warn{background:var(--warn-bg,#fbf0dd);border-color:#e6cd98;color:#8a5a12;}
+.gt-strip.bad{background:var(--bad-bg,#fbe4e3);border-color:#eab9b6;color:#a5322e;}
+.gt-strip .gt-ico{font-size:14px;line-height:1;}
+.gt-strip .gt-txt{line-height:1.35;}
+.gt-verify{background:#fff;border:1px solid var(--line);border-radius:4px;padding:9px 11px;}
+.gt-doc{font-size:12px;color:var(--ink);}
+.linklike{background:none;border:none;color:var(--navy);text-decoration:underline;cursor:pointer;font:inherit;padding:0;}
+.fbtn.disabled{opacity:.55;pointer-events:none;}
+/* ── §56 Sales Intake ── */
+.ik-head{display:flex;align-items:center;gap:18px;flex-wrap:wrap;border-left:4px solid var(--teal);}
+.ik-head.ready{border-left-color:var(--ok);}
+.ik-head-l{flex:1;min-width:200px;}
+.ik-pn{font-family:"SF Mono",Menlo,Consolas,monospace;color:var(--amber);font-weight:700;font-size:16px;}
+.ik-cust{font-weight:600;color:var(--navy-dk);}
+.ik-head-r{display:flex;flex-direction:column;align-items:flex-end;gap:6px;min-width:210px;}
+.ik-meter{width:210px;}
+.ik-bar{height:9px;border-radius:5px;background:var(--line);overflow:hidden;}
+.ik-bar span{display:block;height:100%;border-radius:5px;transition:width .25s;}
+.ik-pct{font-size:11px;color:#6b7885;margin-top:3px;text-align:right;}
+.ik-misschip{display:inline-block;background:#fff;border:1px solid #e6cd98;color:#8a5a12;border-radius:10px;padding:1px 8px;margin:2px 3px 0;font-size:11px;}
+.ik-sec h2{display:flex;align-items:center;}
+.ik-note{color:#7c8a96;margin:-2px 0 10px;font-style:italic;}
+.ik-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;}
+.ik-f{display:flex;flex-direction:column;gap:3px;}
+.ik-f.full{grid-column:1 / -1;}
+.ik-l{font-size:12px;color:#54636f;font-weight:600;}
+.ik-req{color:var(--bad);margin-left:3px;}
+.ik-in{font:13px inherit;padding:6px 9px;border:1px solid var(--line);border-radius:4px;background:#fff;color:var(--ink);width:100%;}
+.ik-in:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-soft);}
+.ik-in.miss{border-color:#e6b06a;background:#fffaf0;}
+.ik-area{resize:vertical;min-height:34px;}
+.ik-chips{display:flex;flex-wrap:wrap;gap:6px;}
+.ik-chip{font:12px inherit;padding:4px 11px;border:1px solid var(--line);border-radius:16px;background:#fff;color:#54636f;cursor:pointer;}
+.ik-chip:hover{border-color:var(--teal);}
+.ik-chip.on{background:var(--teal-soft);border-color:var(--teal);color:#12718f;font-weight:600;}
 
 /* ── Project detail modal ── */
 .pd-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;margin:4px 0 12px;}
@@ -2962,6 +3000,11 @@ const FORMULATION_DEFAULTS = {
   archived:false,    // manual force-archive (hide from the active pipeline)
   keepActive:false,  // manual force-keep (pin to the active pipeline even without a signal)
   keepVisible:false, // §53 pin an older (pre-2025-05) project so it stays in the dashboard scope
+  // §56 SALES → R&D INTAKE — the front-door handoff checklist (Sales owns collecting complete
+  // customer requirements before R&D starts). Answers keyed by INTAKE_SECTIONS field key; a few
+  // identity keys mirror the canonical project fields (see INTAKE_MAP). Completeness gates the
+  // handoff: an incomplete request stays in "Pending Information" and cannot be submitted to R&D.
+  intake:{},
 };
 
 function emptyProject(pn) {
@@ -3050,6 +3093,80 @@ function formulaHash(p){
 }
 const isLocked = (p) => !!(p && p.formulaLock && p.formulaLock.locked);
 
+// ── Golden thread ────────────────────────────────────────────────────────────
+// The commit gate. One rule: the production formula must equal the formula the
+// customer signed on the MFSO. At sign-off we snapshot the formula's hash + COGS
+// (mfsoSignRecord). Thereafter goldenThread() re-checks the CURRENT formula hash
+// against that snapshot. If it drifts, the thread is BROKEN and no production
+// document (SO/MO/BOM/MMR) may be cut until the MFSO is re-signed to the current
+// formula. This is the P26053-1 case caught in-app before an MO is ever generated.
+// Build/patch the golden-thread anchor. Two ways a project becomes signed:
+//  • in-app sign-off on the current (locked) formula → verified BY CONSTRUCTION (the app
+//    generated the MFSO from this exact formula), so verified:true + anchor now.
+//  • externally-signed (customer emailed/mailed a signed MFSO) → verified:false until an
+//    Enova employee uploads that document and confirms it matches the committed formula.
+function mfsoSignRecord(p, opts){
+  opts = opts || {};
+  const verified = opts.verified !== false;                 // default true (in-app path)
+  const anchor = {
+    formulaHash: formulaHash(p),
+    cogsPerUnit: (p.cogsBreakdown && p.cogsBreakdown.cogsPerUnit != null) ? p.cogsBreakdown.cogsPerUnit : null,
+    composition: (p.ingredients||[]).filter(r => (Number(r.inputMg)||0) > 0)
+      .map(r => [ (r.item&&r.item.n)||r.importedAlt||r.importedName||'?', Number(r.inputMg)||0 ]),
+  };
+  return {
+    signed:true, by:CURRENT_ACTOR.email, byName:CURRENT_ACTOR.name, ts:nowISO(),
+    source: opts.source || 'inapp',
+    doc: opts.doc || null,                                   // uploaded signed document reference (Storage)
+    verified, verifiedBy: verified?CURRENT_ACTOR.email:null, verifiedByName: verified?CURRENT_ACTOR.name:null, verifiedTs: verified?nowISO():null,
+    // the anchor is only meaningful once verified; unverified records carry no live anchor
+    ...(verified ? anchor : { formulaHash:null, cogsPerUnit:null, composition:null }),
+  };
+}
+// Patch that VERIFIES an externally-signed MFSO against the current committed formula.
+// The employee is asserting: this uploaded signed document matches what the system holds.
+function mfsoVerifyPatch(p){
+  return { verified:true, verifiedBy:CURRENT_ACTOR.email, verifiedByName:CURRENT_ACTOR.name, verifiedTs:nowISO(),
+    formulaHash: formulaHash(p),
+    cogsPerUnit: (p.cogsBreakdown && p.cogsBreakdown.cogsPerUnit != null) ? p.cogsBreakdown.cogsPerUnit : null,
+    composition: (p.ingredients||[]).filter(r => (Number(r.inputMg)||0) > 0)
+      .map(r => [ (r.item&&r.item.n)||r.importedAlt||r.importedName||'?', Number(r.inputMg)||0 ]) };
+}
+function goldenThread(p){
+  const sig = p && p.mfsoSigned;
+  if (!sig || !sig.signed) return { state:'UNSIGNED', ok:false, blocked:false, reason:'MFSO not signed — production is not authorized.' };
+  // A signed MFSO must be VERIFIED against the committed formula before it can drive production.
+  // Externally-signed docs (and any legacy signed record with no anchor) start here and are BLOCKED.
+  if (sig.verified !== true || sig.formulaHash == null){
+    const hasDoc = !!(sig.doc && sig.doc.path);
+    return { state:'PENDING_VERIFY', ok:false, blocked:true, hasDoc, external:(sig.source && sig.source!=='inapp'),
+      reason: hasDoc
+        ? 'Signed MFSO is attached but not yet verified against the committed formula — an Enova employee must confirm the match before any production document is cut.'
+        : 'Signed MFSO is not verified — attach the customer-signed document and confirm it matches the committed formula before cutting production documents.' };
+  }
+  if (sig.formulaHash !== formulaHash(p)){
+    const was = (sig.cogsPerUnit != null) ? sig.cogsPerUnit : null;
+    const now = (p.cogsBreakdown && p.cogsBreakdown.cogsPerUnit != null) ? p.cogsBreakdown.cogsPerUnit : null;
+    return { state:'DRIFTED', ok:false, blocked:true, signedCogs:was, liveCogs:now,
+      cogsDelta:(was!=null&&now!=null)?(now-was):null,
+      reason:'The formula changed after the MFSO was signed — the production formula no longer matches what the customer signed.' };
+  }
+  return { state:'CLEAN', ok:true, blocked:false, reason:'Committed formula matches the verified signed MFSO.' };
+}
+// The MFSO must be signed against a frozen (approved & locked) formula, or the thread
+// has nothing to anchor to. Hard gate with an admin-override-logged escape (mirrors
+// passIntegrityGate). Returns TRUE to proceed.
+function passMfsoLockGate(proj, setProjects){
+  if (isLocked(proj)) return true;
+  if (!CURRENT_IS_ADMIN){ toast('Approve & lock the formula first — the MFSO must be signed against a frozen formula (Formulation page → Approve & lock).','err'); return false; }
+  const msg = `⚠ The formula for ${proj.pn} is NOT approved & locked.\n\n`
+    + `Signing the MFSO now anchors the golden thread to an UNFROZEN formula — it could change afterward with no signature to match. Best practice: approve & lock first.\n\n`
+    + `Proceed anyway and record an OVERRIDE by ${CURRENT_ACTOR.name||CURRENT_ACTOR.email||'this user'}?`;
+  if (typeof window!=='undefined' && window.confirm && !window.confirm(msg)) return false;
+  logAudit(setProjects, proj.pn, 'MFSO signed on UNLOCKED formula — OVERRIDE', 'Formula was not approved & locked at sign time');
+  return true;
+}
+
 // ── Auditable workbook (Cover · Master Formula · Batch Cost Build · Bid) ──────
 // Pure data builder (unit-testable); mirrors the Master Formula + Master Bid
 // layout from the project's captured formula + the (approved) cost snapshot.
@@ -3136,6 +3253,8 @@ function migrateProject(raw){
   if (!p.approvals || typeof p.approvals!=='object') p.approvals = {};
   // §49 commitment: ensure the commit object exists (backfills every legacy record on load).
   if (!p.commit || typeof p.commit!=='object') p.commit = { nda:false, ndaDate:null, poNumber:'', soIssued:false, paying:false, payingNote:'', ts:null };
+  // §56 intake answers object (backfills every legacy record on load).
+  if (!p.intake || typeof p.intake!=='object' || Array.isArray(p.intake)) p.intake = {};
   p.archived = !!p.archived; p.keepActive = !!p.keepActive; p.keepVisible = !!p.keepVisible;
   // §48 readiness: keep null OR a well-formed object (never a stray scalar); normalize sub-structures.
   if (p.readiness != null){
@@ -3205,6 +3324,15 @@ function validateProject(p){
       (rc.errors||[]).forEach(e => { if (COVERED[e.code]) return; (BLOCK[e.code]?errors:warnings).push('⛬ '+e.message); });
       (rc.warnings||[]).forEach(w => { if (!COVERED[w.code]) warnings.push('⛬ '+w.message); });
     }
+  } catch(_){}
+  // ── Golden thread (advisory here; hard block is at production-doc generation) ──
+  // Surfaces a signed project whose formula drifted from what the customer signed so
+  // it shows up on the Readiness board. Does NOT block the quote — the block is scoped
+  // to cutting SO/MO/BOM/MMR, the only place the mismatch actually reaches production.
+  try {
+    const gt = goldenThread(p);
+    if (gt.state === 'DRIFTED') warnings.push('⛓ Golden thread broken — the formula changed since the MFSO was signed; re-sign before cutting production documents.');
+    else if (gt.state === 'PENDING_VERIFY') warnings.push('⛓ Signed MFSO not verified — attach the customer-signed document and confirm it matches the committed formula before production.');
   } catch(_){}
   return { errors, warnings, ok: errors.length===0 };
 }
@@ -5855,7 +5983,7 @@ function searchInvF(q, cat) {
 }
 function bestGuessF(name) {
   if (!name) return null;
-  const stop = new Set(["the","and","of","for","with","extract","powder","mg","mcg","iu","blend","from","liquid","natural","organic","kosher","usp","as","per"]);
+  const stop = new Set(["the","and","of","for","with","extract","powder","mg","mcg","iu","blend","from","liquid","natural","organic","kosher","usp","as","per","water","ro","solvent","purified","deionized","aqua","filtered","distilled"]);
   // Keep short but DISTINCTIVE micronutrient tokens (vitamin letters, B-numbers, coq10, dha…)
   // that the old length>2 filter dropped — dropping them made "Vitamin C" collide with "Vitamin E".
   const MICRO = /^(a|b|c|d|e|k|d3|k2|b1|b2|b3|b5|b6|b9|b12|q10|coq10|dha|epa|mct|nac|nmn|gaba|5htp)$/;
@@ -5865,17 +5993,21 @@ function bestGuessF(name) {
   if (!words.length) return null;
   const weight = (w) => w.length>4 ? 2 : (w.length<=2 ? 1.5 : 1);   // short distinctive tokens matter
   const total = words.reduce((s,w)=>s+weight(w),0);
-  let best=null, bestScore=0;
+  let best=null, bestScore=0, bestHits=0;
   for (const item of INVENTORY) {
-    const hay=item.d.toLowerCase(); let sc=0;
+    const hay=item.d.toLowerCase(); let sc=0, hits=0;
     for (const w of words) {
       // word-boundary for short tokens so "c" hits "Vitamin C" but not "Calcium"/"Clear"
       const present = w.length<=2 ? new RegExp("\\b"+w+"\\b").test(hay) : hay.includes(w);
-      if (present) sc += weight(w);
+      if (present) { sc += weight(w); hits++; }
     }
-    if(sc>bestScore){bestScore=sc;best=item;}
+    if(sc>bestScore){bestScore=sc;best=item;bestHits=hits;}
   }
-  return bestScore>=Math.max(1.5, total*0.4) ? {item:best, conf:Math.min(1, bestScore/total)} : null;
+  // Require real evidence: ≥2 distinct tokens matched, OR the whole name is a single distinctive
+  // (≥6-char) token. A lone generic token can no longer carry a match — that is what turned
+  // "R/O Water" into "Whey Protein Isolate (water soluble)" and added $11/unit.
+  const strong = bestHits>=2 || (words.length===1 && words[0].length>=6);
+  return (strong && bestScore>=Math.max(1.5, total*0.4)) ? {item:best, conf:Math.min(1, bestScore/total)} : null;
 }
 
 function FInvSearch({val, onSelect, placeholder}) {
@@ -6337,19 +6469,23 @@ function FIntakePanel({onApply, attachments, autoTrigger, autoText, onAutoDone})
       // dangerous fuzzy name-match. If the catalog knows the ingredient it supplies the real RM# (→ a
       // direct inventory match) and/or a cost; if it doesn't know it, we get null and stay unmatched
       // rather than guessing. Only if the catalog also misses do we fall back to the old fuzzy (AI path).
+      let srcPot = null;
       if (!alt && userUnitCost==null && typeof sourcingResolve==='function'){
         const src = sourcingResolve(nm);
         if (src){
           if (src.alt && INV_IX[src.alt]) direct = { item: INV_IX[src.alt], score: 900, exact:false, catalog:true };
           else { if (src.alt) alt = src.alt; if (src.costPerG!=null) userUnitCost = src.costPerG; }
+          if (Number(src.potencyPct)>0) srcPot = Number(src.potencyPct);   // F6: honor the catalog's standardized potency
         }
       }
       // NEVER fuzzy-match a row that carries an explicit RM#, a sheet cost, or a catalog hit. An unresolved
       // RM# (e.g. R/O Water ALT-RP-0000) stays UNMATCHED — never fuzzed to a wrong SKU. That fallback is
       // what turned "R/O Water" into "Whey Protein Isolate (water soluble)" and added $11/unit.
-      const noFuzzy = !!alt || userUnitCost!=null;
+      // Never fuzzy-guess a row that has an RM#, a cost, a catalog hit, OR a non-positive dose
+      // (a 0-mg IU/CFU/"N/A" row would otherwise pick up a wrong SKU that activates on dose entry).
+      const noFuzzy = !!alt || userUnitCost!=null || !(Number(i.mgPerServing)>0);
       return { name:nm, mg:i.mgPerServing,
-        potencyPct: (Number(i.potencyPct)>0 && Number(i.potencyPct)<=100) ? Number(i.potencyPct) : 100,
+        potencyPct: (Number(i.potencyPct)>0 && Number(i.potencyPct)<=100) ? Number(i.potencyPct) : (srcPot!=null ? srcPot : 100),
         overage: (i.overage!=null ? i.overage : seedOv), unit:i.rawUnitAsWritten,
         alt, userUnitCost,
         match: direct || (noFuzzy ? null : bestGuessF(nm)) };
@@ -6904,7 +7040,13 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
   };
 
   const noMatch = (proj.ingredients||[]).filter(r=>!r.item);
-  const noCost  = calcIng.filter(r=>r.item && (!r.fresh || r.fresh.u===0));
+  // "$0 — COGS understated" must also catch a DOSED but UNMATCHED real ingredient (e.g. Organic Honey
+  // at 156 g contributing $0), not just matched-but-MISys-$0 items — otherwise a real material hides
+  // behind the softer "not matched" notice. Never invents a cost; only flags the gap.
+  const noCost  = calcIng.filter(r => (Number(r.inputMg)>0) && (
+    (r.item && (!r.fresh || r.fresh.u===0)) ||   // matched, but MISys carries no cost
+    (!r.item && !(r.cPS>0))                        // dosed, unmatched, no resolved cost
+  ));
 
   const addIng = () => { if (locked) return; upd({ ingredients:[...(proj.ingredients||[]), {id:Math.random(), item:null, inputMg:0, potencyPct:100}] }); logAudit(setProjects, proj.pn, 'Ingredient row added', ''); };
   const remIng = id => { if (locked) return; const r=(proj.ingredients||[]).find(x=>x.id===id); upd({ ingredients:(proj.ingredients||[]).filter(x=>x.id!==id) }); logAudit(setProjects, proj.pn, 'Ingredient removed', r?((r.item&&r.item.d)||r.importedName||''):''); };
@@ -6936,10 +7078,16 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
         : (isLiquidForm && Number(proj.servingSize)>0 ? Number(proj.servingSize) : undefined) });
     const sysOnly = (out.rows||[]).filter(r => r.source && r.source !== 'request');
     if (!sysOnly.length) { toast((out.warnings&&out.warnings[0]) || ('No deterministic system for '+proj.dosageForm+' yet.'), 'warn'); return; }
-    const sysRows = sysOnly.map(r => ({ id:Math.random(),
+    // F3: do NOT re-add a house-standard SKU the formula already carries (e.g. an imported Master
+    // Formula whose Stevia / R/O Water / preservatives are plain rows) — that produced a duplicate
+    // system (two Stevia, two water fills, double-counted mass + cost). Keep every existing row; only
+    // add system components for SKUs not already present.
+    const haveAlts = new Set(activeRows.map(r => r.importedAlt || (r.item && r.item.n)).filter(Boolean));
+    const sysRows = sysOnly.filter(r => !(r.alt && haveAlts.has(r.alt))).map(r => ({ id:Math.random(),
       item: (r.alt && typeof INV_IX!=='undefined' && INV_IX[r.alt]) ? INV_IX[r.alt] : null,
       inputMg: r.mg, potencyPct: 100, importedName: r.name, importedAlt: r.alt||null,
       enovaRole: r.role||null, enovaNote: r.note||null, enovaStandard: true, enovaConfirm: !!r.confirm, aiSuggested: true }));
+    if (!sysRows.length) { toast('Formula already carries the house-standard system for '+proj.dosageForm+' — nothing to add.','ok'); return; }
     upd({ ingredients:[...activeRows, ...sysRows] });
     logAudit(setProjects, proj.pn, 'Turnkey formula built (Enova Formulator)', [(out.notes||[]).join(' · '), ...(out.warnings||[])].filter(Boolean).join(' | '));
     const warn = (out.warnings||[]).length ? ' ⚠ '+out.warnings[0] : '';
@@ -7845,26 +7993,299 @@ function MFSOEditor({ proj, upd, signed }){
   );
 }
 
+/* ══════════════ §56 SALES → R&D INTAKE (handoff checklist + completeness gate) ══════════════
+   Sales owns collecting complete customer requirements before R&D starts. This is the FRONT
+   door of the golden thread: an incomplete request stays in "Pending Information" and cannot be
+   handed to R&D. Data-driven from INTAKE_SECTIONS so the 12-section checklist stays one config.
+   Nothing here promises feasibility/compliance/cost — it only captures + gates completeness. */
+const INTAKE_MAP = { customerName:'customer', productName:'product', salesRep:'rep' };  // mirror canonical project fields
+const IK_YN = ['Yes','No'], IK_TRI = ['Yes','No','N/A'];
+const inAny = (val,k,...opts)=>{ const a=val(k); return Array.isArray(a) && opts.some(o=>a.includes(o)); };
+const INTAKE_SECTIONS = [
+  { n:1, title:'Create & identify the project', fields:[
+    { k:'customerName', label:'Customer name', type:'text', req:true },
+    { k:'clientContact', label:'Client contact (name / email / phone)', type:'text', req:true, full:true },
+    { k:'salesRep', label:'Enova Sales Representative', type:'text', req:true },
+    { k:'productName', label:'Proposed product name', type:'text', req:true },
+    { k:'projectType', label:'Project type', type:'select', req:true,
+      opts:['New product','Reformulation','Reorder with changes','Customer-provided formula','Competitive-match product'] },
+    { k:'completionDate', label:'Requested completion / delivery date', type:'text', req:true, ph:'e.g. 2026-10-15' },
+    { k:'priority', label:'Priority', type:'select', req:true, opts:['Standard','High','Urgent'] },
+    { k:'priorityReason', label:'Reason for urgency', type:'text', req:(v)=>['High','Urgent'].includes(v('priority')), full:true },
+  ]},
+  { n:2, title:'Define the product concept', note:'R&D reviews requested claims/ingredients. Sales does not promise a claim, ingredient, dosage, or name is compliant before R&D review.', fields:[
+    { k:'purpose', label:'Product purpose / intended benefit', type:'area', req:true, full:true },
+    { k:'targetConsumer', label:'Target consumer', type:'multi', req:true, full:true,
+      opts:['Adults','Children','Men','Women','Pregnant/Nursing','Other'] },
+    { k:'childAgeRange', label:'Exact age range (if Children)', type:'text', req:(v)=>inAny(v,'targetConsumer','Children') },
+    { k:'countries', label:'Country/countries of sale', type:'text', req:true },
+    { k:'salesPlatform', label:'Intended sales platform', type:'multi', req:true, full:true,
+      opts:['Retail','Amazon','Online','Practitioner','Export','Other'] },
+    { k:'referenceProduct', label:'Reference/competitor product, formula, or photo (if any)', type:'area', full:true },
+    { k:'claims', label:'Claims / marketing statements the customer wants', type:'area', req:true, full:true },
+    { k:'certExpectation', label:'Specific certification or regulatory position expected?', type:'text', req:true, full:true, ph:'e.g. NSF, Non-GMO, Organic, Kosher — or None' },
+  ]},
+  { n:3, title:'Complete formula requirements', note:'A customer example/label is reference only. R&D verifies legality, potency, serving size, capsule fit, feasibility, safety, and label declaration.', fields:[
+    { k:'dosageForm', label:'Desired dosage form', type:'select', req:true,
+      opts:['Capsule','Tablet','Powder','Stick pack','Gummy','Liquid','Softgel','Other'] },
+    { k:'ingredientList', label:'Complete ingredient list', type:'area', req:true, full:true },
+    { k:'activeAmounts', label:'Desired amount of each active per serving', type:'area', req:true, full:true },
+    { k:'ingredientForm', label:'Required form / source / concentration / extract ratio / standardization / strain / potency', type:'area', full:true },
+    { k:'brandedIngredients', label:'Required branded / trademarked ingredients', type:'area', full:true },
+    { k:'mustHave', label:'Must-have ingredients', type:'text' },
+    { k:'notPermitted', label:'Ingredients not permitted', type:'text' },
+    { k:'restrictions', label:'Dietary / label restrictions', type:'multi', req:true, full:true,
+      opts:['None','Vegan','Vegetarian','Non-GMO','Organic','Kosher','Halal','Allergen-free','Other'] },
+    { k:'servingSizeReq', label:'Desired serving size', type:'text', req:true },
+    { k:'servingsPerContainer', label:'Servings per container', type:'text', req:true },
+    { k:'suggestedUse', label:'Suggested use / daily intake', type:'text', req:true },
+    { k:'maxSize', label:'Max product size / serving weight (if any)', type:'text' },
+    { k:'sensory', label:'Flavor, sweetness, color, texture requirements', type:'area', req:true, full:true },
+    { k:'excipientRestrictions', label:'Excipient restrictions (no mag stearate / silica / MCC / artificials, etc.)', type:'area', req:true, full:true },
+    { k:'targetSFP', label:'Customer has a target Supplement Facts Panel?', type:'select', opts:IK_YN },
+  ]},
+  { n:4, title:'Ingredient documentation', note:'R&D cannot confirm a formula/label from a marketing brochure. Required for any customer-requested, customer-supplied, or trademarked ingredient.', fields:[
+    { k:'ingredientDocsStatus', label:'Ingredient docs (spec, COA, TDS, SDS, allergen, origin, GMO, cert, trademark license)', type:'select', req:true,
+      opts:['Collected','Pending','N/A — no branded/customer-supplied ingredient'] },
+    { k:'ingredientDocsNotes', label:'What is on file / still needed', type:'area', full:true },
+    { k:'sourcingNeeded', label:'Sourcing required (pricing / lead time / MOQ / quantity)?', type:'select', opts:IK_TRI, req:true },
+  ]},
+  { n:5, title:'Customer-supplied materials', note:'Cannot be assumed from a previous product. Confirm explicitly.', fields:[
+    { k:'customerSupplies', label:'Customer will supply', type:'multi', req:true, full:true,
+      opts:['None','Raw materials','Bottles','Caps/closures','Labels','Boxes/cartons','Film/foil','Scoops/droppers/desiccants/seals'] },
+    { k:'suppliedMaterialDocs', label:'Docs for supplied materials (supplier/item#, spec, drawing, COA/COC, qty, delivery, sample)', type:'select',
+      req:(v)=>{ const s=v('customerSupplies')||[]; return s.length>0 && !(s.length===1 && s[0]==='None'); },
+      opts:['Collected','Pending','N/A'] },
+    { k:'useCustomerPackaging', label:'Use customer-supplied packaging or Enova inventory?', type:'select', req:true,
+      opts:['Enova inventory','Customer-supplied','Mixed — see notes'] },
+  ]},
+  { n:6, title:'Packaging requirements', note:'Label dimensions & packaging drawings must be provided early enough for Quality and R&D to verify fit and label space.', fields:[
+    { k:'containerSpec', label:'Bottle/container type, size, color, material', type:'area', req:true, full:true },
+    { k:'fillCount', label:'Fill count / net quantity', type:'text', req:true },
+    { k:'capSpec', label:'Cap size, style, color, liner', type:'text' },
+    { k:'formPackSpec', label:'Capsule/gummy/powder/stick/liquid specifics (shell, shape, scoop, fill wt, dropper, etc.)', type:'area', full:true },
+    { k:'labelApplication', label:'Label printed on bottle or applied separately?', type:'select', req:true, opts:['Applied label','Printed on bottle','TBD'] },
+    { k:'tamperEvident', label:'Tamper-evident packaging required?', type:'select', req:true, opts:IK_TRI },
+    { k:'labelDims', label:'Label dimensions / container drawing', type:'select', req:true, opts:['Provided','Pending','N/A'] },
+    { k:'masterCase', label:'Master-case configuration (if established)', type:'text' },
+  ]},
+  { n:7, title:'Commercial requirements', note:'Sales does not promise final cost, feasibility, or delivery timing until R&D, Purchasing, and Production review.', fields:[
+    { k:'initialQty', label:'Initial order quantity', type:'text', req:true },
+    { k:'annualVolume', label:'Expected annual volume', type:'text', req:true },
+    { k:'tierQuantities', label:'Requested tier quantities for pricing', type:'text', req:true },
+    { k:'targetPrice', label:"Customer's target price", type:'text' },
+    { k:'commDeliveryDate', label:'Required delivery date', type:'text', req:true },
+    { k:'competitiveBid', label:'Competitive bid required?', type:'select', req:true, opts:IK_YN },
+    { k:'paidOrDevFee', label:'Paid project or development fee?', type:'select', req:true, opts:['Paid project','Development fee','Free / spec'] },
+    { k:'sourcingRestrictions', label:'Special sourcing / minimum-order restrictions', type:'text', full:true },
+  ]},
+  { n:8, title:'Sample requirements', note:'If the formula is modified after sample approval, R&D determines whether another sample and approval are required.', fields:[
+    { k:'sampleRequired', label:'Laboratory sample required?', type:'select', req:true, opts:IK_YN },
+    { k:'sampleCount', label:'Number of samples', type:'text', req:(v)=>v('sampleRequired')==='Yes' },
+    { k:'sampleSpecs', label:'Sample flavor / color / texture / packaging', type:'area', req:(v)=>v('sampleRequired')==='Yes', full:true },
+    { k:'sampleShipTo', label:'Shipping contact & address', type:'area', req:(v)=>v('sampleRequired')==='Yes', full:true },
+    { k:'sampleEvalCriteria', label:'Specific evaluation criteria', type:'area', full:true },
+    { k:'sampleDeadline', label:'Customer feedback deadline', type:'text', req:(v)=>v('sampleRequired')==='Yes' },
+  ]},
+  { n:9, title:'Testing, documentation & stability', note:'Every field must be answered — select No or N/A rather than leaving blank. If the MFSO is not signed, company defaults apply (mfg-date coding, no heavy-metals testing).', fields:[
+    { k:'potencyTesting', label:'Potency testing', type:'select', req:true, opts:IK_TRI },
+    { k:'microTesting', label:'Microbiological testing', type:'select', req:true, opts:IK_TRI },
+    { k:'heavyMetals', label:'Heavy-metals testing', type:'select', req:true, opts:IK_TRI },
+    { k:'thirdPartyTesting', label:'Third-party testing', type:'select', req:true, opts:IK_TRI },
+    { k:'customAnalytes', label:'Customer-specific analytes / limits / methods', type:'select', req:true, opts:IK_TRI },
+    { k:'coaRequired', label:'Certificate of Analysis required', type:'select', req:true, opts:IK_TRI },
+    { k:'certFreeSale', label:'Certificate of Free Sale', type:'select', req:true, opts:IK_TRI },
+    { k:'certOrigin', label:'Certificate of Origin', type:'select', req:true, opts:IK_TRI },
+    { k:'otherExportCerts', label:'Other export / customer certificates', type:'select', req:true, opts:IK_TRI },
+    { k:'shelfLife', label:'Requested shelf life / expiration period', type:'text', req:true },
+    { k:'stabilityTesting', label:'Stability-testing selection', type:'select', req:true, opts:IK_TRI },
+    { k:'dateCode', label:'Date-code preference', type:'select', req:true, opts:['Manufacturing date','Expiration date','Best-by date'] },
+    { k:'certAddressInfo', label:'Country / address info needed for certificates', type:'area', full:true },
+  ]},
+  { n:10, title:'Submit the complete project to R&D', note:'Keep all customer decisions in writing. Change status from Pending Information only when the handoff is complete.', fields:[
+    { k:'docsUploaded', label:'All information & supporting documents uploaded to the project?', type:'select', req:true, opts:IK_YN },
+    { k:'requestsDocumented', label:"Customer's requests clearly documented?", type:'select', req:true, opts:IK_YN },
+    { k:'specialDeadline', label:'Any special deadline, customer commitment, or unusual requirement for R&D', type:'area', full:true },
+  ]},
+];
+function intakeVal(p, k){ const m=INTAKE_MAP[k]; if (m) return p[m]==null?'':p[m]; const v=(p.intake||{})[k]; return v==null?'':v; }
+function intakeFilled(v, type){ if (type==='multi') return Array.isArray(v) && v.length>0; return v!=null && String(v).trim()!==''; }
+function intakeCompleteness(p){
+  const val = (k)=>intakeVal(p,k);
+  const sections = INTAKE_SECTIONS.map(sec=>{
+    let req=0, done=0; const missing=[];
+    sec.fields.forEach(f=>{ const isReq = typeof f.req==='function' ? !!f.req(val) : !!f.req; if(!isReq) return;
+      req++; if (intakeFilled(val(f.k), f.type)) done++; else missing.push(f.label); });
+    return { n:sec.n, title:sec.title, req, done, missing };
+  });
+  const req = sections.reduce((a,s)=>a+s.req,0), done = sections.reduce((a,s)=>a+s.done,0);
+  const missing = sections.flatMap(s=>s.missing.map(l=>({ section:s.n, title:s.title, label:l })));
+  return { sections, req, done, missing, pct: req? Math.round(done/req*100):100, ready: req>0 ? done===req : false };
+}
+
+function IntakePage({ projects, setProjects, onToggleNav, targetPn, onTargetConsumed }){
+  const { isAdmin } = useRole();
+  const [pn, setPn] = useState(null);
+  useEffect(() => { if (targetPn){ setPn(targetPn); if (onTargetConsumed) onTargetConsumed(); } }, [targetPn]);
+  const proj = projects.find(p => p.pn === pn) || null;
+  const upd = (patch) => setProjects(prev => prev.map(p => p.pn === pn ? { ...p, ...patch } : p));
+  const setField = (k, v) => { const m = INTAKE_MAP[k]; if (m) upd({ [m]: v }); else upd({ intake: { ...((proj&&proj.intake)||{}), [k]: v } }); };
+  const toggleMulti = (k, opt) => { const cur = Array.isArray(intakeVal(proj,k))?intakeVal(proj,k):[]; setField(k, cur.includes(opt) ? cur.filter(x=>x!==opt) : [...cur, opt]); };
+
+  const createIntake = () => {
+    const freshPn = uniquePN(projects, nextPN(projects));
+    const np = migrateProject({ ...emptyProject(freshPn), stage:'Pending Information', dateReceived:new Date().toISOString().slice(0,10) });
+    setProjects(prev => [np, ...prev]);
+    dbAudit(freshPn, 'New intake started', 'Pending Information');
+    setPn(freshPn);
+  };
+  const submit = () => {
+    if (!proj) return;
+    const c = intakeCompleteness(proj);
+    if (!c.ready){ toast(`Intake incomplete — ${c.req-c.done} required field(s) still needed before R&D handoff.`,'err'); return; }
+    if (!isAdmin){ toast('Only an Enova admin can hand a project to R&D.','err'); return; }
+    setProjects(prev => prev.map(x => x.pn===pn
+      ? withAudit({ ...x, stage:'Formulation/Sample Development', intake:{ ...(x.intake||{}), submittedAt:nowISO(), submittedBy:CURRENT_ACTOR.email } },
+          'Sales intake complete → handed off to R&D', `${c.done}/${c.req} required captured`)
+      : x));
+    dbAudit(pn, 'Sales intake complete → R&D handoff', (CURRENT_ACTOR.name||CURRENT_ACTOR.email||'')+` · ${c.done}/${c.req} required`);
+    toast('Intake complete — handed off to R&D.','ok');
+  };
+  const markPending = () => {
+    setProjects(prev => prev.map(x => x.pn===pn ? withAudit({ ...x, stage:'Pending Information' }, 'Kept in Pending Information', 'Intake still being collected') : x));
+    toast('Kept in Pending Information.','ok');
+  };
+
+  if (!proj){
+    return (
+      <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+        <div className="gen-top"><button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button><div className="gen-title">Sales Intake — New Project Handoff</div></div>
+        <div className="gen-body">
+          <div className="panel">
+            <h2>Start or recall an intake</h2>
+            <p className="fsmall" style={{marginBottom:10}}>Sales collects the complete customer requirements here <strong>before</strong> a project goes to R&amp;D. An incomplete request stays in <strong>Pending Information</strong> and cannot be handed off — the front-door gate of the golden thread.</p>
+            <div className="fbrow" style={{marginBottom:12}}><button className="fbtn ok" onClick={createIntake}>➕ Start new intake</button></div>
+            <ProjectPicker projects={projects} activePn={null} onSelect={(x)=>setPn(x)}/>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const c = intakeCompleteness(proj);
+  const submittedAt = proj.intake && proj.intake.submittedAt;
+  const val = (k)=>intakeVal(proj,k);
+
+  const renderField = (f) => {
+    const isReq = typeof f.req==='function' ? !!f.req(val) : !!f.req;
+    const v = val(f.k);
+    const filled = intakeFilled(v, f.type);
+    const miss = isReq && !filled;
+    const lab = <label className="ik-l">{f.label}{isReq && <span className="ik-req">*</span>}</label>;
+    let ctl;
+    if (f.type==='multi'){
+      ctl = <div className="ik-chips">{f.opts.map(o => { const on=Array.isArray(v)&&v.includes(o);
+        return <button key={o} type="button" className={"ik-chip"+(on?" on":"")} onClick={()=>toggleMulti(f.k,o)}>{o}</button>; })}</div>;
+    } else if (f.type==='select'){
+      ctl = <select className={"ik-in"+(miss?" miss":"")} value={v||''} onChange={e=>setField(f.k, e.target.value)}>
+        <option value="">— select —</option>{f.opts.map(o=><option key={o} value={o}>{o}</option>)}</select>;
+    } else if (f.type==='area'){
+      ctl = <textarea className={"ik-in ik-area"+(miss?" miss":"")} rows={2} value={v||''} placeholder={f.ph||''} onChange={e=>setField(f.k, e.target.value)}/>;
+    } else {
+      ctl = <input className={"ik-in"+(miss?" miss":"")} value={v||''} placeholder={f.ph||''} onChange={e=>setField(f.k, e.target.value)}/>;
+    }
+    return <div className={"ik-f"+(f.full?" full":"")+(miss?" ismiss":"")} key={f.k}>{lab}{ctl}</div>;
+  };
+
+  return (
+    <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+      <div className="gen-top">
+        <button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+        <div className="gen-title">Sales Intake</div>
+        <select className="gen-proj" value={pn||''} onChange={e=>setPn(e.target.value)}>
+          {projects.map(p => <option key={p.pn} value={p.pn}>{p.pn} — {cleanCustomer(p.customer)} — {(p.product||'').slice(0,36)}</option>)}
+        </select>
+        <button className="fbtn ok sm" style={{marginLeft:8}} onClick={createIntake}>➕ New</button>
+      </div>
+
+      <div className="gen-body">
+        {/* Completeness header */}
+        <div className={"panel ik-head "+(c.ready?"ready":"")}>
+          <div className="ik-head-l">
+            <div className="ik-pn">{proj.pn}</div>
+            <div className="ik-cust">{cleanCustomer(proj.customer)||'—'} · <span className="fsmall">{proj.product||'unnamed product'}</span></div>
+            <div className="fsmall" style={{marginTop:2,color:'#7c8a96'}}>Stage: <strong>{normalizeStage(proj.stage)}</strong>{submittedAt && <> · handed to R&amp;D {fmtTs(submittedAt)}</>}</div>
+          </div>
+          <div className="ik-head-r">
+            <div className="ik-meter"><div className="ik-bar"><span style={{width:c.pct+'%', background:c.ready?'var(--ok)':'var(--teal)'}}/></div>
+              <div className="ik-pct">{c.done}/{c.req} required · <strong>{c.pct}%</strong></div></div>
+            <span className={"fbadge "+(c.ready?"ok":"warn")}>{c.ready?"✓ Ready for R&D handoff":"Pending information"}</span>
+          </div>
+        </div>
+
+        {!c.ready && c.missing.length>0 && (
+          <div className="falert warn"><strong>{c.missing.length} required item(s) still needed</strong> before this can go to R&amp;D: {c.missing.slice(0,8).map((m,i)=><span key={i} className="ik-misschip">§{m.section} {m.label}</span>)}{c.missing.length>8 && <span className="fsmall"> +{c.missing.length-8} more…</span>}</div>
+        )}
+
+        <div className="fbrow" style={{margin:'2px 0 14px'}}>
+          <button className="fbtn ok" disabled={!c.ready || !isAdmin} title={!isAdmin?'Only an admin can hand off to R&D':(!c.ready?'Complete all required fields first':'')} onClick={submit}>📤 Submit complete handoff → R&amp;D</button>
+          <button className="fbtn sec sm" onClick={markPending}>Keep in Pending Information</button>
+          <span className="fsmall" style={{color:'#7c8a96',alignSelf:'center'}}>Answers save as you type. Sales does not promise claim/ingredient/cost/feasibility before R&amp;D review.</span>
+        </div>
+
+        {INTAKE_SECTIONS.map(sec => {
+          const sc = c.sections.find(s=>s.n===sec.n) || {req:0,done:0};
+          return (
+          <div className="panel ik-sec" key={sec.n}>
+            <h2>{sec.n}. {sec.title}
+              <span className={"fbadge "+(sc.req===0?"neutral":(sc.done===sc.req?"ok":"warn"))} style={{marginLeft:"auto"}}>{sc.req===0?"optional":`${sc.done}/${sc.req}`}</span></h2>
+            {sec.note && <p className="fsmall ik-note">{sec.note}</p>}
+            <div className="ik-grid">{sec.fields.map(renderField)}</div>
+          </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function DocumentsPage({ projects, setProjects, onToggleNav, targetPn, onTargetConsumed }){
   const { isAdmin } = useRole();               // only admins may sign the MFSO → production
   const [pn, setPn] = useState(null);          // opens BLANK — recall a project
   const [confirmSign, setConfirmSign] = useState(false);
+  const [uploading, setUploading] = useState(false);      // signed-doc upload in flight
+  const [confirmVerify, setConfirmVerify] = useState(false);
   // Opened from a Project Page "MFSO" jump → focus that project (one-shot).
   useEffect(() => { if (targetPn) { setPn(targetPn); if (onTargetConsumed) onTargetConsumed(); } }, [targetPn]);
   const proj = projects.find(p => p.pn === pn) || null;
   const signed = !!(proj && proj.mfsoSigned && proj.mfsoSigned.signed);
   const locked = proj ? isLocked(proj) : false;
+  const gt = proj ? goldenThread(proj) : null;          // golden-thread state (CLEAN/DRIFTED/PENDING_VERIFY/…)
+  const threadBroken = !!(gt && gt.blocked);            // DRIFTED or PENDING_VERIFY → production docs hard-blocked
+  const gtDrift   = !!(gt && gt.state==='DRIFTED');
+  const gtPending = !!(gt && gt.state==='PENDING_VERIFY');
+  const signedDoc = (proj && proj.mfsoSigned && proj.mfsoSigned.doc) || null;
+  const blockLabel = gtDrift ? 'formula drifted' : (gtPending ? 'verify signed MFSO' : '');
   const upd = (patch) => setProjects(prev => prev.map(p => p.pn === pn ? { ...p, ...patch } : p));
 
   const signMFSO = () => {
+    if (!passMfsoLockGate(proj, setProjects)) return;                                // golden thread: sign against a frozen formula
     if (!passIntegrityGate(proj, setProjects, 'MFSO signed → production')) return;   // no production run on understated cost without a logged override
     setProjects(prev => prev.map(x => {
       if (x.pn !== pn) return x;
-      const sig = { signed:true, by:CURRENT_ACTOR.email, byName:CURRENT_ACTOR.name, ts:nowISO() };
-      return withAudit({ ...x, mfsoSigned:sig, stage:'In Production' }, 'MFSO signed by customer', 'Authorized → In Production');
+      return withAudit({ ...x, mfsoSigned:mfsoSignRecord(x), stage:'In Production' }, 'MFSO signed by customer', 'Authorized → In Production · golden thread anchored');
     }));
     dbAudit(pn, 'E-SIGNATURE · MFSO signed → In Production', 'Authorized by '+(CURRENT_ACTOR.name||CURRENT_ACTOR.email||''));
     setConfirmSign(false);
+  };
+  const resignMFSO = () => {
+    if (!isAdmin){ toast('Only an admin can re-sign the MFSO.','err'); return; }
+    if (!passMfsoLockGate(proj, setProjects)) return;
+    if (!passIntegrityGate(proj, setProjects, 'MFSO re-signed → production')) return;
+    setProjects(prev => prev.map(x => x.pn===pn
+      ? withAudit({ ...x, mfsoSigned:mfsoSignRecord(x) }, 'MFSO RE-SIGNED to current formula', 'Golden thread restored — customer approved the changed formula')
+      : x));
+    dbAudit(pn, 'E-SIGNATURE · MFSO re-signed (formula changed)', 'Re-anchored by '+(CURRENT_ACTOR.name||CURRENT_ACTOR.email||''));
   };
   const unsignMFSO = async () => {
     if (!(await confirmDialog({ message:'Revert the MFSO signature for '+pn+'? This takes the project back out of the signed/production state.', title:'Revert MFSO signature', confirmLabel:'Revert', danger:true }))) return;
@@ -7872,6 +8293,53 @@ function DocumentsPage({ projects, setProjects, onToggleNav, targetPn, onTargetC
       ? withAudit({ ...x, mfsoSigned:{ ...(x.mfsoSigned||{}), signed:false, revokedBy:CURRENT_ACTOR.email, revokedTs:nowISO() } }, 'MFSO signature reverted', '')
       : x));
     dbAudit(pn, 'MFSO signature reverted', 'Reverted by '+(CURRENT_ACTOR.name||CURRENT_ACTOR.email||''));
+  };
+  // Upload the customer-signed MFSO (emailed/mailed → filed here). Stored immutably in the
+  // private 'mfso-signed' bucket; the reference is attached to the record's anchor.
+  const uploadSignedDoc = async (file) => {
+    if (!file) return;
+    if (typeof sb==='undefined' || !sb || !sb.storage){ toast('Storage is unavailable right now — the signed document could not be uploaded.','err'); return; }
+    const okType = /pdf|png|jpe?g|tiff?|heic/i.test(file.type||'') || /\.(pdf|png|jpe?g|tiff?|heic)$/i.test(file.name||'');
+    if (!okType){ toast('Upload a PDF or image scan of the signed MFSO.','err'); return; }
+    if (file.size > 26214400){ toast('File is larger than 25 MB.','err'); return; }
+    setUploading(true);
+    try {
+      const safe = (file.name||'signed-mfso').replace(/[^\w.\-]+/g,'_');
+      const path = `${pn}/${Date.now()}_${safe}`;
+      const { error } = await sb.storage.from('mfso-signed').upload(path, file, { upsert:false, contentType:file.type||'application/octet-stream' });
+      if (error){ toast('Upload failed: '+error.message,'err'); setUploading(false); return; }
+      const doc = { path, name:file.name||safe, size:file.size, type:file.type||'', uploadedAt:nowISO(), uploadedBy:CURRENT_ACTOR.email };
+      setProjects(prev => prev.map(x => x.pn===pn
+        ? withAudit({ ...x, mfsoSigned:{ ...(x.mfsoSigned||{signed:true}), doc } }, 'Signed MFSO document uploaded', file.name||safe)
+        : x));
+      dbAudit(pn, 'Signed MFSO document uploaded', (file.name||safe)+' by '+(CURRENT_ACTOR.name||CURRENT_ACTOR.email||''));
+      toast('Signed MFSO uploaded and filed.','ok');
+    } catch(e){ toast('Upload error: '+(e&&e.message||e),'err'); }
+    setUploading(false);
+  };
+  const openSignedDoc = async () => {
+    const doc = proj && proj.mfsoSigned && proj.mfsoSigned.doc;
+    if (!doc || !doc.path || typeof sb==='undefined' || !sb || !sb.storage) return;
+    try {
+      const { data, error } = await sb.storage.from('mfso-signed').createSignedUrl(doc.path, 300);
+      if (error || !data){ toast('Could not open the document: '+(error&&error.message||'unknown'),'err'); return; }
+      if (typeof window!=='undefined') window.open(data.signedUrl, '_blank');
+    } catch(e){ toast('Could not open the document.','err'); }
+  };
+  // Enova employee confirms the uploaded signed MFSO matches the committed formula →
+  // sets the golden-thread anchor. Admin-only; requires the signed document on file.
+  const verifyMFSO = () => {
+    if (!isAdmin){ toast('Only an admin can verify the signed MFSO.','err'); return; }
+    const hasDoc = !!(proj && proj.mfsoSigned && proj.mfsoSigned.doc && proj.mfsoSigned.doc.path);
+    if (!hasDoc){ toast('Attach the customer-signed MFSO document before verifying.','err'); return; }
+    if (!confirmVerify){ toast('Tick the confirmation box first.','err'); return; }
+    if (!passIntegrityGate(proj, setProjects, 'MFSO verified → production')) return;
+    setProjects(prev => prev.map(x => x.pn===pn
+      ? withAudit({ ...x, mfsoSigned:{ ...(x.mfsoSigned||{signed:true}), ...mfsoVerifyPatch(x) }, stage:(x.stage==='In Production'?x.stage:'In Production') },
+          'Signed MFSO VERIFIED against committed formula', 'Golden thread anchored — production authorized')
+      : x));
+    dbAudit(pn, 'E-SIGNATURE · Signed MFSO verified', 'Committed formula confirmed to match signed document by '+(CURRENT_ACTOR.name||CURRENT_ACTOR.email||''));
+    setConfirmVerify(false);
   };
 
   if (!proj) {
@@ -7911,15 +8379,66 @@ function DocumentsPage({ projects, setProjects, onToggleNav, targetPn, onTargetC
         {/* Document flow map */}
         <div className="doc-flow">
           <span className="doc-flow-step done">Quote / Bid</span><span className="doc-flow-arr">→</span>
-          <span className={"doc-flow-step "+(signed?"done":"active")}>MFSO {signed?"✓ signed":"(gate)"}</span><span className="doc-flow-arr">→</span>
-          <span className={"doc-flow-step "+(signed?"active":"")}>Production: SO · MO · BOM · MMR</span>
+          <span className={"doc-flow-step "+(threadBroken?"":(signed?"done":"active"))}>MFSO {signed?(gtDrift?"⛓️‍💥 drifted":(gtPending?"⏳ verify":"✓ verified")):"(gate)"}</span><span className="doc-flow-arr">→</span>
+          <span className={"doc-flow-step "+(signed&&!threadBroken?"active":"")}>Production: SO · MO · BOM · MMR</span>
         </div>
 
         {/* MFSO — the gate */}
-        <div className={"panel "+(signed?"fcf ok":"")}>
+        <div className={"panel "+(gt&&gt.state==='CLEAN'?"fcf ok":"")}>
           <h2>MFSO — Master Formula Sign-Off
-            <span className={"fbadge "+(signed?"ok":"warn")} style={{marginLeft:"auto"}}>{signed?"🔒 Signed — in production":"Awaiting customer signature"}</span></h2>
+            <span className={"fbadge "+(gt&&gt.state==='CLEAN'?"ok":(threadBroken?"bad":"warn"))} style={{marginLeft:"auto"}}>{!signed?"Awaiting customer signature":(gt.state==='CLEAN'?"🔒 Verified — in production":(gtPending?"⏳ Signed — verify pending":"⛓️‍💥 Signed — formula drifted"))}</span></h2>
           <p className="fsmall">The customer signs the MFSO based on the quote/bid. <strong>A signed MFSO authorizes production</strong> and unlocks the documents below; the project moves to <strong>In Production</strong>.</p>
+
+          {signed && gt && (
+            <div className={"gt-strip "+(gtDrift?"bad":(gtPending?"warn":"ok"))}>
+              <span className="gt-ico">{gtDrift?"⛓️‍💥":(gtPending?"⛓":"🔗")}</span>
+              <span className="gt-txt"><strong>Golden thread: {gtDrift?"BROKEN":(gtPending?"verify pending":"intact")}</strong> — {gt.reason}</span>
+            </div>
+          )}
+
+          {/* PENDING_VERIFY — externally signed (emailed/mailed): upload the signed doc, then verify against the committed formula */}
+          {signed && gtPending && (
+            <div className="falert warn" style={{marginBottom:8}}>
+              <strong>Production documents are blocked until this signed MFSO is verified.</strong> Attach the customer-signed document (emailed or mailed), then confirm it matches the committed formula.
+              {proj.mfsoSigned && proj.mfsoSigned.reconcileHint && <div style={{marginTop:6}}><strong>Reconciliation hint:</strong> {proj.mfsoSigned.reconcileHint}</div>}
+              <div className="gt-verify" style={{marginTop:10}}>
+                {signedDoc
+                  ? <div className="gt-doc">📎 <button className="linklike" onClick={openSignedDoc}>{signedDoc.name}</button> <span className="fsmall" style={{color:'#7c8a96'}}>· uploaded {signedDoc.uploadedAt?fmtTs(signedDoc.uploadedAt):''}{signedDoc.uploadedBy?' by '+signedDoc.uploadedBy:''}</span></div>
+                  : <div className="fsmall" style={{color:'#8a5a12'}}>No signed document on file yet.</div>}
+                <div className="fbrow" style={{marginTop:8}}>
+                  <label className={"fbtn sec sm"+(uploading?" disabled":"")} style={{cursor:uploading?'default':'pointer'}}>
+                    {uploading?'Uploading…':(signedDoc?'📎 Replace signed MFSO':'📎 Upload signed MFSO')}
+                    <input type="file" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.heic,application/pdf,image/*" style={{display:'none'}} disabled={uploading}
+                      onChange={e=>{ const f=e.target.files&&e.target.files[0]; e.target.value=''; uploadSignedDoc(f); }}/>
+                  </label>
+                  {isAdmin && <>
+                    <label className="fsmall" style={{display:'flex',alignItems:'center',gap:6}}>
+                      <input type="checkbox" checked={confirmVerify} disabled={!signedDoc} onChange={e=>setConfirmVerify(e.target.checked)}/>
+                      I confirm the uploaded signed MFSO matches the committed formula for {proj.pn}.
+                    </label>
+                    <button className="fbtn ok sm" disabled={!signedDoc || !confirmVerify} title={!signedDoc?'Upload the signed document first':''} onClick={verifyMFSO}>✔ Verify → anchor thread</button>
+                  </>}
+                  {!isAdmin && <span className="fsmall" style={{color:'#7c8a96'}}>An admin must verify to authorize production.</span>}
+                </div>
+                {!gt.external && isAdmin && <div className="fsmall" style={{marginTop:8,color:'#7c8a96'}}>Signed in-app before verification — you can also <button className="linklike" onClick={resignMFSO}>re-sign against the locked formula</button> to anchor the thread (requires the formula approved &amp; locked).</div>}
+              </div>
+            </div>
+          )}
+
+          {/* DRIFTED — the formula changed after a verified signature */}
+          {signed && gtDrift && (
+            <div className="falert err" style={{marginBottom:8}}>
+              <strong>Production documents are blocked.</strong> The formula changed after the customer signed the MFSO
+              {gt.signedCogs!=null && gt.liveCogs!=null && <> — signed at <strong>{f$(gt.signedCogs)}</strong>/unit, live cost is now <strong>{f$(gt.liveCogs)}</strong>/unit{gt.cogsDelta!=null && <> ({gt.cogsDelta>=0?'+':''}{f$(gt.cogsDelta)})</>}</>}.
+              &nbsp;An SO/MO/BOM/MMR cut now would not match what was signed. {isAdmin ? 'Confirm the customer approved the change, then re-sign to restore the thread.' : 'An admin must re-sign the MFSO to the current formula.'}
+              {isAdmin && <div style={{marginTop:8}}><button className="fbtn ok sm" onClick={resignMFSO}>🔗 Re-sign MFSO to current formula</button></div>}
+            </div>
+          )}
+
+          {/* CLEAN — show the on-file signed document if one was uploaded */}
+          {signed && gt.state==='CLEAN' && signedDoc && (
+            <div className="gt-doc" style={{marginBottom:8}}>📎 Signed document on file: <button className="linklike" onClick={openSignedDoc}>{signedDoc.name}</button></div>
+          )}
 
           {!locked && <div className="falert warn" style={{marginBottom:8}}>The formula is not yet <strong>approved &amp; locked</strong> on the Formulation page. Approve it first so the MFSO reflects a frozen formula and cost.</div>}
           {readiness.errors.length>0 && <div className="falert err" style={{marginBottom:8}}><strong>Data readiness — COGS understated:</strong> {readiness.errors.join(' ')} <em>Signing will require an explicit override, logged to the audit trail.</em></div>}
@@ -7945,19 +8464,24 @@ function DocumentsPage({ projects, setProjects, onToggleNav, targetPn, onTargetC
         {/* MFSO editor — every cell/column/row editable; prints via buildMFSO */}
         <MFSOEditor proj={proj} upd={upd} signed={signed}/>
 
-        {/* Production documents — locked until MFSO signed */}
+        {/* Production documents — locked until MFSO signed AND the golden thread is intact */}
         <div className="panel" style={{position:"relative"}}>
           <h2>Production Documents
-            <span className={"fbadge "+(signed?"ok":"neutral")} style={{marginLeft:"auto"}}>{signed?"Unlocked":"Locked until MFSO signed"}</span></h2>
+            <span className={"fbadge "+(signed&&!threadBroken?"ok":(threadBroken?"bad":"neutral"))} style={{marginLeft:"auto"}}>{signed?(threadBroken?("Blocked — "+blockLabel):"Unlocked"):"Locked until MFSO signed"}</span></h2>
           {!signed && <div className="falert info">🔒 Sign the MFSO above to unlock the Sales Order, Manufacturing Order, Bill of Materials, and Master Manufacturing Record.</div>}
+          {signed && gtPending && <div className="falert warn">⛓ <strong>Blocked — signed MFSO not verified.</strong> Upload the customer-signed MFSO in the panel above and confirm it matches the committed formula. Until an Enova employee verifies it, no SO/MO/BOM/MMR can be cut.</div>}
+          {signed && gtDrift && <div className="falert err">⛓️‍💥 <strong>Blocked by the golden thread.</strong> The committed formula no longer matches the signed MFSO. Re-sign the MFSO (above) to the current formula before cutting any production document — otherwise the SO/MO/BOM/MMR would not match what the customer signed.</div>}
           <div className="doc-grid">
-            {PRODUCTION_DOCS.map(d => (
-              <div className={"doc-card"+(signed?"":" locked")} key={d.key}>
+            {PRODUCTION_DOCS.map(d => {
+              const canBuild = signed && !threadBroken;
+              return (
+              <div className={"doc-card"+(canBuild?"":" locked")} key={d.key}>
                 <div className="doc-card-h">{d.label}</div>
                 <div className="doc-card-d">{d.desc}</div>
-                <button className="fbtn teal sm" disabled={!signed} onClick={()=>printDoc(d.build(proj))}>🖨 Generate {d.key}</button>
+                <button className="fbtn teal sm" disabled={!canBuild} title={threadBroken?'Golden thread broken — re-sign the MFSO first':(!signed?'Sign the MFSO first':'')} onClick={()=>{ if(!canBuild) return; printDoc(d.build(proj)); }}>🖨 Generate {d.key}</button>
               </div>
-            ))}
+              );
+            })}
           </div>
           <p className="fsmall" style={{marginTop:10}}>Every document is generated from this project's captured formula, approved cost snapshot, and manual tier pricing. Nothing is invented; all raw materials trace to MISys ALT codes.</p>
         </div>
@@ -8026,9 +8550,10 @@ function GeneratePage({ projects, setProjects, onToggleNav }){
 
   // Signing the MFSO authorizes production (Enova process: signed MFSO → In Production).
   const markSignedMFSO = () => {
+    if (!passMfsoLockGate(proj, setProjects)) return;                                // golden thread: sign against a frozen formula
     if (!passIntegrityGate(proj, setProjects, 'MFSO signed → production')) return;
     setProjects(prev => prev.map(x => x.pn===pn
-      ? withAudit({ ...x, mfsoSigned:{ signed:true, by:CURRENT_ACTOR.email, byName:CURRENT_ACTOR.name, ts:nowISO() }, stage:'In Production' }, 'MFSO signed by customer', 'Authorized → In Production')
+      ? withAudit({ ...x, mfsoSigned:mfsoSignRecord(x), stage:'In Production' }, 'MFSO signed by customer', 'Authorized → In Production · golden thread anchored')
       : x));
     dbAudit(pn, 'E-SIGNATURE · MFSO signed → In Production', 'Authorized by '+(CURRENT_ACTOR.name||CURRENT_ACTOR.email||''));
   };
@@ -9812,12 +10337,15 @@ function App({ session }) {
   // generated/signed it shows there; if not, the Documents MFSO gate lets the user generate one.
   const [documentsPn, setDocumentsPn] = useState(null);
   const goMFSO = (pn) => { setDocumentsPn(pn); setNav('documents'); };
+  const [intakePn, setIntakePn] = useState(null);          // §56 Project page / board → open Sales Intake for a project
+  const goIntake = (pn) => { setIntakePn(pn); setNav('intake'); };
 
   // Re-render the app when the live MISys inventory is refreshed via applyInventory().
   const [, setInvVer] = useState(0);
   useEffect(() => { _onInventoryChange = () => setInvVer(v => v + 1); return () => { _onInventoryChange = null; }; }, []);
 
   const NAV_ITEMS = [
+    { id:'intake',      label:'Sales Intake',icon:'📥', ready:true },
     { id:'wip',         label:'WIP Board',   icon:'📋', ready:true },
     { id:'readiness',   label:'Readiness',   icon:'🚦', ready:true },
     { id:'projects',    label:'Projects',    icon:'🗃', ready:true },
@@ -9870,6 +10398,7 @@ function App({ session }) {
       <div className="app-page">
         {role==='viewer' && <div className="falert warn" style={{margin:0,borderRadius:0,zIndex:150}}>👁 <strong>Viewer access</strong> — you can see everything but can't save changes. Ask an Enova admin (Carlos, Tong, Joseph, Marina, Nick, Jonathan, or Ryan) for edit access.</div>}
         {writeErr && <div className="falert err" style={{margin:0,borderRadius:0,display:'flex',alignItems:'center',gap:8,zIndex:150}}><span style={{flex:1}}>⚠ {writeErr}</span><button className="fbtn sec sm" onClick={()=>setWriteErr(null)}>Dismiss</button></div>}
+        {nav === 'intake' && <IntakePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} targetPn={intakePn} onTargetConsumed={()=>setIntakePn(null)} />}
         {nav === 'wip' && <WIPBoardPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onFormulate={goFormulate} onOpenMFSO={goMFSO} onSendReview={sendReview} people={ENOVA_PEOPLE} openPagePn={openPn} onPageOpened={()=>setOpenPn(null)} onUpdateProject={updateProject} onRenameProject={renameProject} onDeleteProject={deleteProject} />}
         {nav === 'readiness' && <ReadinessPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onOpenMFSO={goMFSO} onOpenProject={openProjectPage} gateConfig={rdyCfg} />}
         {nav === 'projects' && <ProjectsPage projects={projects} onToggleNav={toggleNav} onFormulate={goFormulate} onOpenMFSO={goMFSO} onSendReview={sendReview} people={ENOVA_PEOPLE} onUpdateProject={updateProject} onRenameProject={renameProject} onDeleteProject={deleteProject} />}

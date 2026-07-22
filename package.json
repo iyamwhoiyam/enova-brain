@@ -1,0 +1,21 @@
+{
+  "name": "enova-brain-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enova Brain Studio — the app is the single file index.html (React/JSX compiled in-browser). This package.json exists only to install the dev dependencies the regression suite (run_all_tests.sh) needs so CI can gate every deploy.",
+  "scripts": {
+    "verify": "node ci_verify.js",
+    "test": "bash run_all_tests.sh"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@babel/parser": "^7.24.0",
+    "@babel/preset-react": "^7.24.0",
+    "decimal.js": "^10.6.0",
+    "playwright": "^1.54.1",
+    "playwright-core": "^1.54.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "xlsx": "^0.18.5"
+  }
+}

@@ -1829,6 +1829,15 @@ table.ptbl tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--teal);}
   margin-top:4px;line-height:1.35;
 }
 .card .c-date{font-size:10px;color:#9aa4ae;margin-top:4px;}
+/* §70 Stage-integrity flag — reported stage not justified by artifacts. */
+.card.card-flagged{border-color:var(--bad);box-shadow:0 0 0 1px rgba(217,83,79,.28);}
+.card.card-flagged::before{background-image:radial-gradient(circle,#e79a97 1.1px,transparent 1.3px);}
+.card .c-flag{
+  display:inline-block;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.02em;
+  color:#fff;background:var(--bad);border-radius:7px;padding:1.5px 6px;margin-bottom:4px;
+  line-height:1.35;max-width:100%;white-space:normal;cursor:help;
+}
+.rep-btn.flag-on{background:var(--bad);border-color:var(--bad);color:#fff;}
 
 /* hover actions (shifted left of the info button) */
 .c-actions{
@@ -2994,6 +3003,126 @@ function frontOf(p) {
 }
 function stageFront(s) {
   return PRODUCTION_STAGES.has(s) ? 'production' : 'commercial';
+}
+
+/* ══════════════ §70 STAGE-INTEGRITY MODEL — a stage must be JUSTIFIED by real artifacts ══════════════
+   The failure the board exposed: a card sat under "MFSO" (P26202, no formula) or "PO Submitted"
+   (P26100, product = "(no product name)") with none of the work those stages imply. A stage string is
+   a CLAIM, not proof. This model makes each stage DECLARE the artifacts it requires, computes what a
+   project is actually missing, CAPS the board placement to the highest stage the artifacts justify
+   (the Salesforce-reported stage is kept as metadata + a red flag), and GATES future advancement so a
+   card can't be dragged into MFSO / PO Submitted / In Production without the prerequisites (admin
+   override, logged). Enova formula policy holds: missing is missing — we FLAG gaps, we never invent a
+   product name, a formula row, or a cost to satisfy a gate. */
+// A real, DOSED formula exists: at least one ingredient carries an actual mg dose. Empty placeholder
+// rows do NOT count (mirrors validateProject's `real` filter — inputMg > 0).
+function hasRealFormula(p) {
+  return !!p && Array.isArray(p.ingredients) && p.ingredients.some(r => (Number(r && r.inputMg) || 0) > 0);
+}
+// A real product NAME — non-empty and not a junk/placeholder string ("(no product name)", TBD, …).
+function hasRealProduct(p) {
+  const v = (p && p.product || '').trim();
+  if (!v) return false;
+  if (v.charAt(0) === '(') return false; // "(no product name)", "(unnamed)", …
+  if (/no product name|unnamed|untitled|^tbd$|^n\/?a$/i.test(v)) return false;
+  return true;
+}
+// A real cost build exists: a persisted cogsPerUnit > 0 (traces to MISys / Master Bid — never invented).
+function hasCosting(p) {
+  const cb = p && p.cogsBreakdown;
+  return !!cb && Number(cb.cogsPerUnit) > 0;
+}
+// The MFSO has actually been SIGNED (customer-approved), not merely a stage label.
+function hasSignedMFSO(p) {
+  return !!(p && p.mfsoSigned && p.mfsoSigned.signed);
+}
+// The artifact prerequisites, reused across stages (cumulative up the ladder).
+const STAGE_REQ = {
+  product: {
+    id: 'product',
+    label: 'a defined product name',
+    test: hasRealProduct
+  },
+  formula: {
+    id: 'formula',
+    label: 'a saved formula',
+    test: hasRealFormula
+  },
+  costing: {
+    id: 'costing',
+    label: 'a costed COGS build',
+    test: hasCosting
+  },
+  mfso: {
+    id: 'mfso',
+    label: 'a signed MFSO',
+    test: hasSignedMFSO
+  }
+};
+// The LINEAR pipeline ladder used for capping (excludes the non-linear states On Hold / Completed /
+// Cancelled — those are legitimate parallel/terminal states and are never capped or gated).
+const STAGE_LADDER = ["Pending Information", "Formulation/Sample Development", "Lab/Sampling", "Sample Sent to Customer", "BID Process", "BID Sent", "MFSO", "PO Submitted", "In Production"];
+// What each stage REQUIRES to be legitimately claimed. Cumulative: a later stage implies everything the
+// earlier ones need, so effectiveStage() is a simple "highest ladder rung whose requirements all pass".
+const STAGE_REQUIRES = {
+  "Pending Information": [],
+  "Formulation/Sample Development": [STAGE_REQ.product],
+  "Lab/Sampling": [STAGE_REQ.product, STAGE_REQ.formula],
+  "Sample Sent to Customer": [STAGE_REQ.product, STAGE_REQ.formula],
+  "BID Process": [STAGE_REQ.product, STAGE_REQ.formula, STAGE_REQ.costing],
+  "BID Sent": [STAGE_REQ.product, STAGE_REQ.formula, STAGE_REQ.costing],
+  "MFSO": [STAGE_REQ.product, STAGE_REQ.formula, STAGE_REQ.costing],
+  "PO Submitted": [STAGE_REQ.product, STAGE_REQ.formula, STAGE_REQ.costing, STAGE_REQ.mfso],
+  "In Production": [STAGE_REQ.product, STAGE_REQ.formula, STAGE_REQ.costing, STAGE_REQ.mfso]
+};
+// The stage a project's artifacts actually JUSTIFY: walk DOWN from the claimed rung to the first rung
+// whose requirements are all met. Caps downward only — never promotes a project above its claim. Off-
+// ladder states (On Hold / Completed / Cancelled / unknown) are returned unchanged.
+function effectiveStage(p) {
+  const claimed = normalizeStage(p && p.stage);
+  const ci = STAGE_LADDER.indexOf(claimed);
+  if (ci === -1) return claimed;
+  for (let i = ci; i >= 0; i--) {
+    const reqs = STAGE_REQUIRES[STAGE_LADDER[i]] || [];
+    if (reqs.every(r => r.test(p))) return STAGE_LADDER[i];
+  }
+  return STAGE_LADDER[0];
+}
+// Integrity report for the CLAIMED stage: what's missing, whether it's flagged, and where it caps to.
+function stageIntegrity(p) {
+  const claimed = normalizeStage(p && p.stage);
+  const eff = effectiveStage(p);
+  const reqs = STAGE_REQUIRES[claimed] || [];
+  const missing = reqs.filter(r => !r.test(p));
+  return {
+    claimed,
+    effective: eff,
+    ok: missing.length === 0,
+    capped: eff !== claimed && STAGE_LADDER.indexOf(claimed) !== -1,
+    missing,
+    reasons: missing.map(r => r.label)
+  };
+}
+// Advance gate: is moving p INTO targetStage an unjustified jump? Only blocks when the target sits ABOVE
+// the stage the project's artifacts already reach (effectiveStage) AND the target's prerequisites aren't
+// met. Backward corrections, lateral moves, On Hold, and closing are never blocked.
+function stageAdvanceGate(p, targetStage) {
+  const t = normalizeStage(targetStage);
+  const ti = STAGE_LADDER.indexOf(t);
+  if (ti === -1) return {
+    blocked: false,
+    reasons: []
+  };
+  const effIdx = STAGE_LADDER.indexOf(effectiveStage(p));
+  if (ti <= effIdx) return {
+    blocked: false,
+    reasons: []
+  };
+  const missing = (STAGE_REQUIRES[t] || []).filter(r => !r.test(p));
+  return {
+    blocked: missing.length > 0,
+    reasons: missing.map(r => r.label)
+  };
 }
 
 /* ══════════════ §48 PRODUCTION READINESS — cross-department command board ══════════════
@@ -7376,6 +7505,7 @@ function WIPBoardPage({
   const [rowMode, setRowMode] = useState('pm'); // §64 'pm' = manager swimlanes (matrix) | 'none' = flat columns
   const [formFilter, setFormFilter] = useState('All');
   const [activeOnly, setActiveOnly] = useState(true); // §49 default the board to committed jobs only
+  const [integrityOnly, setIntegrityOnly] = useState(false); // §70 show only stage-integrity-flagged jobs
   const [front, setFront] = useState('all'); // §53 operational front: all | commercial | production
   const [showOlder, setShowOlder] = useState(false); // §53 include projects received before 2025-05
   const [modal, setModal] = useState(null);
@@ -7494,14 +7624,24 @@ function WIPBoardPage({
     const matchDateTo = !dateTo || p.dateReceived && p.dateReceived <= dateTo;
     const matchActive = !activeOnly || isActiveProj(p);
     const matchScope = showOlder || inDateScope(p); // §53 default: 2025-05 → today
-    const matchFront = front === 'all' || frontOf(p) === front; // §53 commercial vs production
-    return matchQ && matchR && matchF && matchDateFrom && matchDateTo && matchActive && matchScope && matchFront;
-  }), [projects, search, pmFilter, formFilter, dateFrom, dateTo, activeOnly, front, showOlder]);
+    // §70 Front follows the EFFECTIVE stage so a card capped back to a commercial stage
+    // (e.g. an "In Production" claim with no formula) lands in a column that actually exists.
+    const matchFront = front === 'all' || stageFront(effectiveStage(p)) === front; // §53 commercial vs production
+    const matchIntegrity = !integrityOnly || !stageIntegrity(p).ok; // §70 flagged-only view
+    return matchQ && matchR && matchF && matchDateFrom && matchDateTo && matchActive && matchScope && matchFront && matchIntegrity;
+  }), [projects, search, pmFilter, formFilter, dateFrom, dateTo, activeOnly, front, showOlder, integrityOnly]);
+  // §70 Count of stage-integrity-flagged projects in the current (unfiltered-by-integrity) view.
+  const flaggedCount = useMemo(() => projects.filter(p => {
+    if (activeOnly && !isActiveProj(p)) return false;
+    if (!showOlder && !inDateScope(p)) return false;
+    if (front !== 'all' && stageFront(effectiveStage(p)) !== front) return false;
+    return !stageIntegrity(p).ok;
+  }).length, [projects, activeOnly, showOlder, front]);
   const byStage = useMemo(() => {
     const m = {};
     stages.forEach(s => m[s] = []);
     filtered.forEach(p => {
-      const st = normalizeStage(p.stage); // group under the canonical (merged) column
+      const st = effectiveStage(p); // §70 place under the stage the artifacts JUSTIFY, not just the claim
       if (m[st]) m[st].push(p);else {
         m[st] = [p];
       }
@@ -7599,6 +7739,31 @@ function WIPBoardPage({
   // Reassigns 'order' for every card in targetStage, inserting the dragged card
   // at the exact position indicated (before/after targetPn, or appended if targetPn is null).
   const reorderProjects = (draggedPn, targetStage, targetPn, position, targetPm) => {
+    // §70 Stage-advance gate: block dropping a card into a stage whose artifact prerequisites the
+    // project doesn't meet (no product / formula / costing / signed MFSO). Backward corrections,
+    // lateral re-orders, and PM-only reassignment are never gated. Admin can override (logged); the
+    // card keeps its red flag until the gap is actually filled. Never invents data to pass the gate.
+    const draggedProj = projects.find(p => p.pn === draggedPn);
+    if (draggedProj) {
+      const gate = stageAdvanceGate(draggedProj, targetStage);
+      if (gate.blocked) {
+        if (!CURRENT_IS_ADMIN) {
+          toast(`Can't move ${draggedPn} into “${normalizeStage(targetStage)}” — it's missing ${gate.reasons.join(', ')}, which that stage requires. Fill the gap first, or ask an admin to override.`, 'err');
+          setDragId(null);
+          setDragOver(null);
+          setDragOverCard(null);
+          return;
+        }
+        const msg = `⚠ ${draggedPn} is missing ${gate.reasons.join(', ')}, which “${normalizeStage(targetStage)}” requires.\n\n` + `Moving it there records a STAGE OVERRIDE by ${CURRENT_ACTOR.name || CURRENT_ACTOR.email || 'you'} in the audit trail. ` + `The card keeps its red integrity flag until the gap is filled.\n\nOverride and move anyway?`;
+        if (typeof window !== 'undefined' && window.confirm && !window.confirm(msg)) {
+          setDragId(null);
+          setDragOver(null);
+          setDragOverCard(null);
+          return;
+        }
+        logAudit(setProjects, draggedPn, 'STAGE OVERRIDE → ' + normalizeStage(targetStage), 'missing: ' + gate.reasons.join(' | '));
+      }
+    }
     setProjects(prev => {
       const draggedIdx = prev.findIndex(p => p.pn === draggedPn);
       if (draggedIdx === -1) return prev;
@@ -7688,7 +7853,7 @@ function WIPBoardPage({
     const m = {};
     filtered.forEach(p => {
       const rk = pmKeyOf(p),
-        st = normalizeStage(p.stage);
+        st = effectiveStage(p); // §70 effective placement in the manager matrix too
       m[rk] = m[rk] || {};
       (m[rk][st] = m[rk][st] || []).push(p);
     });
@@ -7707,9 +7872,12 @@ function WIPBoardPage({
   const wipCard = (p, stage, pmRow) => {
     const showLineAbove = dragOverCard?.pn === p.pn && dragOverCard.position === 'above' && dragId !== p.pn;
     const showLineBelow = dragOverCard?.pn === p.pn && dragOverCard.position === 'below' && dragId !== p.pn;
+    // §70 Stage-integrity flag: this card's reported stage isn't justified by its artifacts.
+    const integ = stageIntegrity(p);
+    const flagTitle = integ.ok ? '' : `Stage-integrity flag — reported “${integ.claimed}” but missing ${integ.reasons.join(', ')}. ` + `Shown under “${integ.effective}” (the furthest its artifacts justify). Fill the gap or an admin can override.`;
     return /*#__PURE__*/React.createElement("div", {
       key: p.pn,
-      className: `card ${dragId === p.pn ? 'dragging' : ''}`,
+      className: `card ${dragId === p.pn ? 'dragging' : ''} ${integ.ok ? '' : 'card-flagged'}`,
       draggable: true,
       onDragStart: () => onDragStart(p.pn),
       onDragEnd: onDragEnd,
@@ -7728,7 +7896,10 @@ function WIPBoardPage({
       onClick: e => e.stopPropagation(),
       onMouseEnter: e => openInfo(p, e.currentTarget.getBoundingClientRect()),
       onMouseLeave: scheduleClose
-    }, "i"), /*#__PURE__*/React.createElement("div", {
+    }, "i"), !integ.ok && /*#__PURE__*/React.createElement("div", {
+      className: "c-flag",
+      title: flagTitle
+    }, "\u26A0 needs ", integ.reasons.map(r => r.replace(/^a saved |^a defined |^a costed |^a signed /, '')).join(' + ')), /*#__PURE__*/React.createElement("div", {
       className: "c-pn"
     }, p.pn), /*#__PURE__*/React.createElement("div", {
       className: "c-prod"
@@ -8313,7 +8484,19 @@ function WIPBoardPage({
     className: `rep-btn ${rowMode === 'none' ? 'active' : ''}`,
     onClick: () => setRowMode('none'),
     title: "Flat columns \u2014 the classic single-row board"
-  }, "Flat"))), /*#__PURE__*/React.createElement("div", {
+  }, "Flat"), /*#__PURE__*/React.createElement("span", {
+    className: "filter-label",
+    style: {
+      marginLeft: 14
+    }
+  }, "Integrity"), /*#__PURE__*/React.createElement("button", {
+    className: `rep-btn ${integrityOnly ? 'active flag-on' : ''}`,
+    onClick: () => setIntegrityOnly(v => !v),
+    title: "Show only projects whose reported stage isn't justified by their artifacts (no product name / formula / costing / signed MFSO). These are placed under the furthest stage their work supports and flagged."
+  }, "\u26A0 Flagged", flaggedCount ? ` (${flaggedCount})` : ''), integrityOnly && /*#__PURE__*/React.createElement("button", {
+    className: "rep-btn danger",
+    onClick: () => setIntegrityOnly(false)
+  }, "\u2715 Clear"))), /*#__PURE__*/React.createElement("div", {
     className: "statrow"
   }, /*#__PURE__*/React.createElement("div", {
     className: `stat ${roll.batchedN ? '' : 'muted'}`,
@@ -21559,6 +21742,342 @@ function CommandPalette({
   }, "\u2191\u2193 move \xB7 \u21B5 open \xB7 esc close")));
 }
 
+/* ══════════════════ §69 PRODUCTION DOCUMENTS + EXECUTED BATCH RECORDS ══════════════════
+   Generates the cGMP production packet from the approved formula + live batch data: a BOM (ingredients ×
+   batch qty, with overage), and an executed batch record (BOM, the actual raw lots issued from the ledger,
+   in-process checks, QC tests, yield, and the e-signed QA disposition). Both are printable; the executed
+   batch record files into the Document Vault as a controlled `mbr` document, linked to the batch lot. */
+function bomFromFormula(p, units) {
+  const b = Number(units) || 0;
+  const ings = Array.isArray(p && p.ingredients) ? p.ingredients : [];
+  const rows = [];
+  ings.forEach(ing => {
+    const sku = ing && ing.item && ing.item.n;
+    const mg = Number(ing && ing.inputMg);
+    const desc = ing && ing.item && ing.item.d || ing && ing.importedName || 'ingredient';
+    const ov = Number(ing && ing.overage) || 0;
+    if (mg > 0) {
+      const g = mg * (1 + ov) * b / 1000;
+      rows.push({
+        sku: sku || '(unmapped)',
+        desc,
+        mg,
+        overage: ov,
+        gPerBatch: Math.round(g * 1000) / 1000,
+        mapped: !!sku
+      });
+    }
+  });
+  return rows;
+}
+function prDocHead(title) {
+  return '<!doctype html><html><head><meta charset="utf-8"><title>' + atEsc(title) + '</title>' + '<style>body{font:13px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#1f2d38;margin:32px;}h1{font-size:19px;margin:0 0 2px;}h2{font-size:14px;border-bottom:2px solid #1f3a5f;padding-bottom:4px;margin-top:22px;}table{border-collapse:collapse;width:100%;font-size:12px;margin-top:6px;}th,td{border:1px solid #d5dde3;padding:5px 8px;text-align:left;vertical-align:top;}th{background:#eef2f5;}.num{text-align:right;}.mono{font-family:ui-monospace,Menlo,monospace;font-size:11px;}.meta{color:#5a6b7a;margin-bottom:4px;}.sign{margin-top:10px;color:#5a6b7a;}.noprint{margin:12px 0;}@media print{.noprint{display:none;}}</style></head><body>' + '<div class="noprint"><button onclick="window.print()">🖨 Print / Save as PDF</button></div>';
+}
+function buildBomHtml(p, units, rows) {
+  const body = (rows || []).map(r => '<tr><td class="mono">' + atEsc(r.sku) + '</td><td>' + atEsc(r.desc) + '</td><td class="num">' + r.mg + '</td><td class="num">' + (r.overage * 100).toFixed(0) + '%</td><td class="num">' + r.gPerBatch + '</td></tr>').join('');
+  return prDocHead('BOM — ' + (p.pn || '')) + '<h1>Enova Science — Bill of Materials</h1>' + '<div class="meta">Project ' + atEsc(p.pn || '') + ' · ' + atEsc(p.product || '') + ' · ' + atEsc(p.customer || '') + ' · batch ' + atEsc(String(units)) + ' units · generated ' + atEsc(new Date().toISOString().slice(0, 10)) + '</div>' + '<table><thead><tr><th>SKU</th><th>Material</th><th class="num">mg/serving</th><th class="num">Overage</th><th class="num">g / batch</th></tr></thead><tbody>' + (body || '<tr><td colspan="5">No formula ingredients mapped.</td></tr>') + '</tbody></table>' + '<div class="sign">Prepared by: ____________________  Date: __________ &nbsp;&nbsp; Verified by: ____________________  Date: __________</div>' + '</body></html>';
+}
+function buildBatchRecordHtml(p, units, bom, materials, qc) {
+  qc = qc || {};
+  const bomRows = (bom || []).map(r => '<tr><td class="mono">' + atEsc(r.sku) + '</td><td>' + atEsc(r.desc) + '</td><td class="num">' + r.gPerBatch + '</td><td> </td><td> </td></tr>').join('');
+  const matRows = (materials || []).map(m => '<tr><td>' + atEsc((m.ts || '').replace('T', ' ').slice(0, 16)) + '</td><td class="mono">' + atEsc(m.sku) + '</td><td>' + atEsc(m.description || '') + '</td><td class="num">' + m.qty + '</td><td class="mono">' + atEsc(m.lot_no || '') + '</td><td>' + atEsc(m.actor || '') + '</td></tr>').join('');
+  const ipRows = (qc.inProcess || []).map(ip => '<tr><td>' + atEsc(ip.k || '') + '</td><td>' + (ip.ok ? '✓ pass' : '—') + '</td><td>' + atEsc(ip.note || '') + '</td></tr>').join('');
+  const tRows = (qc.tests || []).map(t => '<tr><td>' + atEsc(t.name || '') + '</td><td>' + (t.required ? 'required' : '—') + '</td><td>' + atEsc(t.result || '') + '</td><td>' + (t.coa ? 'COA' : '') + '</td></tr>').join('');
+  return prDocHead('Executed Batch Record — ' + (p.pn || '')) + '<h1>Enova Science — Executed Batch Record</h1>' + '<div class="meta">Project ' + atEsc(p.pn || '') + ' · ' + atEsc(p.product || '') + ' · ' + atEsc(p.customer || '') + '</div>' + '<table><tbody><tr><th>Batch #</th><td>' + atEsc(qc.batchNo || '') + '</td><th>Lot #</th><td class="mono">' + atEsc(qc.lotNo || '') + '</td></tr>' + '<tr><th>Mfg date</th><td>' + atEsc(qc.mfgDate || '') + '</td><th>Planned qty</th><td>' + atEsc(String(qc.plannedQty != null ? qc.plannedQty : units)) + '</td></tr>' + '<tr><th>Actual yield</th><td>' + atEsc(String(qc.actualYield || '')) + '</td><th>Disposition</th><td><b>' + atEsc(qc.disposition || 'Pending') + '</b></td></tr></tbody></table>' + '<h2>Bill of materials (planned) — record actual lot + weight at issue</h2>' + '<table><thead><tr><th>SKU</th><th>Material</th><th class="num">g / batch (planned)</th><th>Actual lot</th><th>Actual wt</th></tr></thead><tbody>' + (bomRows || '<tr><td colspan="5">—</td></tr>') + '</tbody></table>' + '<h2>Materials issued (from the inventory ledger)</h2>' + '<table><thead><tr><th>When</th><th>SKU</th><th>Material</th><th class="num">Qty</th><th>Lot(s)</th><th>By</th></tr></thead><tbody>' + (matRows || '<tr><td colspan="6">No issues recorded in the transactional ledger.</td></tr>') + '</tbody></table>' + '<h2>In-process checks</h2><table><thead><tr><th>Check</th><th>Result</th><th>Note</th></tr></thead><tbody>' + (ipRows || '<tr><td colspan="3">—</td></tr>') + '</tbody></table>' + '<h2>QC / release testing</h2><table><thead><tr><th>Test</th><th>Req</th><th>Result</th><th>COA</th></tr></thead><tbody>' + (tRows || '<tr><td colspan="4">—</td></tr>') + '</tbody></table>' + '<h2>QA disposition</h2><div class="meta">' + atEsc(qc.disposition || 'Pending') + (qc.dispByName ? ' · by ' + atEsc(qc.dispByName) : '') + (qc.dispTs ? ' · ' + atEsc((qc.dispTs || '').replace('T', ' ').slice(0, 19)) : '') + '</div>' + '<div class="sign">Manufactured by: ______________ Date: ______ &nbsp; Reviewed by: ______________ Date: ______ &nbsp; QA released by: ______________ Date: ______</div>' + '</body></html>';
+}
+function prPrint(html) {
+  try {
+    const w = window.open('', '_blank');
+    if (w) {
+      w.document.write(html);
+      w.document.close();
+    } else toast('Allow pop-ups to open the document.', 'warn');
+  } catch (e) {
+    toast('Print failed: ' + (e && e.message || e), 'err');
+  }
+}
+function ProductionRecordsPage({
+  projects,
+  onToggleNav,
+  targetPn,
+  onTargetConsumed
+}) {
+  const {
+    isAdmin
+  } = useRole();
+  const [pn, setPn] = useState(targetPn || '');
+  const [units, setUnits] = useState('');
+  const [mos, setMos] = useState([]);
+  const [ledger, setLedger] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const proj = useMemo(() => (projects || []).find(p => p.pn === pn.trim()) || null, [projects, pn]);
+  const pnList = useMemo(() => (projects || []).map(p => p.pn).filter(Boolean), [projects]);
+  const qc = proj && proj.qc ? proj.qc : null;
+  const bom = useMemo(() => proj ? bomFromFormula(proj, units || proj.batchUnits || 0) : [], [proj, units]);
+  useEffect(() => {
+    if (targetPn) {
+      setPn(targetPn);
+      if (onTargetConsumed) onTargetConsumed();
+    }
+  }, [targetPn]);
+  useEffect(() => {
+    if (proj && !units) setUnits(String(proj.batchUnits || ''));
+  }, [proj]);
+  const loadBatch = React.useCallback(async () => {
+    if (typeof sb === 'undefined' || !sb || !pn.trim()) {
+      setMos([]);
+      setLedger([]);
+      return;
+    }
+    setLoading(true);
+    setMsg('');
+    try {
+      const mo = await sb.from('erp_v_mo_status').select('*').eq('pn', pn.trim());
+      const list = mo.data || [];
+      setMos(list);
+      let led = [];
+      if (list.length) {
+        const parts = await Promise.all(list.map(m => sb.from('erp_v_lot_ledger').select('*').ilike('ref', '%' + (m.mo_no || '#' + m.id) + '%').order('ts', {
+          ascending: false
+        }).limit(200)));
+        led = parts.flatMap(r => r.data || []);
+      }
+      setLedger(led);
+    } catch (e) {
+      setMsg('Load failed: ' + (e && e.message || e));
+    }
+    setLoading(false);
+  }, [pn]);
+  useEffect(() => {
+    loadBatch();
+  }, [loadBatch]);
+  const fileToVault = async () => {
+    if (!isAdmin) {
+      toast('Only an admin can file to the vault.', 'err');
+      return;
+    }
+    if (!proj) {
+      toast('Pick a project.', 'warn');
+      return;
+    }
+    if (typeof sb === 'undefined' || !sb) {
+      toast('Offline.', 'err');
+      return;
+    }
+    setBusy(true);
+    setMsg('');
+    try {
+      const html = buildBatchRecordHtml(proj, units || proj.batchUnits || 0, bom, ledger, qc);
+      const blob = new Blob([html], {
+        type: 'text/html'
+      });
+      const path = pn.trim() + '/mbr/' + Date.now() + '_executed_batch_record.html';
+      const up = await sb.storage.from('enova-documents').upload(path, blob, {
+        upsert: false,
+        contentType: 'text/html'
+      });
+      if (up.error) throw up.error;
+      const hash = await dvSha256(blob);
+      const {
+        data,
+        error
+      } = await sb.rpc('erp_doc_register', {
+        p_pn: pn.trim(),
+        p_doc_type: 'mbr',
+        p_title: 'Executed batch record' + (qc && qc.lotNo ? ' — lot ' + qc.lotNo : ''),
+        p_storage_path: path,
+        p_sha256: hash,
+        p_mime: 'text/html',
+        p_bytes: blob.size,
+        p_source: 'generated',
+        p_status: 'effective',
+        p_effective_date: new Date().toISOString().slice(0, 10)
+      });
+      if (error) throw error;
+      setMsg('✓ Filed to Document Vault as MBR rev ' + (data && data.revision || '') + ' (effective). Find it under Document Vault → P' + pn.trim().replace(/^P/, '') + '.');
+      toast('Batch record filed to the vault.', 'ok');
+    } catch (e) {
+      toast('Filing failed: ' + (e && e.message || e), 'err');
+      setMsg('');
+    }
+    setBusy(false);
+  };
+  const header = /*#__PURE__*/React.createElement("div", {
+    className: "gen-top"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "sb-toggle gen-ham",
+    onClick: onToggleNav,
+    title: "Toggle sidebar",
+    "aria-label": "Toggle sidebar"
+  }, "\u2630"), /*#__PURE__*/React.createElement("div", {
+    className: "gen-title"
+  }, "Batch Records"));
+  return /*#__PURE__*/React.createElement("div", {
+    className: "app-page gen-page",
+    style: {
+      background: 'var(--paper)'
+    }
+  }, header, /*#__PURE__*/React.createElement("div", {
+    className: "gen-body"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "panel dash-panel"
+  }, /*#__PURE__*/React.createElement("h2", null, "Production packet ", /*#__PURE__*/React.createElement("span", {
+    className: "fsmall dash-src"
+  }, "BOM \xB7 executed batch record \u2192 Document Vault")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      flexWrap: 'wrap',
+      alignItems: 'flex-end',
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "sc-f",
+    style: {
+      maxWidth: 200
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "Project #"), /*#__PURE__*/React.createElement("input", {
+    list: "pr-pn-list",
+    value: pn,
+    onChange: e => setPn(e.target.value),
+    placeholder: "P26xxx"
+  })), /*#__PURE__*/React.createElement("datalist", {
+    id: "pr-pn-list"
+  }, pnList.slice(0, 1200).map(x => /*#__PURE__*/React.createElement("option", {
+    key: x,
+    value: x
+  }))), /*#__PURE__*/React.createElement("label", {
+    className: "sc-f",
+    style: {
+      maxWidth: 130
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "Batch units"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    value: units,
+    onChange: e => setUnits(e.target.value),
+    placeholder: "units"
+  })), loading && /*#__PURE__*/React.createElement("span", {
+    className: "fsmall",
+    style: {
+      color: '#8794a0'
+    }
+  }, "loading batch\u2026")), !proj && /*#__PURE__*/React.createElement("div", {
+    className: "fsmall",
+    style: {
+      color: '#9aa7b2',
+      padding: '8px 0'
+    }
+  }, "Pick a project to build its BOM and batch record.")), proj && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "dash-cols"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "panel dash-panel"
+  }, /*#__PURE__*/React.createElement("h2", null, "Batch summary"), /*#__PURE__*/React.createElement("div", {
+    className: "fsmall",
+    style: {
+      lineHeight: 1.8
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("b", null, proj.pn), " \xB7 ", proj.product || '—', " \xB7 ", proj.customer ? cleanCustomer(proj.customer) : ''), qc ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", null, "Batch # ", /*#__PURE__*/React.createElement("b", null, qc.batchNo || '—'), " \xB7 Lot # ", /*#__PURE__*/React.createElement("b", {
+    className: "mono"
+  }, qc.lotNo || '—'), " \xB7 Mfg ", qc.mfgDate || '—'), /*#__PURE__*/React.createElement("div", null, "Planned ", qc.plannedQty != null ? qc.plannedQty : units || '—', " \xB7 Actual yield ", qc.actualYield || '—', " \xB7 Disposition ", /*#__PURE__*/React.createElement("span", {
+    className: "fbadge " + (qc.disposition === 'Released' ? 'ok' : qc.disposition === 'Rejected' ? 'bad' : qc.disposition === 'On Hold' ? 'warn' : 'neutral')
+  }, qc.disposition || 'Pending'))) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#9aa7b2'
+    }
+  }, "No batch record opened yet \u2014 open one on the Documents page (QC / batch panel). BOM still generates from the formula below."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 6
+    }
+  }, mos.length, " MO(s) \xB7 ", ledger.length, " material issue(s) recorded in the ledger.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      flexWrap: 'wrap',
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "fbtn sec sm",
+    onClick: () => prPrint(buildBomHtml(proj, units || proj.batchUnits || 0, bom))
+  }, "\uD83D\uDDA8 Print BOM"), /*#__PURE__*/React.createElement("button", {
+    className: "fbtn sec sm",
+    onClick: () => prPrint(buildBatchRecordHtml(proj, units || proj.batchUnits || 0, bom, ledger, qc))
+  }, "\uD83D\uDDA8 Print batch record"), /*#__PURE__*/React.createElement("button", {
+    className: "fbtn ok sm",
+    disabled: busy || !isAdmin,
+    title: isAdmin ? '' : 'Admin only',
+    onClick: fileToVault
+  }, busy ? 'Filing…' : '📁 File batch record → Vault')), msg && /*#__PURE__*/React.createElement("div", {
+    className: "fsmall",
+    style: {
+      marginTop: 8,
+      color: '#1f7a4d'
+    }
+  }, msg)), /*#__PURE__*/React.createElement("div", {
+    className: "panel dash-panel"
+  }, /*#__PURE__*/React.createElement("h2", null, "Bill of materials ", /*#__PURE__*/React.createElement("span", {
+    className: "fsmall dash-src"
+  }, "formula \xD7 ", units || proj.batchUnits || 0, " units")), /*#__PURE__*/React.createElement("table", {
+    className: "dash-tbl"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "SKU"), /*#__PURE__*/React.createElement("th", null, "Material"), /*#__PURE__*/React.createElement("th", {
+    className: "num"
+  }, "mg/srv"), /*#__PURE__*/React.createElement("th", {
+    className: "num"
+  }, "Overage"), /*#__PURE__*/React.createElement("th", {
+    className: "num"
+  }, "g/batch"))), /*#__PURE__*/React.createElement("tbody", null, bom.map((r, i) => /*#__PURE__*/React.createElement("tr", {
+    key: i
+  }, /*#__PURE__*/React.createElement("td", {
+    className: "mono sm"
+  }, r.mapped ? r.sku : /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#b4433a'
+    }
+  }, "unmapped")), /*#__PURE__*/React.createElement("td", null, r.desc), /*#__PURE__*/React.createElement("td", {
+    className: "num"
+  }, r.mg), /*#__PURE__*/React.createElement("td", {
+    className: "num"
+  }, (r.overage * 100).toFixed(0), "%"), /*#__PURE__*/React.createElement("td", {
+    className: "num strong"
+  }, r.gPerBatch))))), !bom.length && /*#__PURE__*/React.createElement("div", {
+    className: "fsmall",
+    style: {
+      padding: 6
+    }
+  }, "No formula ingredients \u2014 build the formula first."))), /*#__PURE__*/React.createElement("div", {
+    className: "panel dash-panel"
+  }, /*#__PURE__*/React.createElement("h2", null, "Materials issued to this batch ", /*#__PURE__*/React.createElement("span", {
+    className: "fsmall dash-src"
+  }, "erp_v_lot_ledger \xB7 lot traceability")), /*#__PURE__*/React.createElement("table", {
+    className: "dash-tbl"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "When"), /*#__PURE__*/React.createElement("th", null, "SKU"), /*#__PURE__*/React.createElement("th", null, "Material"), /*#__PURE__*/React.createElement("th", {
+    className: "num"
+  }, "Qty"), /*#__PURE__*/React.createElement("th", null, "Lot(s)"), /*#__PURE__*/React.createElement("th", null, "MO ref"), /*#__PURE__*/React.createElement("th", null, "By"))), /*#__PURE__*/React.createElement("tbody", null, ledger.slice(0, 40).map(m => /*#__PURE__*/React.createElement("tr", {
+    key: m.id
+  }, /*#__PURE__*/React.createElement("td", {
+    className: "fsmall"
+  }, fmtTs(m.ts)), /*#__PURE__*/React.createElement("td", {
+    className: "mono sm"
+  }, m.sku), /*#__PURE__*/React.createElement("td", null, m.description || '—'), /*#__PURE__*/React.createElement("td", {
+    className: "num strong",
+    style: {
+      color: Number(m.qty) < 0 ? '#b4433a' : '#1f7a4d'
+    }
+  }, m.qty), /*#__PURE__*/React.createElement("td", {
+    className: "fsmall"
+  }, m.lot_no || '—'), /*#__PURE__*/React.createElement("td", {
+    className: "fsmall"
+  }, m.ref || '—'), /*#__PURE__*/React.createElement("td", {
+    className: "fsmall"
+  }, m.actor || '—'))))), !ledger.length && /*#__PURE__*/React.createElement("div", {
+    className: "fsmall",
+    style: {
+      padding: 6
+    }
+  }, "No materials issued yet \u2014 issue them on Stock Control (Manufacturing \u2192 Issue), then they appear here with full lot traceability.")))));
+}
+
 // Role context so any page can read the signed-in user's access level without prop-threading.
 const RoleContext = React.createContext({
   isAdmin: true,
@@ -21876,6 +22395,11 @@ function App({
     icon: '🏭',
     ready: true
   }, {
+    id: 'batchrec',
+    label: 'Batch Records',
+    icon: '📑',
+    ready: true
+  }, {
     id: 'review',
     label: 'Review Queue',
     icon: '🔎',
@@ -22084,6 +22608,9 @@ function App({
     projects: projects,
     onToggleNav: toggleNav
   }), nav === 'production' && /*#__PURE__*/React.createElement(ProductionBoardPage, {
+    onToggleNav: toggleNav
+  }), nav === 'batchrec' && /*#__PURE__*/React.createElement(ProductionRecordsPage, {
+    projects: projects,
     onToggleNav: toggleNav
   }), nav === 'review' && /*#__PURE__*/React.createElement(ReviewQueuePage, {
     onToggleNav: toggleNav

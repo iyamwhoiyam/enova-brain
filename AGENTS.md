@@ -47,11 +47,11 @@ node verify.js | grep -iE 'BABEL PARSE|Total lines'
 # NOTE: verify.js's crude whole-file counter reports Δ1/Δ0/Δ-1 — that is JSX-text
 # noise (literal braces/parens inside JSX), NOT an imbalance. Trust the script-scoped 0/0/0.
 
-# full regression suite — must end with "ALL <n> CHECKS PASSED" (currently 45)
+# full regression suite — must end with "ALL <n> CHECKS PASSED" (currently 47)
 bash run_all_tests.sh
 
 # sync the deploy file (see §4) and rebuild the offline test bundle
-cp Enova_Brain_Studio_2.html index.html
+node build_prod.js && cp index.prod.html index.html   # precompiled deploy build (npm run build)
 node build_offline.js
 ```
 
@@ -65,14 +65,14 @@ For UI changes, also run a Playwright drive of `index.offline.html` (headless Ch
 | File | Role |
 | --- | --- |
 | `Enova_Brain_Studio_2.html` | **The source.** ~11,573 lines. React 18 + Babel-standalone, single file. Edit this. |
-| `index.html` | **The deploy file** the user uploads (GitHub → Vercel). It is a **byte-for-byte copy of the source** — keep md5 identical. `cp source → index.html`. |
-| `index.offline.html` | Fully-inlined offline bundle (react/xlsx/decimal inlined). Built by `build_offline.js`. **This is what the browser tests load.** |
-| `index.prod.html` | Precompiled-JSX artifact from `build_prod.js` (test only — NOT the deploy file). |
+| `index.html` | **The deploy file** (GitHub → Vercel). The **precompiled production build** of the source — JSX compiled ahead of time, babel-standalone removed (faster load, no Babel console warnings). Build with `node build_prod.js && cp index.prod.html index.html`. NOT a raw copy of the source. |
+| `index.offline.html` | Fully-inlined offline bundle (react/xlsx/decimal inlined) built from `index.prod.html` by `build_offline.js`. **This is what the browser tests load.** Git-ignored artifact. |
+| `index.prod.html` | Precompiled build from `build_prod.js`; copied to `index.html` for deploy. Git-ignored artifact. |
+| `ci_verify.js` | Portable CI gate: rebuilds from source, proves `index.html` is that exact precompiled build. |
 | `verify.js`, `run_all_tests.sh`, `test_*.js`, `shoot_*.js` | Verification harness. |
 | `backups/` | Timestamped app backups (ephemeral — §7). |
 
-**Deploy = copy source to `index.html`, commit, Vercel builds.** DB migrations are applied separately via the
-Supabase MCP; there is no DB deploy step tied to the frontend push.
+**Deploy = `node build_prod.js && cp index.prod.html index.html` (npm run build), commit `index.html` + source, Vercel serves `index.html`.** DB migrations are applied separately via the Supabase MCP; there is no DB deploy step tied to the frontend push.
 
 ## 5. Architecture (what the wiring actually is)
 
@@ -132,6 +132,7 @@ Do not treat `backups/` as a safety net beyond the current session.
 The Project holds ~60 `claude/*.md` docs. Route to the relevant one instead of reading all:
 
 - Transactional inventory/purchasing/MO → `Enova_Transactional_SystemOfRecord_Shipped.md`
+- Document Vault (controlled docs / storage / retrieval) → `Enova_Document_Vault_Shipped.md`
 - Golden thread / commit gate → `Enova_GoldenThread_CommitGate_Shipped.md`, `Enova_GoldenThread_Reconciliation_*`
 - Pipeline lifecycle → `Enova_Pipeline_Lifecycle_Shipped.md`
 - Dashboard / reporting views → `Enova_Executive_Dashboard_Shipped.md`

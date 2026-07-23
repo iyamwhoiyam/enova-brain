@@ -69,6 +69,7 @@ run "readiness board"    node shoot_readiness.js
 run "commitment gate"    node shoot_commit.js
 run "moq + margin"       node shoot_moq_margin.js
 run "fronts + scope"     node shoot_fronts.js
+run "wip manager matrix"  node shoot_wipmatrix.js
 run "integrity gate"     node test_integrity.js
 run "gated pages render"  node test_gated_pages.js
 run "golden-thread gate"  node test_golden_thread.js
@@ -78,6 +79,10 @@ run "exec dashboard"      node test_dashboard.js
 run "formula library"     node test_library.js
 run "comms + qc"          node test_comms_qc.js
 run "stock control"       node test_stockcontrol.js
+run "document vault"      node test_vault.js
+run "audit & trace"       node test_audit.js
+run "command center"      node test_cc.js
+run "command palette"     node shoot_cmdk.js
 run "role gating"        node test_roles.js
 run "per-row overage"    node test_overage.js
 run "editable preview"   node test_preview.js

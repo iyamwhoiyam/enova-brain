@@ -4,6 +4,7 @@
   "private": true,
   "description": "Enova Brain Studio — the app is the single file index.html (React/JSX compiled in-browser). This package.json exists only to install the dev dependencies the regression suite (run_all_tests.sh) needs so CI can gate every deploy.",
   "scripts": {
+    "build": "node build_prod.js && cp index.prod.html index.html",
     "verify": "node ci_verify.js",
     "test": "bash run_all_tests.sh"
   },

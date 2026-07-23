@@ -2457,6 +2457,53 @@ input.fcell:focus{border-color:var(--teal);outline:none;background:#fff;}
 .sc-inline td{background:#f6f9fb;border-top:1px dashed #d5dde3;}
 .sc-inline-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 4px;}
 .sc-inline-row input{padding:5px 7px;border:1px solid var(--line,#d5dde3);border-radius:5px;font-size:13px;}
+/* §64 WIP manager-swimlane matrix (Shop-Ware style) */
+.wipm{display:grid;gap:8px;align-items:stretch;padding:4px;}
+.wipm-corner{display:flex;flex-direction:column;justify-content:center;padding:6px 12px;background:#1f3a5f;color:#fff;border-radius:8px;font-weight:700;min-height:46px;position:sticky;left:0;z-index:3;}
+.wipm-corner-a{font-size:13px;}
+.wipm-corner-b{font-size:11px;opacity:.82;font-weight:600;}
+.wipm-chead{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-radius:8px;font-weight:700;color:#33424f;background:#eef2f5;border-top:3px solid #9aa7b2;min-height:46px;}
+.wipm-chead .col-head-label{font-size:13px;}
+.wipm-chead .col-count{background:rgba(0,0,0,.08);border-radius:10px;padding:1px 8px;font-size:12px;}
+.wipm-rhead{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-radius:8px;background:#fff;border:1px solid #e2e8ee;border-left:4px solid #2f8fc4;font-weight:700;color:#243746;position:sticky;left:0;top:6px;z-index:2;align-self:start;min-height:44px;box-shadow:0 1px 4px rgba(20,40,60,.08);}
+.wipm-rhead.unassigned{border-left-color:#9aa7b2;color:#6b7885;}
+.wipm-rname{font-size:15px;}
+.wipm-rhead .col-count{background:#eef2f5;border-radius:10px;padding:1px 8px;font-size:12px;color:#5a6b7a;}
+.wipm-cell{min-height:56px;max-height:62vh;overflow-y:auto;background:#f6f9fb;border:1px solid #e8eef3;border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:6px;}
+.wipm-cell.drag-over{background:#e6f5ec;border-color:var(--teal,#2fae7a);box-shadow:inset 0 0 0 2px var(--teal,#2fae7a);}
+.wipm-empty{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;color:#b8c4ce;font-size:12px;border:1px dashed transparent;border-radius:6px;}
+.wipm-empty.drag-over{color:var(--teal,#2fae7a);border-color:var(--teal,#2fae7a);}
+.wipm-none{padding:26px;text-align:center;color:#8794a0;}
+/* §67 Command Center */
+.cc-live{display:flex;align-items:center;gap:6px;font-size:12px;color:#5a6b7a;margin-left:auto;}
+.cc-dot{width:9px;height:9px;border-radius:50%;background:#c4ccd3;display:inline-block;}
+.cc-dot.on{background:#2fae7a;box-shadow:0 0 0 0 rgba(47,174,122,.6);animation:ccpulse 2s infinite;}
+@keyframes ccpulse{0%{box-shadow:0 0 0 0 rgba(47,174,122,.5);}70%{box-shadow:0 0 0 7px rgba(47,174,122,0);}100%{box-shadow:0 0 0 0 rgba(47,174,122,0);}}
+.cc-alerts{display:flex;flex-wrap:wrap;gap:8px;}
+.cc-alert{display:flex;flex-direction:column;gap:1px;padding:7px 12px;border-radius:8px;border-left:4px solid #9aa7b2;background:#f4f8fb;min-width:210px;}
+.cc-alert.bad{border-left-color:#b4433a;background:#fbecea;}
+.cc-alert.warn{border-left-color:#e0912f;background:#fdf4e7;}
+.cc-alert.info{border-left-color:#2f8fc4;background:#eef6fb;}
+.cc-alert-t{font-weight:700;font-size:12px;color:#243746;}
+.cc-alert-x{font-size:12px;color:#5a6b7a;}
+/* §68 Command palette */
+.app-search{display:flex;align-items:center;gap:11px;padding:9px 14px;margin:6px 8px;cursor:pointer;border-radius:8px;background:rgba(255,255,255,.08);color:#e7edf2;font-size:13px;}
+.app-search:hover{background:rgba(255,255,255,.16);}
+.app-search .ni{font-size:15px;}
+.app-search-kbd{margin-left:auto;font-size:11px;background:rgba(255,255,255,.16);border-radius:4px;padding:1px 6px;}
+.app-sidebar.collapsed .app-search .nlabel,.app-sidebar.collapsed .app-search-kbd{display:none;}
+.cmdk-bg{position:fixed;inset:0;background:rgba(16,26,34,.42);z-index:400;display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;}
+.cmdk{width:min(620px,92vw);background:#fff;border-radius:12px;box-shadow:0 24px 64px rgba(15,30,45,.35);overflow:hidden;}
+.cmdk-input{width:100%;border:0;border-bottom:1px solid #e2e8ee;padding:16px 18px;font-size:16px;outline:none;box-sizing:border-box;}
+.cmdk-list{max-height:52vh;overflow-y:auto;}
+.cmdk-item{display:flex;align-items:center;gap:10px;padding:10px 16px;cursor:pointer;border-bottom:1px solid #f2f5f8;}
+.cmdk-item.on{background:#eef6fb;}
+.cmdk-ic{width:20px;text-align:center;}
+.cmdk-lbl{flex:1;font-size:14px;color:#243746;}
+.cmdk-sub{color:#8794a0;font-size:12px;}
+.cmdk-kind{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#9aa7b2;background:#f2f5f8;border-radius:4px;padding:2px 6px;}
+.cmdk-empty{padding:18px;color:#9aa7b2;font-size:14px;}
+.cmdk-foot{padding:8px 16px;border-top:1px solid #eef2f5;color:#9aa7b2;font-size:11px;}
 .rdy-cfg{max-width:820px;}
 .rdy-modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
 .rdy-modal-sub{font-size:12px;color:#5a6b7a;margin-bottom:12px;}
@@ -5191,6 +5238,7 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
   const [zoom, setZoom]         = useState(1.0);
   const [search, setSearch]     = useState('');
   const [pmFilter, setPmFilter] = useState('All');
+  const [rowMode, setRowMode]   = useState('pm');   // §64 'pm' = manager swimlanes (matrix) | 'none' = flat columns
   const [formFilter, setFormFilter] = useState('All');
   const [activeOnly, setActiveOnly] = useState(true);   // §49 default the board to committed jobs only
   const [front, setFront]       = useState('all');      // §53 operational front: all | commercial | production
@@ -5347,11 +5395,13 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
 
   // Reassigns 'order' for every card in targetStage, inserting the dragged card
   // at the exact position indicated (before/after targetPn, or appended if targetPn is null).
-  const reorderProjects = (draggedPn, targetStage, targetPn, position) => {
+  const reorderProjects = (draggedPn, targetStage, targetPn, position, targetPm) => {
     setProjects(prev => {
       const draggedIdx = prev.findIndex(p => p.pn === draggedPn);
       if (draggedIdx === -1) return prev;
       const dragged = { ...prev[draggedIdx], stage: targetStage };
+      // §64 drag-to-assign: dropping into a manager's swimlane reassigns the PM.
+      if (targetPm !== undefined) dragged.pm = (targetPm === 'Unassigned' ? '' : targetPm);
       const rest = prev.filter(p => p.pn !== draggedPn);
       const stageList = rest.filter(p => p.stage === targetStage)
         .sort((a,b) => (a.order ?? 999999) - (b.order ?? 999999));
@@ -5373,8 +5423,8 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
   };
 
   // Dropping on empty column background → append to end of that column
-  const onDrop = (stage) => {
-    if (dragId) reorderProjects(dragId, stage, null, null);
+  const onDrop = (stage, pmRow) => {
+    if (dragId) reorderProjects(dragId, stage, null, null, pmRow);
     setDragId(null); setDragOver(null); setDragOverCard(null);
   };
 
@@ -5388,12 +5438,74 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
   };
 
   // Dropping directly on a card → precise insertion at that position
-  const onCardDrop = (e, cardPn, stage) => {
+  const onCardDrop = (e, cardPn, stage, pmRow) => {
     e.preventDefault(); e.stopPropagation();
     if (dragId && dragId !== cardPn) {
-      reorderProjects(dragId, stage, cardPn, dragOverCard?.position || 'above');
+      reorderProjects(dragId, stage, cardPn, dragOverCard?.position || 'above', pmRow);
     }
     setDragId(null); setDragOver(null); setDragOverCard(null);
+  };
+
+  // ── §64 Manager swimlanes — Shop-Ware matrix (PM rows × stage columns) ─────
+  const PM_ROW_TEAM = ['Carlos','Tong','Marina','Nick','Jonathan','Joseph'];
+  const pmKeyOf = (p) => { const v = (p.pm||'').trim(); return (v && v!=='All' && v!=='`') ? v : 'Unassigned'; };
+  // The stage columns shown on the board (Completed/Cancelled live in Closed Projects; respect the front).
+  const wipCols = useMemo(() => stages.filter(s => s!=='Completed' && s!=='Cancelled').filter(s => front==='all' || stageFront(s)===front), [stages, front]);
+  // The manager rows: the fixed Enova team + any other PM present in the data + an Unassigned lane.
+  // When the name filter picks one manager, collapse to just that lane.
+  const wipmRows = useMemo(() => {
+    if (rowMode !== 'pm') return [];
+    if (pmFilter !== 'All') return [pmFilter];
+    const present = new Set(filtered.map(pmKeyOf));
+    const extras = [...present].filter(k => k!=='Unassigned' && !PM_ROW_TEAM.includes(k)).sort();
+    const rows = [...PM_ROW_TEAM, ...extras];
+    if (present.has('Unassigned')) rows.push('Unassigned');
+    return rows;
+  }, [rowMode, pmFilter, filtered]);
+  // Cards grouped by manager → stage, ordered by the same manual drag order the flat board uses.
+  const byPmStage = useMemo(() => {
+    const m = {};
+    filtered.forEach(p => {
+      const rk = pmKeyOf(p), st = normalizeStage(p.stage);
+      (m[rk] = m[rk] || {}); (m[rk][st] = m[rk][st] || []).push(p);
+    });
+    Object.values(m).forEach(byS => Object.values(byS).forEach(list => list.sort((a,b) => {
+      const ao = a.order, bo = b.order;
+      if (ao != null && bo != null) return ao - bo;
+      if (ao != null) return -1; if (bo != null) return 1;
+      return (b.dateReceived||'0000-00-00').localeCompare(a.dateReceived||'0000-00-00');
+    })));
+    return m;
+  }, [filtered]);
+  // One project-tile renderer reused by BOTH the flat columns and the swimlane cells. pmRow is set
+  // only in matrix mode → dropping the tile there reassigns the manager (drag-to-assign).
+  const wipCard = (p, stage, pmRow) => {
+    const showLineAbove = dragOverCard?.pn===p.pn && dragOverCard.position==='above' && dragId!==p.pn;
+    const showLineBelow = dragOverCard?.pn===p.pn && dragOverCard.position==='below' && dragId!==p.pn;
+    return (
+      <div key={p.pn} className={`card ${dragId===p.pn?'dragging':''}`} draggable
+        onDragStart={() => onDragStart(p.pn)} onDragEnd={onDragEnd}
+        onDragOver={e => onCardDragOver(e, p.pn, stage)}
+        onDrop={e => onCardDrop(e, p.pn, stage, pmRow)}
+        onClick={() => setPagePn(p.pn)}
+        style={{ borderTop: showLineAbove ? '3px solid var(--teal)' : undefined,
+                 borderBottom: showLineBelow ? '3px solid var(--teal)' : undefined,
+                 marginTop: showLineAbove ? 4 : undefined, marginBottom: showLineBelow ? 4 : undefined }}>
+        <div className="c-info" title="Project info" onClick={e => e.stopPropagation()}
+          onMouseEnter={e => openInfo(p, e.currentTarget.getBoundingClientRect())} onMouseLeave={scheduleClose}>i</div>
+        <div className="c-pn">{p.pn}</div>
+        <div className="c-prod">{p.product || '—'}</div>
+        <div className="c-cust">{cleanCustomer(p.customer)}</div>
+        <div className="c-meta">
+          <span className="tag tag-form" style={{background: FORM_CLR[p.dosageForm]||'#888'}}>
+            {(p.dosageForm||'').replace(' - Retail','').replace(' - Bulk',' Bulk')||'—'}</span>
+          {p.isBulk && <span className="tag tag-bulk">Bulk</span>}
+          <span className="tag tag-v">V{p.revision}{p.revCount>1?` (${p.revCount})`:''}</span>
+          {p.pm && p.pm !== 'All' && p.pm !== '`' && <span className="tag tag-rep">PM: {p.pm}</span>}
+        </div>
+        {p.dateReceivedDisplay && <div className="c-date">{p.dateReceivedDisplay}</div>}
+      </div>
+    );
   };
 
   // ── Click-and-drag background panning (Miro/Figma style) ───────────────
@@ -5746,6 +5858,11 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
           {pmFilter !== 'All' && (
             <button className="rep-btn danger" onClick={() => setPmFilter('All')}>✕ Clear</button>
           )}
+          <span className="filter-label" style={{marginLeft:14}}>Rows</span>
+          <button className={`rep-btn ${rowMode==='pm'?'active':''}`} onClick={() => setRowMode('pm')}
+            title="Manager swimlanes — one row per project manager (drag a tile into a row to assign it)">Managers</button>
+          <button className={`rep-btn ${rowMode==='none'?'active':''}`} onClick={() => setRowMode('none')}
+            title="Flat columns — the classic single-row board">Flat</button>
         </div>
       </div>
 
@@ -5801,81 +5918,82 @@ function WIPBoardPage({ projects, setProjects, onToggleNav, onFormulate, onOpenM
         onPointerCancel={endPan}
         onPointerLeave={endPan}>
         <div className="board-scale" ref={boardRef} style={{ transform: `scale(${zoom})` }}>
-          <div className="board">
-            {/* Completed & Cancelled are NOT columns here — they live in Closed Projects. */}
-            {stages.filter(s => s !== 'Completed' && s !== 'Cancelled').filter(s => front==='all' || stageFront(s)===front).map(stage => {
-              const cards = byStage[stage] || [];
-              const isDragTarget = dragOver === stage;
-              const colorCls = STAGE_COLOR_KEY(stage);
-              const isCol = !!collapsedCols[stage];
-              return (
-                <div key={stage} className={`col ${isCol ? 'col-collapsed' : ''}`}
-                  onDragOver={e => onDragOver(stage, e)}
-                  onDragLeave={onDragLeave}
-                  onDrop={() => onDrop(stage)}>
-
-                  <div className={`col-head clickable ${colorCls}`}
-                    onClick={() => toggleCol(stage)}
-                    title={isCol ? `Expand “${stage}”` : `Collapse “${stage}”`}
-                    role="button" tabIndex={0}
-                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCol(stage); } }}>
-                    <span className="col-head-label">{stage}</span>
-                    <span className="col-count">{cards.length}</span>
-                  </div>
-
-                  <div className={`col-body ${isDragTarget ? 'drag-over' : ''}`}>
-                    {cards.length === 0 ? (
-                      <div className={`empty-col ${isDragTarget ? 'drag-over' : ''}`}>
-                        {isDragTarget ? 'Drop here' : 'No projects'}
-                      </div>
-                    ) : (
-                      cards.map(p => {
-                        const showLineAbove = dragOverCard?.pn===p.pn && dragOverCard.position==='above' && dragId!==p.pn;
-                        const showLineBelow = dragOverCard?.pn===p.pn && dragOverCard.position==='below' && dragId!==p.pn;
-                        return (
-                        <div key={p.pn}
-                          className={`card ${dragId===p.pn?'dragging':''}`}
-                          draggable
-                          onDragStart={() => onDragStart(p.pn)}
-                          onDragEnd={onDragEnd}
-                          onDragOver={e => onCardDragOver(e, p.pn, stage)}
-                          onDrop={e => onCardDrop(e, p.pn, stage)}
-                          onClick={() => setPagePn(p.pn)}
-                          style={{
-                            borderTop: showLineAbove ? '3px solid var(--teal)' : undefined,
-                            borderBottom: showLineBelow ? '3px solid var(--teal)' : undefined,
-                            marginTop: showLineAbove ? 4 : undefined,
-                            marginBottom: showLineBelow ? 4 : undefined,
-                          }}>
-
-                          {/* top-right info button — hover shows full project info */}
-                          <div className="c-info" title="Project info"
-                            onClick={e => e.stopPropagation()}
-                            onMouseEnter={e => openInfo(p, e.currentTarget.getBoundingClientRect())}
-                            onMouseLeave={scheduleClose}>i</div>
-
-                          <div className="c-pn">{p.pn}</div>
-                          <div className="c-prod">{p.product || '—'}</div>
-                          <div className="c-cust">{cleanCustomer(p.customer)}</div>
-                          <div className="c-meta">
-                            <span className="tag tag-form"
-                              style={{background: FORM_CLR[p.dosageForm]||'#888'}}>
-                              {(p.dosageForm||'').replace(' - Retail','').replace(' - Bulk',' Bulk')||'—'}
-                            </span>
-                            {p.isBulk && <span className="tag tag-bulk">Bulk</span>}
-                            <span className="tag tag-v">V{p.revision}{p.revCount>1?` (${p.revCount})`:''}</span>
-                            {p.pm && p.pm !== 'All' && p.pm !== '`' && <span className="tag tag-rep">PM: {p.pm}</span>}
-                          </div>
-                          {p.dateReceivedDisplay && <div className="c-date">{p.dateReceivedDisplay}</div>}
-                        </div>
-                        );
-                      })
-                    )}
-                  </div>
+          {rowMode === 'pm' ? (
+            /* §64 Shop-Ware matrix: manager rows × stage columns, tiles in each cell. */
+            <div className="wipm" style={{ gridTemplateColumns: `170px repeat(${wipCols.length}, minmax(280px, 300px))` }}>
+              <div className="wipm-corner"><span className="wipm-corner-a">Manager</span><span className="wipm-corner-b">Stage →</span></div>
+              {wipCols.map(stage => (
+                <div key={stage} className={`wipm-chead ${STAGE_COLOR_KEY(stage)}`}>
+                  <span className="col-head-label">{stage}</span>
+                  <span className="col-count">{(byStage[stage]||[]).length}</span>
                 </div>
-              );
-            })}
-          </div>
+              ))}
+              {wipmRows.length === 0 ? (
+                <div className="wipm-none" style={{gridColumn:`1 / span ${wipCols.length+1}`}}>No projects match the current filters.</div>
+              ) : wipmRows.map(rk => {
+                const rowN = wipCols.reduce((n,s) => n + (((byPmStage[rk]||{})[s])||[]).length, 0);
+                return (
+                  <React.Fragment key={rk}>
+                    <div className={`wipm-rhead ${rk==='Unassigned'?'unassigned':''}`}
+                      title={rk==='Unassigned' ? 'Projects with no project manager assigned' : `${rk} — ${rowN} project(s)`}>
+                      <span className="wipm-rname">{rk}</span>
+                      <span className="col-count">{rowN}</span>
+                    </div>
+                    {wipCols.map(stage => {
+                      const cards = ((byPmStage[rk]||{})[stage]) || [];
+                      const cellKey = rk + '⋮' + stage;
+                      const isTarget = dragOver === cellKey;
+                      return (
+                        <div key={stage} className={`wipm-cell ${isTarget ? 'drag-over' : ''}`}
+                          onDragOver={e => { e.preventDefault(); setDragOver(cellKey); }}
+                          onDragLeave={onDragLeave}
+                          onDrop={() => onDrop(stage, rk)}>
+                          {cards.length ? cards.map(p => wipCard(p, stage, rk))
+                            : <div className={`wipm-empty ${isTarget ? 'drag-over' : ''}`}>{isTarget ? 'Drop here' : ''}</div>}
+                        </div>
+                      );
+                    })}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="board">
+              {/* Completed & Cancelled are NOT columns here — they live in Closed Projects. */}
+              {wipCols.map(stage => {
+                const cards = byStage[stage] || [];
+                const isDragTarget = dragOver === stage;
+                const colorCls = STAGE_COLOR_KEY(stage);
+                const isCol = !!collapsedCols[stage];
+                return (
+                  <div key={stage} className={`col ${isCol ? 'col-collapsed' : ''}`}
+                    onDragOver={e => onDragOver(stage, e)}
+                    onDragLeave={onDragLeave}
+                    onDrop={() => onDrop(stage)}>
+
+                    <div className={`col-head clickable ${colorCls}`}
+                      onClick={() => toggleCol(stage)}
+                      title={isCol ? `Expand “${stage}”` : `Collapse “${stage}”`}
+                      role="button" tabIndex={0}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCol(stage); } }}>
+                      <span className="col-head-label">{stage}</span>
+                      <span className="col-count">{cards.length}</span>
+                    </div>
+
+                    <div className={`col-body ${isDragTarget ? 'drag-over' : ''}`}>
+                      {cards.length === 0 ? (
+                        <div className={`empty-col ${isDragTarget ? 'drag-over' : ''}`}>
+                          {isDragTarget ? 'Drop here' : 'No projects'}
+                        </div>
+                      ) : (
+                        cards.map(p => wipCard(p, stage))
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -11356,6 +11474,649 @@ function StockControlPage({ projects, onToggleNav }){
   );
 }
 
+/* ══════════════════ §65 DOCUMENT VAULT — controlled documents: store · version · approve · retrieve ══════════════════
+   Every artifact (formula/quote/MFSO/BOM/MO/MBR/COA/label/spec/cert/SOP) is a versioned, status-tracked
+   controlled document with an sha-256, an approver + effective date, and supersession history. Files live in
+   the private, immutable `enova-documents` bucket; registry writes go through admin-gated, audited RPCs. */
+const DOC_TYPES = ['formula','quote','mfso','bom','mo','mbr','coa','label','spec','cert','sop','other'];
+const DOC_TYPE_LABEL = { formula:'Formula', quote:'Quote', mfso:'MFSO', bom:'BOM', mo:'MO', mbr:'MBR / Batch Record', coa:'COA', label:'Label', spec:'Specification', cert:'Certificate', sop:'SOP', other:'Other' };
+const DOC_STATUS = { draft:['Draft','neutral'], in_review:['In review','warn'], approved:['Approved','teal'], effective:['Effective','ok'], superseded:['Superseded','muted'], obsolete:['Obsolete','bad'] };
+function dvBytes(n){ const b=Number(n)||0; if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(0)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
+async function dvSha256(file){ try{ const buf=await file.arrayBuffer(); const h=await crypto.subtle.digest('SHA-256',buf); return [...new Uint8Array(h)].map(x=>x.toString(16).padStart(2,'0')).join(''); }catch(e){ return ''; } }
+async function dvDownload(path){
+  if(typeof sb==='undefined'||!sb||!path) return;
+  const { data, error } = await sb.storage.from('enova-documents').createSignedUrl(path, 300);
+  if(error){ toast('Could not open document: '+error.message,'err'); return; }
+  if(data && data.signedUrl && typeof window!=='undefined') window.open(data.signedUrl,'_blank');
+}
+
+function DocUploadModal({ projects, presetPn, onClose, onDone }){
+  const { isAdmin } = useRole();
+  const [pn,setPn] = useState(presetPn||'');
+  const [docType,setDocType] = useState('coa');
+  const [title,setTitle] = useState('');
+  const [file,setFile] = useState(null);
+  const [effective,setEffective] = useState(true);
+  const [busy,setBusy] = useState(false);
+  const pnList = useMemo(()=> (projects||[]).map(p=>p.pn).filter(Boolean), [projects]);
+  const submit = async ()=>{
+    if(!isAdmin){ toast('Only an admin can add a controlled document.','err'); return; }
+    if(!pn.trim()){ toast('Pick a project.','warn'); return; }
+    if(!file){ toast('Choose a file to upload.','warn'); return; }
+    if(typeof sb==='undefined'||!sb){ toast('Offline — sign in to add documents.','err'); return; }
+    setBusy(true);
+    try{
+      const safe = file.name.replace(/[^\w.\-]+/g,'_');
+      const path = pn.trim()+'/'+docType+'/'+Date.now()+'_'+safe;
+      const up = await sb.storage.from('enova-documents').upload(path, file, { upsert:false, contentType:file.type||'application/octet-stream' });
+      if(up.error) throw up.error;
+      const hash = await dvSha256(file);
+      const { data, error } = await sb.rpc('erp_doc_register', { p_pn:pn.trim(), p_doc_type:docType, p_title:title.trim()||null,
+        p_storage_path:path, p_sha256:hash, p_mime:file.type||'', p_bytes:file.size, p_source:'uploaded',
+        p_status: effective?'effective':'draft', p_effective_date: effective ? new Date().toISOString().slice(0,10) : null });
+      if(error) throw error;
+      toast(DOC_TYPE_LABEL[docType]+' rev '+(data&&data.revision||'')+' registered ('+(data&&data.status||'')+').','ok');
+      onDone && onDone();
+    }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); }
+    setBusy(false);
+  };
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal rdy-modal" onClick={e=>e.stopPropagation()} style={{maxWidth:560}}>
+        <div className="rdy-modal-head"><h3>Add controlled document</h3><button className="rdy-x" onClick={onClose}>✕</button></div>
+        <p className="rdy-modal-sub">Upload a file into the immutable document vault. It is versioned, sha-256 stamped, and — if marked effective — supersedes the prior version of the same type. {!isAdmin && <b>(Admin required.)</b>}</p>
+        <div style={{display:'flex',flexDirection:'column',gap:10}}>
+          <label className="sc-f"><span>Project #</span><input list="dv-pn-list" value={pn} onChange={e=>setPn(e.target.value)} placeholder="P26xxx"/></label>
+          <datalist id="dv-pn-list">{pnList.slice(0,1200).map(x=><option key={x} value={x}/>)}</datalist>
+          <label className="sc-f"><span>Document type</span>
+            <select value={docType} onChange={e=>setDocType(e.target.value)}>{DOC_TYPES.map(t=><option key={t} value={t}>{DOC_TYPE_LABEL[t]}</option>)}</select></label>
+          <label className="sc-f"><span>Title (optional)</span><input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Berberine HCl COA — Lot 12345"/></label>
+          <label className="sc-f"><span>File</span><input type="file" onChange={e=>setFile(e.target.files&&e.target.files[0])}/></label>
+          <label className="pp-f" style={{display:'flex',gap:8,alignItems:'center'}}>
+            <input type="checkbox" checked={effective} onChange={e=>setEffective(e.target.checked)}/>
+            <span className="fsmall">Mark effective now (becomes the current controlled version; supersedes the prior one). Uncheck to save as draft for later approval.</span></label>
+        </div>
+        <div style={{display:'flex',gap:8,marginTop:12}}>
+          <button className="fbtn ok" style={{marginLeft:'auto'}} disabled={busy||!isAdmin} onClick={submit}>{busy?'Uploading…':'Register document'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DocumentVaultPage({ projects, onToggleNav, targetPn, onTargetConsumed }){
+  const { isAdmin } = useRole();
+  const [state,setState] = useState({loading:true,err:null});
+  const [docs,setDocs] = useState([]);
+  const [q,setQ] = useState('');
+  const [typeF,setTypeF] = useState('all');
+  const [statusF,setStatusF] = useState('current');
+  const [pnF,setPnF] = useState(targetPn||'');
+  const [showUpload,setShowUpload] = useState(false);
+  const [busy,setBusy] = useState(false);
+
+  const load = React.useCallback(async ()=>{
+    if(typeof sb==='undefined'||!sb){ setState({loading:false,err:'offline'}); return; }
+    setState({loading:true,err:null});
+    try{
+      const { data, error } = await sb.from('erp_v_documents').select('*').order('generated_at',{ascending:false}).limit(2000);
+      if(error) throw error;
+      setDocs(data||[]); setState({loading:false,err:null});
+    }catch(e){ setState({loading:false,err:(e&&e.message)||'load failed'}); }
+  }, []);
+  useEffect(()=>{ load(); }, [load]);
+  useEffect(()=>{ if(targetPn){ setPnF(targetPn); if(onTargetConsumed) onTargetConsumed(); } }, [targetPn]);
+
+  const approve = async (d)=>{
+    if(!isAdmin){ toast('Only an admin can approve.','err'); return; }
+    setBusy(true);
+    const { error } = await sb.rpc('erp_doc_approve', { p_id:d.id, p_effective_date:new Date().toISOString().slice(0,10) });
+    setBusy(false);
+    if(error){ toast(error.message,'err'); return; }
+    toast(DOC_TYPE_LABEL[d.doc_type]+' rev '+d.revision+' → effective.','ok'); load();
+  };
+  const setStatus = async (d, status)=>{
+    if(!isAdmin){ toast('Only an admin can change status.','err'); return; }
+    if(status==='obsolete' && !(await confirmDialog({title:'Mark obsolete',message:'Mark this document obsolete? It stays in the vault for retention/audit but is no longer current.',confirmLabel:'Mark obsolete'}))) return;
+    setBusy(true);
+    const { error } = await sb.rpc('erp_doc_setstatus', { p_id:d.id, p_status:status });
+    setBusy(false);
+    if(error){ toast(error.message,'err'); return; }
+    toast('Status → '+status,'ok'); load();
+  };
+
+  const filtered = useMemo(()=>{
+    const lq=q.trim().toLowerCase();
+    return docs.filter(d=>{
+      if(typeF!=='all' && d.doc_type!==typeF) return false;
+      if(pnF.trim() && d.pn!==pnF.trim()) return false;
+      if(statusF==='current' && !['effective','approved'].includes(d.status)) return false;
+      else if(statusF!=='current' && statusF!=='all' && d.status!==statusF) return false;
+      if(lq && ![d.pn,d.customer,d.product,d.doc_type,d.title,d.author,d.approver].some(v=>String(v||'').toLowerCase().includes(lq))) return false;
+      return true;
+    });
+  }, [docs,q,typeF,statusF,pnF]);
+
+  const stats = useMemo(()=>({
+    total: docs.length,
+    effective: docs.filter(d=>d.status==='effective').length,
+    drafts: docs.filter(d=>['draft','in_review'].includes(d.status)).length,
+    projects: new Set(docs.map(d=>d.pn)).size,
+  }), [docs]);
+
+  const header = (
+    <div className="gen-top">
+      <button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+      <div className="gen-title">Document Vault</div>
+      <button className="fbtn ok sm" style={{marginLeft:'auto'}} onClick={()=>setShowUpload(true)} disabled={!isAdmin} title={isAdmin?'':'Admin only'}>+ Add document</button>
+      <button className="fbtn sec sm" onClick={load} disabled={state.loading}>{state.loading?'…':'↻ Refresh'}</button>
+    </div>
+  );
+  if(state.loading) return <div className="app-page gen-page" style={{background:'var(--paper)'}}>{header}<div className="pb-loading">Loading the document vault…</div></div>;
+  if(state.err==='offline') return <div className="app-page gen-page" style={{background:'var(--paper)'}}>{header}<div className="pb-loading">The vault stores controlled documents in Supabase. Sign in to use it.</div></div>;
+  if(state.err) return <div className="app-page gen-page" style={{background:'var(--paper)'}}>{header}<div className="pb-loading">Couldn’t load: {state.err} <button className="fbtn sec sm" onClick={load}>Retry</button></div></div>;
+
+  const Badge = ({s})=>{ const m=DOC_STATUS[s]||[s,'neutral']; return <span className={"fbadge "+(m[1]==='muted'?'neutral':m[1])} style={m[1]==='muted'?{opacity:.6}:undefined}>{m[0]}</span>; };
+
+  return (
+    <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+      {header}
+      <div className="gen-body">
+        <div className="dash-grid">
+          <div className="dash-tile teal"><div className="dash-v">{stats.total.toLocaleString()}</div><div className="dash-lab">Documents on file</div><div className="dash-sub">{stats.projects} projects</div></div>
+          <div className="dash-tile ok"><div className="dash-v">{stats.effective.toLocaleString()}</div><div className="dash-lab">Effective (current)</div><div className="dash-sub">controlled versions</div></div>
+          <div className="dash-tile warn"><div className="dash-v">{stats.drafts.toLocaleString()}</div><div className="dash-lab">Draft / in review</div><div className="dash-sub">awaiting approval</div></div>
+          <div className="dash-tile navy"><div className="dash-v">🔒</div><div className="dash-lab">Immutable · sha-256</div><div className="dash-sub">retained for audit</div></div>
+        </div>
+
+        <div className="panel dash-panel">
+          <h2>Controlled documents <span className="fsmall dash-src">erp_v_documents · immutable vault</span></h2>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginBottom:8}}>
+            <input className="sc-search" value={q} onChange={e=>setQ(e.target.value)} placeholder="Search doc, title, project, customer, author…" style={{maxWidth:320}}/>
+            <select value={typeF} onChange={e=>setTypeF(e.target.value)}><option value="all">All types</option>{DOC_TYPES.map(t=><option key={t} value={t}>{DOC_TYPE_LABEL[t]}</option>)}</select>
+            <select value={statusF} onChange={e=>setStatusF(e.target.value)}>
+              <option value="current">Current (effective)</option><option value="all">All statuses</option>
+              <option value="draft">Draft</option><option value="in_review">In review</option>
+              <option value="superseded">Superseded</option><option value="obsolete">Obsolete</option></select>
+            {pnF && <button className="fbtn sec sm" onClick={()=>setPnF('')}>✕ {pnF}</button>}
+          </div>
+          <table className="dash-tbl">
+            <thead><tr><th>Project</th><th>Type</th><th>Title</th><th className="num">Rev</th><th>Status</th><th>Effective</th><th>By</th><th></th></tr></thead>
+            <tbody>{filtered.slice(0,500).map(d=>(
+              <tr key={d.id}>
+                <td><button className="linklike" onClick={()=>setPnF(d.pn)} title="Filter to this project">{d.pn}</button><div className="fsmall" style={{color:'#8794a0'}}>{d.customer?cleanCustomer(d.customer):''}</div></td>
+                <td>{DOC_TYPE_LABEL[d.doc_type]||d.doc_type}</td>
+                <td>{d.title||<span style={{color:'#9aa7b2'}}>—</span>}{d.bytes?<span className="fsmall" style={{color:'#9aa7b2'}}> · {dvBytes(d.bytes)}</span>:null}</td>
+                <td className="num">v{d.revision}</td>
+                <td><Badge s={d.status}/></td>
+                <td className="fsmall">{d.effective_date||'—'}{d.approver?<div style={{color:'#8794a0'}}>{d.approver}</div>:null}</td>
+                <td className="fsmall">{d.author||'—'}</td>
+                <td style={{whiteSpace:'nowrap'}}>
+                  <button className="fbtn sec sm" onClick={()=>dvDownload(d.storage_path)} title="Open (signed URL)">Open</button>
+                  {isAdmin && ['draft','in_review','approved'].includes(d.status) && <button className="fbtn ok sm" disabled={busy} onClick={()=>approve(d)}>Approve</button>}
+                  {isAdmin && d.status!=='obsolete' && d.status!=='effective' && <button className="fbtn sec sm" disabled={busy} onClick={()=>setStatus(d,'obsolete')}>Obsolete</button>}
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+          {filtered.length===0 && <div className="fsmall" style={{padding:8}}>No documents match. {isAdmin ? <>Add one with <b>+ Add document</b>.</> : null}</div>}
+          {filtered.length>500 && <div className="fsmall" style={{padding:6}}>Showing 500 of {filtered.length} — narrow with search/filters.</div>}
+        </div>
+      </div>
+      {showUpload && <DocUploadModal projects={projects} presetPn={pnF} onClose={()=>setShowUpload(false)} onDone={()=>{ setShowUpload(false); load(); }} />}
+    </div>
+  );
+}
+
+/* ══════════════════ §66 AUDIT & TRACEABILITY — inspection-ready trail, lot genealogy, audit binder ══════════════════
+   Reads the immutable, hash-chained `studio_audit` (every action, attributable) and the transactional lot
+   ledger. Gives: a cross-project audit-trail viewer with filters + CSV export; a lot/MO genealogy trace
+   (a raw lot → its receipt/PO + the MOs it fed, or an MO → the raw lots it consumed); and a one-click,
+   printable project audit binder (effective controlled docs + full trail) for a customer/FDA audit. */
+function atEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function atExportAuditCsv(rows){
+  const cols=[['created_at','When (UTC)'],['pn','Project'],['actor_email','Actor'],['action','Action'],['detail','Detail'],['entry_hash','Entry hash']];
+  const cell=(v)=>{ let s=v==null?'':String(v); if(/[",\n]/.test(s)) s='"'+s.replace(/"/g,'""')+'"'; return s; };
+  const csv=cols.map(c=>c[1]).join(',')+'\n'+rows.map(r=>cols.map(c=>cell(r[c[0]])).join(',')).join('\n');
+  try{
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='enova_audit_'+new Date().toISOString().slice(0,10)+'.csv'; document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },2000);
+  }catch(e){ toast('Export failed: '+((e&&e.message)||e),'err'); }
+}
+function buildBinderHtml(pn, proj, docs, audit){
+  const eff=(docs||[]).filter(d=>d.status==='effective');
+  const drows=eff.map(d=>'<tr><td>'+atEsc(DOC_TYPE_LABEL[d.doc_type]||d.doc_type)+'</td><td>'+atEsc(d.title||'')+'</td><td>v'+atEsc(d.revision)+'</td><td>'+atEsc(d.effective_date||'')+'</td><td>'+atEsc(d.approver||'')+'</td><td class="mono">'+atEsc((d.sha256||'').slice(0,16))+'</td></tr>').join('');
+  const arows=(audit||[]).map(a=>'<tr><td>'+atEsc((a.created_at||'').replace('T',' ').slice(0,19))+'</td><td>'+atEsc(a.actor_email||'')+'</td><td>'+atEsc(a.action||'')+'</td><td>'+atEsc(a.detail||'')+'</td></tr>').join('');
+  const now=new Date().toISOString().slice(0,19).replace('T',' ');
+  return '<!doctype html><html><head><meta charset="utf-8"><title>Audit binder — '+atEsc(pn)+'</title>'
+   +'<style>body{font:13px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#1f2d38;margin:32px;}h1{font-size:20px;margin:0 0 2px;}h2{font-size:15px;border-bottom:2px solid #1f3a5f;padding-bottom:4px;margin-top:26px;}table{border-collapse:collapse;width:100%;font-size:12px;margin-top:6px;}th,td{border:1px solid #d5dde3;padding:5px 8px;text-align:left;vertical-align:top;}th{background:#eef2f5;}.mono{font-family:ui-monospace,Menlo,monospace;font-size:11px;}.meta{color:#5a6b7a;margin-bottom:6px;}.noprint{margin:12px 0;}@media print{.noprint{display:none;}}</style></head><body>'
+   +'<div class="noprint"><button onclick="window.print()">🖨 Print / Save as PDF</button></div>'
+   +'<h1>Enova Science — Project Audit Binder</h1>'
+   +'<div class="meta">Project '+atEsc(pn)+' · '+atEsc(proj.customer||proj.customer_name||'')+' · '+atEsc(proj.product||'')+' · generated '+atEsc(now)+' UTC</div>'
+   +'<h2>Effective controlled documents ('+eff.length+')</h2>'
+   +'<table><thead><tr><th>Type</th><th>Title</th><th>Rev</th><th>Effective</th><th>Approver</th><th>SHA-256</th></tr></thead><tbody>'+(drows||'<tr><td colspan="6">No effective documents on file.</td></tr>')+'</tbody></table>'
+   +'<h2>Audit trail ('+(audit||[]).length+' events · hash-chained, tamper-evident)</h2>'
+   +'<table><thead><tr><th>When (UTC)</th><th>Actor</th><th>Action</th><th>Detail</th></tr></thead><tbody>'+(arows||'<tr><td colspan="4">No audit events recorded.</td></tr>')+'</tbody></table>'
+   +'</body></html>';
+}
+
+function AuditTracePage({ projects, onToggleNav }){
+  const [tab,setTab] = useState('audit');
+  const [state,setState] = useState({loading:true,err:null});
+  const [audit,setAudit] = useState([]);
+  const [pnF,setPnF] = useState('');
+  const [actorF,setActorF] = useState('');
+  const [actionF,setActionF] = useState('all');
+  const [fromD,setFromD] = useState('');
+  const [toD,setToD] = useState('');
+  const [traceMode,setTraceMode] = useState('lot');
+  const [traceQ,setTraceQ] = useState('');
+  const [trace,setTrace] = useState(null);
+  const [tracing,setTracing] = useState(false);
+  const [binderPn,setBinderPn] = useState('');
+  const [binderBusy,setBinderBusy] = useState(false);
+
+  const loadAudit = React.useCallback(async ()=>{
+    if(typeof sb==='undefined'||!sb){ setState({loading:false,err:'offline'}); return; }
+    setState({loading:true,err:null});
+    try{
+      const { data, error } = await sb.from('studio_audit').select('*').order('created_at',{ascending:false}).limit(3000);
+      if(error) throw error;
+      setAudit(data||[]); setState({loading:false,err:null});
+    }catch(e){ setState({loading:false,err:(e&&e.message)||'load failed'}); }
+  },[]);
+  useEffect(()=>{ loadAudit(); },[loadAudit]);
+
+  const actions = useMemo(()=> ['all', ...new Set(audit.map(a=>a.action).filter(Boolean))].slice(0,80), [audit]);
+  const filteredAudit = useMemo(()=> audit.filter(a=>{
+    if(pnF.trim() && a.pn!==pnF.trim()) return false;
+    if(actorF.trim() && !String(a.actor_email||'').toLowerCase().includes(actorF.trim().toLowerCase())) return false;
+    if(actionF!=='all' && a.action!==actionF) return false;
+    const d=(a.created_at||'').slice(0,10);
+    if(fromD && d<fromD) return false;
+    if(toD && d>toD) return false;
+    return true;
+  }), [audit,pnF,actorF,actionF,fromD,toD]);
+
+  const pnList = useMemo(()=> (projects||[]).map(p=>p.pn).filter(Boolean), [projects]);
+
+  const runTrace = async ()=>{
+    if(typeof sb==='undefined'||!sb || !traceQ.trim()){ return; }
+    setTracing(true); setTrace(null);
+    try{
+      const q=traceQ.trim();
+      if(traceMode==='lot'){
+        const [rec,mov]=await Promise.all([
+          sb.from('erp_v_lot_receipts').select('*').ilike('lot_no','%'+q+'%').limit(200),
+          sb.from('erp_v_lot_ledger').select('*').ilike('lot_no','%'+q+'%').order('ts',{ascending:false}).limit(500),
+        ]);
+        setTrace({ mode:'lot', q, receipts:rec.data||[], movements:mov.data||[] });
+      } else {
+        const mov=await sb.from('erp_v_lot_ledger').select('*').ilike('ref','%'+q+'%').order('ts',{ascending:false}).limit(500);
+        setTrace({ mode:'mo', q, receipts:[], movements:mov.data||[] });
+      }
+    }catch(e){ toast('Trace failed: '+((e&&e.message)||e),'err'); }
+    setTracing(false);
+  };
+
+  const buildBinder = async ()=>{
+    const pn=binderPn.trim(); if(!pn){ toast('Pick a project first.','warn'); return; }
+    if(typeof sb==='undefined'||!sb){ toast('Offline — sign in to build a binder.','err'); return; }
+    setBinderBusy(true);
+    try{
+      const [docs,aud]=await Promise.all([
+        sb.from('erp_v_documents').select('*').eq('pn',pn).order('doc_type'),
+        sb.from('studio_audit').select('*').eq('pn',pn).order('created_at',{ascending:true}),
+      ]);
+      const proj=(projects||[]).find(p=>p.pn===pn)||{};
+      const html=buildBinderHtml(pn, proj, docs.data||[], aud.data||[]);
+      const w=window.open('','_blank');
+      if(w){ w.document.write(html); w.document.close(); } else toast('Allow pop-ups to open the binder.','warn');
+    }catch(e){ toast('Binder failed: '+((e&&e.message)||e),'err'); }
+    setBinderBusy(false);
+  };
+
+  const header = (
+    <div className="gen-top">
+      <button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+      <div className="gen-title">Audit &amp; Traceability</div>
+      <button className="fbtn sec sm" style={{marginLeft:'auto'}} onClick={loadAudit} disabled={state.loading}>{state.loading?'…':'↻ Refresh'}</button>
+    </div>
+  );
+  if(state.loading) return <div className="app-page gen-page" style={{background:'var(--paper)'}}>{header}<div className="pb-loading">Loading the audit trail…</div></div>;
+  if(state.err==='offline') return <div className="app-page gen-page" style={{background:'var(--paper)'}}>{header}<div className="pb-loading">Audit &amp; traceability read live from Supabase. Sign in to use it.</div></div>;
+  if(state.err) return <div className="app-page gen-page" style={{background:'var(--paper)'}}>{header}<div className="pb-loading">Couldn’t load: {state.err} <button className="fbtn sec sm" onClick={loadAudit}>Retry</button></div></div>;
+
+  return (
+    <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+      {header}
+      <div className="gen-body">
+        <div className="sc-tabs">
+          {[['audit','Audit Trail'],['trace','Lot / MO Trace'],['binder','Audit Binder']].map(([id,lab])=>(
+            <button key={id} className={"sc-tab "+(tab===id?'on':'')} onClick={()=>setTab(id)}>{lab}</button>
+          ))}
+        </div>
+
+        {tab==='audit' && (
+          <div className="panel dash-panel">
+            <h2>Immutable audit trail <span className="fsmall dash-src">studio_audit · hash-chained</span>
+              <button className="fbtn sec sm" style={{marginLeft:'auto'}} onClick={()=>atExportAuditCsv(filteredAudit)}>⭳ Export CSV ({filteredAudit.length})</button></h2>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginBottom:8}}>
+              <input className="sc-search" value={pnF} onChange={e=>setPnF(e.target.value)} placeholder="Project #" list="at-pn-list" style={{maxWidth:140}}/>
+              <datalist id="at-pn-list">{pnList.slice(0,1200).map(x=><option key={x} value={x}/>)}</datalist>
+              <input className="sc-search" value={actorF} onChange={e=>setActorF(e.target.value)} placeholder="Actor email" style={{maxWidth:200}}/>
+              <select value={actionF} onChange={e=>setActionF(e.target.value)}>{actions.map(a=><option key={a} value={a}>{a==='all'?'All actions':a}</option>)}</select>
+              <label className="fsmall" style={{color:'#5a6b7a'}}>From <input type="date" value={fromD} onChange={e=>setFromD(e.target.value)}/></label>
+              <label className="fsmall" style={{color:'#5a6b7a'}}>To <input type="date" value={toD} onChange={e=>setToD(e.target.value)}/></label>
+              {(pnF||actorF||actionF!=='all'||fromD||toD) && <button className="fbtn sec sm" onClick={()=>{setPnF('');setActorF('');setActionF('all');setFromD('');setToD('');}}>✕ Clear</button>}
+            </div>
+            <table className="dash-tbl">
+              <thead><tr><th>When (UTC)</th><th>Project</th><th>Actor</th><th>Action</th><th>Detail</th></tr></thead>
+              <tbody>{filteredAudit.slice(0,600).map(a=>(
+                <tr key={a.id}>
+                  <td className="fsmall mono">{(a.created_at||'').replace('T',' ').slice(0,19)}</td>
+                  <td>{a.pn?<button className="linklike" onClick={()=>setPnF(a.pn)}>{a.pn}</button>:<span style={{color:'#9aa7b2'}}>—</span>}</td>
+                  <td className="fsmall">{a.actor_email||'—'}</td>
+                  <td><span className="fbadge neutral">{a.action}</span></td>
+                  <td className="fsmall">{a.detail||''}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+            {filteredAudit.length===0 && <div className="fsmall" style={{padding:8}}>No audit events match.</div>}
+            {filteredAudit.length>600 && <div className="fsmall" style={{padding:6}}>Showing 600 of {filteredAudit.length} — narrow the filters or export CSV for the full set.</div>}
+          </div>
+        )}
+
+        {tab==='trace' && (
+          <div className="panel dash-panel">
+            <h2>Lot / MO genealogy <span className="fsmall dash-src">erp_v_lot_ledger · erp_v_lot_receipts</span></h2>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginBottom:10}}>
+              <span className="sc-tabs" style={{margin:0}}>
+                <button className={"sc-tab "+(traceMode==='lot'?'on':'')} onClick={()=>setTraceMode('lot')}>By raw lot #</button>
+                <button className={"sc-tab "+(traceMode==='mo'?'on':'')} onClick={()=>setTraceMode('mo')}>By MO #</button>
+              </span>
+              <input className="sc-search" value={traceQ} onChange={e=>setTraceQ(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')runTrace();}}
+                placeholder={traceMode==='lot'?'Enter a raw lot # (e.g. LOT-12345)':'Enter an MO # (e.g. MO260722-14)'} style={{maxWidth:320}}/>
+              <button className="fbtn ok sm" onClick={runTrace} disabled={tracing||!traceQ.trim()}>{tracing?'Tracing…':'Trace'}</button>
+            </div>
+            <div className="fsmall" style={{color:'#5a6b7a',marginBottom:10}}>
+              {traceMode==='lot'
+                ? 'Forward + backward trace for a raw-material lot: where it was received (PO/vendor) and every batch (MO) it was issued into — the recall view.'
+                : 'What went into a batch: every raw lot and quantity issued to this manufacturing order — the "what’s in this batch" view.'}
+            </div>
+            {trace && trace.mode==='lot' && (
+              <>
+                <h3 className="fsmall" style={{margin:'6px 0'}}>Receipt(s) — where lot “{trace.q}” came from</h3>
+                <table className="dash-tbl"><thead><tr><th>Lot</th><th>SKU</th><th>Material</th><th className="num">Qty received</th><th>Expiry</th><th>Received</th><th>Status</th></tr></thead>
+                  <tbody>{trace.receipts.map(r=>(<tr key={r.id}><td className="mono sm">{r.lot_no}</td><td className="mono sm">{r.sku}</td><td>{r.description||'—'}</td><td className="num">{r.qty}</td><td className="fsmall">{r.expiry||'—'}</td><td className="fsmall">{r.received_date||'—'}</td><td><span className="fbadge neutral">{r.status||'—'}</span></td></tr>))}</tbody></table>
+                {!trace.receipts.length && <div className="fsmall" style={{padding:6}}>No receipt on file for that lot.</div>}
+                <h3 className="fsmall" style={{margin:'14px 0 6px'}}>Movements — every batch this lot fed / adjustment</h3>
+                <table className="dash-tbl"><thead><tr><th>When</th><th>Type</th><th className="num">Qty</th><th>SKU</th><th>Reference (MO/PO)</th><th>Lots</th><th>By</th></tr></thead>
+                  <tbody>{trace.movements.map(m=>(<tr key={m.id}><td className="fsmall">{fmtTs(m.ts)}</td><td><span className={"fbadge "+(m.txn_type==='receipt'?'ok':m.txn_type==='issue'?'warn':'neutral')}>{m.txn_type}</span></td><td className="num strong" style={{color:Number(m.qty)<0?'#b4433a':'#1f7a4d'}}>{Number(m.qty)>0?'+':''}{m.qty}</td><td className="mono sm">{m.sku}</td><td className="fsmall">{m.ref||'—'}</td><td className="fsmall">{m.lot_no||'—'}</td><td className="fsmall">{m.actor||'—'}</td></tr>))}</tbody></table>
+                {!trace.movements.length && <div className="fsmall" style={{padding:6}}>No movements recorded for that lot yet.</div>}
+              </>
+            )}
+            {trace && trace.mode==='mo' && (
+              <>
+                <h3 className="fsmall" style={{margin:'6px 0'}}>Materials issued to “{trace.q}”</h3>
+                <table className="dash-tbl"><thead><tr><th>When</th><th>Type</th><th className="num">Qty</th><th>SKU</th><th>Material</th><th>Lots consumed</th><th>By</th></tr></thead>
+                  <tbody>{trace.movements.map(m=>(<tr key={m.id}><td className="fsmall">{fmtTs(m.ts)}</td><td><span className={"fbadge "+(m.txn_type==='issue'?'warn':'neutral')}>{m.txn_type}</span></td><td className="num strong">{m.qty}</td><td className="mono sm">{m.sku}</td><td>{m.description||'—'}</td><td className="fsmall">{m.lot_no||'—'}</td><td className="fsmall">{m.actor||'—'}</td></tr>))}</tbody></table>
+                {!trace.movements.length && <div className="fsmall" style={{padding:6}}>No issues recorded for that MO yet.</div>}
+              </>
+            )}
+            {!trace && <div className="fsmall" style={{padding:6,color:'#9aa7b2'}}>Enter a lot or MO number and press Trace. (Traces populate as production runs move stock through the transactional ledger.)</div>}
+          </div>
+        )}
+
+        {tab==='binder' && (
+          <div className="panel dash-panel">
+            <h2>Project audit binder <span className="fsmall dash-src">effective docs + full trail</span></h2>
+            <div className="fsmall" style={{color:'#5a6b7a',marginBottom:10}}>Builds a printable, inspection-ready binder for one project: its effective controlled documents (type, rev, effective date, approver, sha-256) and the complete hash-chained audit trail. Open it, then Print / Save as PDF.</div>
+            <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+              <label className="sc-f" style={{maxWidth:220}}><span>Project #</span><input list="at-binder-pn" value={binderPn} onChange={e=>setBinderPn(e.target.value)} placeholder="P26xxx"/></label>
+              <datalist id="at-binder-pn">{pnList.slice(0,1200).map(x=><option key={x} value={x}/>)}</datalist>
+              <button className="fbtn ok" style={{alignSelf:'flex-end'}} onClick={buildBinder} disabled={binderBusy||!binderPn.trim()}>{binderBusy?'Building…':'🖨 Build audit binder'}</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════ §67 OPERATIONS COMMAND CENTER — one live screen: everything inside the walls ══════════════════
+   Assembles the floor (live MOs), inventory health, purchasing, QC dispositions, cash, and an alert rail into
+   a single auto-refreshing operations view. Reads the erp_v_* aggregates + the live projects blob; polls every
+   45s so it stays current without a manual reload. Tablet-friendly (the tile/panel grid wraps). */
+function CommandCenterPage({ projects, onToggleNav }){
+  const [state,setState] = useState({loading:true,err:null});
+  const [d,setD] = useState({health:null,expiring:[],pos:[],mos:[],bott:[],cash:[],docs:[]});
+  const [updated,setUpdated] = useState('');
+  const [auto,setAuto] = useState(true);
+
+  const load = React.useCallback(async ()=>{
+    if(typeof sb==='undefined'||!sb){ setState({loading:false,err:'offline'}); return; }
+    try{
+      const [health,expiring,pos,mos,bott,cash,docs] = await Promise.all([
+        sb.from('erp_v_inventory_health').select('*').maybeSingle(),
+        sb.from('erp_v_expiring_lots').select('*').limit(60),
+        sb.from('erp_v_open_pos').select('*'),
+        sb.from('erp_v_mo_status').select('*'),
+        sb.from('erp_v_bottleneck').select('*'),
+        sb.from('erp_v_cash_forecast').select('*'),
+        sb.from('erp_v_docs_outstanding').select('ref,customer,product,doc'),
+      ]);
+      const e=[health,expiring,pos,mos,bott,cash,docs].map(r=>r&&r.error).find(Boolean); if(e) throw e;
+      setD({ health:(health&&health.data)||null, expiring:(expiring&&expiring.data)||[], pos:(pos&&pos.data)||[],
+             mos:(mos&&mos.data)||[], bott:(bott&&bott.data)||[], cash:(cash&&cash.data)||[], docs:(docs&&docs.data)||[] });
+      setUpdated(new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit'}));
+      setState({loading:false,err:null});
+    }catch(e){ setState({loading:false,err:(e&&e.message)||'load failed'}); }
+  },[]);
+  useEffect(()=>{ load(); },[load]);
+  useEffect(()=>{ if(!auto) return; const id=setInterval(()=>load(), 45000); return ()=>clearInterval(id); },[auto,load]);
+
+  const pc = useMemo(()=>{
+    const c={PRODUCTION:0,COMMITTED:0,PROSPECT:0,ONHOLD:0,DELIVERED:0,qcRunning:0,qcHold:0,qcReleased:0};
+    (projects||[]).forEach(p=>{ const cls=pipelineClass(p); if(c[cls]!=null)c[cls]++;
+      if(p.qc){ if(p.qc.disposition==='On Hold')c.qcHold++; else if(p.qc.disposition==='Released')c.qcReleased++; else c.qcRunning++; } });
+    c.activePipeline=c.PROSPECT+c.COMMITTED; c.qcAny=c.qcRunning+c.qcHold+c.qcReleased; return c;
+  },[projects]);
+
+  const liveMos = useMemo(()=> (d.mos||[]).filter(m=>['planned','in_progress'].includes(m.status)), [d.mos]);
+  const openPos = useMemo(()=> (d.pos||[]).filter(p=>['open','partial','draft'].includes(p.status)), [d.pos]);
+  const cashOut = useMemo(()=> (d.cash||[]).reduce((s,o)=>s+(Number(o.cash_outstanding_est)||0),0), [d.cash]);
+  const blocked = useMemo(()=> (d.bott||[]).reduce((s,b)=>s+(Number(b.blocked)||0),0), [d.bott]);
+  const amtWait = useMemo(()=> (d.bott||[]).reduce((s,b)=>s+(Number(b.amount_waiting)||0),0), [d.bott]);
+
+  const alerts = useMemo(()=>{
+    const A=[];
+    (d.mos||[]).filter(m=>Number(m.lines_short)>0).forEach(m=>A.push({sev:'bad',t:'Material shortage',x:(m.mo_no||('MO#'+m.id))+' · '+m.lines_short+' line(s) short'+(m.pn?(' · '+m.pn):'')}));
+    if(pc.qcHold>0) A.push({sev:'bad',t:'QC hold',x:pc.qcHold+' batch(es) on QA hold'});
+    (d.expiring||[]).filter(l=>Number(l.days_to_expiry)<=30).slice(0,8).forEach(l=>A.push({sev:'warn',t:'Lot expiring',x:l.lot_no+' ('+(l.description||l.sku)+') in '+l.days_to_expiry+'d'}));
+    if(d.health && Number(d.health.out_of_stock)>0) A.push({sev:'warn',t:'Out of stock',x:d.health.out_of_stock+' SKU(s) at/below zero'});
+    if(blocked>0) A.push({sev:'warn',t:'Blocked orders',x:blocked+' order(s) waiting'+(amtWait?(' · '+dMoneyC(amtWait)):'')});
+    if((d.docs||[]).length>0) A.push({sev:'info',t:'Documents outstanding',x:d.docs.length+' to cut/sign'});
+    return A;
+  },[d,pc,blocked,amtWait]);
+
+  const header = (
+    <div className="gen-top">
+      <button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+      <div className="gen-title">Command Center</div>
+      <span className="cc-live" title="Live operations view">
+        <span className={"cc-dot "+(auto?'on':'')}></span>{updated?('Updated '+updated):'—'}
+      </span>
+      <label className="fsmall" style={{color:'#5a6b7a',display:'flex',alignItems:'center',gap:4}}>
+        <input type="checkbox" checked={auto} onChange={e=>setAuto(e.target.checked)}/> auto 45s</label>
+      <button className="fbtn sec sm" onClick={load} disabled={state.loading}>{state.loading?'…':'↻ Refresh'}</button>
+    </div>
+  );
+  if(state.loading) return <div className="app-page gen-page" style={{background:'var(--paper)'}}>{header}<div className="pb-loading">Loading the live operations view…</div></div>;
+  if(state.err==='offline') return <div className="app-page gen-page" style={{background:'var(--paper)'}}>{header}<div className="pb-loading">The Command Center reads live operations from Supabase. Sign in to use it.</div></div>;
+  if(state.err) return <div className="app-page gen-page" style={{background:'var(--paper)'}}>{header}<div className="pb-loading">Couldn’t load: {state.err} <button className="fbtn sec sm" onClick={load}>Retry</button></div></div>;
+
+  const Tile=({v,l,s,tone})=>(<div className={"dash-tile "+(tone||"")}><div className="dash-v">{v}</div><div className="dash-lab">{l}</div>{s&&<div className="dash-sub">{s}</div>}</div>);
+
+  return (
+    <div className="app-page gen-page" style={{background:'var(--paper)'}}>
+      {header}
+      <div className="gen-body">
+        <div className="dash-grid">
+          <Tile tone="ok"   v={pc.PRODUCTION} l="In production" s={`${liveMos.length} live MO(s) · ${pc.ONHOLD} on hold`}/>
+          <Tile tone="teal" v={pc.activePipeline} l="Active pipeline" s={`${pc.COMMITTED} committed · ${pc.PROSPECT} prospects`}/>
+          <Tile tone="navy" v={d.health?dMoneyC(d.health.on_hand_value):'—'} l="On-hand value" s={d.health?`${(d.health.skus||0).toLocaleString()} SKUs · ${d.health.out_of_stock||0} out`:''}/>
+          <Tile tone="amber" v={dMoneyC(cashOut)} l="Cash outstanding" s={`${d.cash.length} orders`}/>
+          <Tile tone={pc.qcHold?'bad':'teal'} v={pc.qcAny} l="Batches in QC" s={`${pc.qcRunning} running · ${pc.qcHold} hold · ${pc.qcReleased} released`}/>
+          <Tile tone={blocked?'bad':'navy'} v={blocked} l="Blocked orders" s={amtWait?`${dMoneyC(amtWait)} waiting`:'clear'}/>
+        </div>
+
+        {/* Alert rail */}
+        <div className="panel dash-panel">
+          <h2>Alerts <span className="fsmall dash-src">{alerts.length} active</span></h2>
+          {alerts.length===0
+            ? <div className="fsmall" style={{color:'#1f7a4d',padding:'4px 0'}}>✓ All clear — no shortages, QC holds, expiries, or blocks.</div>
+            : <div className="cc-alerts">{alerts.map((a,i)=>(
+                <div key={i} className={"cc-alert "+a.sev}><span className="cc-alert-t">{a.t}</span><span className="cc-alert-x">{a.x}</span></div>
+              ))}</div>}
+        </div>
+
+        <div className="dash-cols">
+          {/* On the floor now */}
+          <div className="panel dash-panel">
+            <h2>On the floor now <span className="fsmall dash-src">erp_v_mo_status · live MOs</span></h2>
+            <table className="dash-tbl">
+              <thead><tr><th>MO #</th><th>Project</th><th>Status</th><th className="num">Issued</th><th className="num">Short</th></tr></thead>
+              <tbody>{liveMos.slice(0,20).map(m=>(
+                <tr key={m.id}>
+                  <td className="mono sm">{m.mo_no||('#'+m.id)}</td><td>{m.pn||'—'}</td>
+                  <td><span className={"fbadge "+(m.status==='in_progress'?'teal':'neutral')}>{m.status==='in_progress'?'In progress':'Planned'}</span></td>
+                  <td className="num">{Number(m.qty_issued||0)}/{Number(m.qty_required||0)}</td>
+                  <td className="num">{Number(m.lines_short)>0?<span className="fbadge bad">{m.lines_short}</span>:'—'}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+            {!liveMos.length && <div className="fsmall" style={{padding:6}}>No manufacturing orders running. (Open one on Stock Control.)</div>}
+          </div>
+
+          {/* Inventory health */}
+          <div className="panel dash-panel">
+            <h2>Inventory health <span className="fsmall dash-src">erp_v_inventory_health · expiring lots</span></h2>
+            <div className="fsmall" style={{marginBottom:6}}>
+              {d.health ? <><b>{dMoneyC(d.health.on_hand_value)}</b> on hand · {(d.health.skus||0).toLocaleString()} SKUs · <b style={{color:d.health.out_of_stock?'#b4433a':'#1f7a4d'}}>{d.health.out_of_stock||0}</b> out of stock</> : '—'}
+            </div>
+            <table className="dash-tbl">
+              <thead><tr><th>Lot</th><th>Material</th><th className="num">Qty</th><th>Expiry</th><th className="num">Days</th></tr></thead>
+              <tbody>{(d.expiring||[]).slice(0,12).map((l,i)=>(
+                <tr key={i}><td className="mono sm">{l.lot_no}</td><td>{l.description||l.sku}</td><td className="num">{l.qty}</td><td className="fsmall">{l.expiry}</td>
+                  <td className="num"><span className={"fbadge "+(Number(l.days_to_expiry)<=30?'bad':'warn')}>{l.days_to_expiry}d</span></td></tr>
+              ))}</tbody>
+            </table>
+            {!(d.expiring||[]).length && <div className="fsmall" style={{padding:6,color:'#1f7a4d'}}>✓ No lots expiring within 90 days.</div>}
+          </div>
+        </div>
+
+        <div className="dash-cols">
+          {/* Purchasing */}
+          <div className="panel dash-panel">
+            <h2>Purchasing — open POs <span className="fsmall dash-src">erp_v_open_pos</span></h2>
+            <table className="dash-tbl">
+              <thead><tr><th>PO #</th><th>Vendor</th><th>Status</th><th className="num">Recv/Ord</th><th className="num">Value</th><th>Expected</th></tr></thead>
+              <tbody>{openPos.slice(0,18).map(p=>(
+                <tr key={p.id}><td className="mono sm">{p.po_no||('#'+p.id)}</td><td>{p.vendor||'—'}</td>
+                  <td><span className={"fbadge "+(p.status==='partial'?'teal':p.status==='draft'?'neutral':'warn')}>{p.status}</span></td>
+                  <td className="num">{Number(p.units_received||0)}/{Number(p.units_ordered||0)}</td>
+                  <td className="num">{dMoneyC(p.po_value)}</td><td className="fsmall">{p.expected_date||'—'}</td></tr>
+              ))}</tbody>
+            </table>
+            {!openPos.length && <div className="fsmall" style={{padding:6}}>No open purchase orders.</div>}
+          </div>
+
+          {/* Bottleneck */}
+          <div className="panel dash-panel">
+            <h2>Where work is stuck <span className="fsmall dash-src">erp_v_bottleneck</span></h2>
+            <table className="dash-tbl">
+              <thead><tr><th>Department</th><th>Owner</th><th className="num">Waiting</th><th className="num">Blocked</th><th className="num">$ waiting</th></tr></thead>
+              <tbody>{(d.bott||[]).slice().sort((a,b)=>(Number(b.amount_waiting)||0)-(Number(a.amount_waiting)||0)).slice(0,10).map((b,i)=>(
+                <tr key={i}><td><strong>{b.department||'—'}</strong></td><td className="fsmall">{b.owner||'—'}</td>
+                  <td className="num">{b.orders_waiting}</td><td className="num">{Number(b.blocked)>0?<span className="fbadge bad">{b.blocked}</span>:'—'}</td>
+                  <td className="num strong">{dMoneyC(b.amount_waiting)}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════ §68 COMMAND PALETTE — ⌘K jump to any project or page ══════════════════
+   A global launcher. ⌘K / Ctrl+K (or the sidebar Search button, which fires an 'enova:palette' event)
+   opens it; type to fuzzy-jump to a project (by P#, customer, product, or PM) or any page. Keyboard-driven. */
+function CommandPalette({ projects, navItems, onNavigate, onOpenProject }){
+  const [open,setOpen] = useState(false);
+  const [q,setQ] = useState('');
+  const [idx,setIdx] = useState(0);
+  const inputRef = React.useRef(null);
+
+  useEffect(()=>{
+    const onKey=(e)=>{ if((e.metaKey||e.ctrlKey) && (e.key==='k'||e.key==='K')){ e.preventDefault(); setOpen(o=>!o); } };
+    const onEvt=()=>setOpen(true);
+    window.addEventListener('keydown',onKey);
+    window.addEventListener('enova:palette',onEvt);
+    return ()=>{ window.removeEventListener('keydown',onKey); window.removeEventListener('enova:palette',onEvt); };
+  },[]);
+  useEffect(()=>{ if(open){ setQ(''); setIdx(0); setTimeout(()=>{ try{ inputRef.current && inputRef.current.focus(); }catch(_){} },30); } },[open]);
+
+  const results = useMemo(()=>{
+    const lq=q.trim().toLowerCase();
+    const pages=(navItems||[]).filter(n=>n.ready!==false)
+      .filter(n=> !lq || n.label.toLowerCase().includes(lq) || String(n.id).includes(lq))
+      .map(n=>({ type:'page', key:'p:'+n.id, id:n.id, label:n.label, icon:n.icon }));
+    let projs=[];
+    if(lq){
+      projs=(projects||[]).filter(p=> [p.pn,p.customer,p.product,p.pm].some(v=>String(v||'').toLowerCase().includes(lq)))
+        .slice(0,8).map(p=>({ type:'project', key:'j:'+p.pn, pn:p.pn, label:(p.pn||'')+' · '+(p.product||'—'),
+          sub:(typeof cleanCustomer==='function'?cleanCustomer(p.customer):p.customer)||'' }));
+    }
+    return [...projs, ...pages].slice(0,14);
+  },[q,projects,navItems]);
+
+  useEffect(()=>{ if(idx>=results.length) setIdx(Math.max(0,results.length-1)); },[results.length]);
+
+  const activate=(r)=>{ if(!r) return; if(r.type==='page') onNavigate && onNavigate(r.id); else if(r.type==='project') onOpenProject && onOpenProject(r.pn); setOpen(false); };
+  const onInputKey=(e)=>{
+    if(e.key==='ArrowDown'){ e.preventDefault(); setIdx(i=>Math.min(results.length-1,i+1)); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); setIdx(i=>Math.max(0,i-1)); }
+    else if(e.key==='Enter'){ e.preventDefault(); activate(results[idx]); }
+    else if(e.key==='Escape'){ setOpen(false); }
+  };
+
+  if(!open) return null;
+  return (
+    <div className="cmdk-bg" onClick={()=>setOpen(false)}>
+      <div className="cmdk" onClick={e=>e.stopPropagation()}>
+        <input ref={inputRef} className="cmdk-input" value={q} onChange={e=>{ setQ(e.target.value); setIdx(0); }} onKeyDown={onInputKey}
+          placeholder="Jump to a project (P#, customer, product, PM) or a page…"/>
+        <div className="cmdk-list">
+          {results.length===0
+            ? <div className="cmdk-empty">No matches.</div>
+            : results.map((r,i)=>(
+                <div key={r.key} className={"cmdk-item "+(i===idx?'on':'')} onMouseEnter={()=>setIdx(i)} onClick={()=>activate(r)}>
+                  <span className="cmdk-ic">{r.type==='page'?(r.icon||'▸'):'🗂'}</span>
+                  <span className="cmdk-lbl">{r.label}{r.sub?<span className="cmdk-sub"> · {r.sub}</span>:null}</span>
+                  <span className="cmdk-kind">{r.type==='project'?'project':'page'}</span>
+                </div>
+              ))}
+        </div>
+        <div className="cmdk-foot">↑↓ move · ↵ open · esc close</div>
+      </div>
+    </div>
+  );
+}
+
 // Role context so any page can read the signed-in user's access level without prop-threading.
 const RoleContext = React.createContext({ isAdmin:true, role:'admin' });
 function useRole(){ return React.useContext(RoleContext); }
@@ -11515,6 +12276,7 @@ function App({ session }) {
 
   const NAV_ITEMS = [
     { id:'dashboard',   label:'Dashboard',   icon:'📊', ready:true },
+    { id:'command',     label:'Command Center', icon:'📡', ready:true },
     { id:'intake',      label:'Sales Intake',icon:'📥', ready:true },
     { id:'wip',         label:'WIP Board',   icon:'📋', ready:true },
     { id:'readiness',   label:'Readiness',   icon:'🚦', ready:true },
@@ -11522,8 +12284,10 @@ function App({ session }) {
     { id:'formulation', label:'Formulation', icon:'🧪', ready:true },
     { id:'quote',       label:'Quote',       icon:'💰', ready:true },
     { id:'documents',   label:'Documents',   icon:'📄', ready:true },
+    { id:'vault',       label:'Document Vault', icon:'📁', ready:true },
     { id:'production',  label:'Production',   icon:'🏭', ready:true },
     { id:'review',      label:'Review Queue', icon:'🔎', ready:true },
+    { id:'audit',       label:'Audit & Trace', icon:'🔗', ready:true },
     { id:'inventory',   label:'Inventory',   icon:'📦', ready:true },
     { id:'stockctl',    label:'Stock Control',icon:'🚚', ready:true },
     { id:'sourcing',    label:'Sourcing',    icon:'🌱', ready:true },
@@ -11543,6 +12307,10 @@ function App({ session }) {
           </div>
           <button className="sb-toggle" onClick={toggleNav}
             title={collapsed?'Expand sidebar':'Collapse sidebar'} aria-label="Toggle sidebar">☰</button>
+        </div>
+        <div className="app-search" onClick={()=>{ try{ window.dispatchEvent(new CustomEvent('enova:palette')); }catch(_){} }}
+          title="Search / jump to anything (⌘K)">
+          <span className="ni">🔍</span><span className="nlabel">Search</span><span className="app-search-kbd">⌘K</span>
         </div>
         {NAV_ITEMS.map(item => (
           <div key={item.id}
@@ -11570,11 +12338,13 @@ function App({ session }) {
       </div>
       <ToastHost />
       <ConfirmHost />
+      <CommandPalette projects={projects} navItems={NAV_ITEMS} onNavigate={setNav} onOpenProject={openProjectPage} />
       {showPwChange && <ChangePasswordModal onClose={()=>setShowPwChange(false)} />}
       <div className="app-page">
         {role==='viewer' && <div className="falert warn" style={{margin:0,borderRadius:0,zIndex:150}}>👁 <strong>Viewer access</strong> — you can see everything but can't save changes. Ask an Enova admin (Carlos, Tong, Joseph, Marina, Nick, Jonathan, or Ryan) for edit access.</div>}
         {writeErr && <div className="falert err" style={{margin:0,borderRadius:0,display:'flex',alignItems:'center',gap:8,zIndex:150}}><span style={{flex:1}}>⚠ {writeErr}</span><button className="fbtn sec sm" onClick={()=>setWriteErr(null)}>Dismiss</button></div>}
         {nav === 'dashboard' && <DashboardPage projects={projects} onToggleNav={toggleNav} />}
+        {nav === 'command' && <CommandCenterPage projects={projects} onToggleNav={toggleNav} />}
         {nav === 'intake' && <IntakePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} targetPn={intakePn} onTargetConsumed={()=>setIntakePn(null)} />}
         {nav === 'wip' && <WIPBoardPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onFormulate={goFormulate} onOpenMFSO={goMFSO} onSendReview={sendReview} people={ENOVA_PEOPLE} openPagePn={openPn} onPageOpened={()=>setOpenPn(null)} onUpdateProject={updateProject} onRenameProject={renameProject} onDeleteProject={deleteProject} />}
         {nav === 'readiness' && <ReadinessPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onOpenMFSO={goMFSO} onOpenProject={openProjectPage} gateConfig={rdyCfg} />}
@@ -11582,8 +12352,10 @@ function App({ session }) {
         {nav === 'formulation' && <FormulationPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} targetPn={formulationPn} autoGenPn={pendingGen} onGenConsumed={()=>setPendingGen(null)} />}
         {nav === 'quote' && <QuotePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} />}
         {nav === 'documents' && <DocumentsPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} targetPn={documentsPn} onTargetConsumed={()=>setDocumentsPn(null)} />}
+        {nav === 'vault' && <DocumentVaultPage projects={projects} onToggleNav={toggleNav} />}
         {nav === 'production' && <ProductionBoardPage onToggleNav={toggleNav} />}
         {nav === 'review' && <ReviewQueuePage onToggleNav={toggleNav} />}
+        {nav === 'audit' && <AuditTracePage projects={projects} onToggleNav={toggleNav} />}
         {nav === 'inventory' && <InventoryPage onToggleNav={toggleNav} onCloudPush={sharedInv.push} cloudStatus={sharedInv.status} />}
         {nav === 'stockctl' && <StockControlPage projects={projects} onToggleNav={toggleNav} />}
         {nav === 'sourcing' && <SourcingPage onToggleNav={toggleNav} sourcing={sourcing} />}

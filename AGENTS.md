@@ -114,6 +114,13 @@ via SQL; flag it, don't try to migrate it.
   cGMP docs BOM·MO·MMR/MBR are built here) / `PRODUCTION` (batch actually running: executed MBR + QC) /
   `ONHOLD` / `DELIVERED` / `ARCHIVED` (dead quotes — hidden from live pipeline, fully searchable, formulas
   retained in the Formula Library). **MFSO-signed ≠ In Production.**
+- **Stage integrity (§70):** a stage is a *claim*, not proof. The WIP board places each project at
+  `effectiveStage(p)` — the highest ladder rung whose artifacts (real product name / dosed formula /
+  costed COGS / signed MFSO, cumulative per `STAGE_REQUIRES`) actually pass — caps **downward only**, and
+  keeps the reported stage as a hover note + a red `⚠ needs …` flag. `stageAdvanceGate` blocks dragging a
+  card into MFSO/PO Submitted/In Production without the prereqs (admin override → `logAudit` STAGE
+  OVERRIDE). On Hold / Completed / Cancelled are off-ladder — never capped or gated. **Never invent a
+  product name, formula, or cost to clear a gate.** Details: `Enova_Stage_Integrity_Shipped.md`.
 - **New JSONB fields** get a `FORMULATION_DEFAULTS` entry + a `migrateProject` guard so old blobs upgrade
   cleanly. Never assume a field exists.
 - **Test-harness SSR quirks:** install the `React.useState` override BEFORE `vm.runInContext` (the app captures
@@ -138,6 +145,7 @@ The Project holds ~60 `claude/*.md` docs. Route to the relevant one instead of r
 - Dashboard / reporting views → `Enova_Executive_Dashboard_Shipped.md`
 - Sales intake → `Enova_Sales_Intake_Gate_Shipped.md`
 - Comms + QC/batch → `Enova_Comms_and_QC_Shipped.md`
+- WIP stage integrity (cap placement + flag + advance gate) → `Enova_Stage_Integrity_Shipped.md`
 - Formula engine / cost core → `Enova_Formulation_Generator_Engine.md`, `Enova_Brain_Kernel_Architecture.md`
 - Schema / migration → `Enova_Relational_Schema_Phase1.md`, `Enova_Relational_Migration_and_Slice1.md`
 

@@ -2244,6 +2244,18 @@ input.fcell:focus{border-color:var(--teal);outline:none;background:#fff;}
 .fbtn.del{background:#fff;border-color:var(--bad);color:var(--bad);}
 .fbtn.sm{padding:4px 9px;font-size:11px;}
 .fbrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;}
+/* §71 Generate-from-concept panel */
+.bp-gen{margin-top:10px;padding:12px;border:1px solid var(--teal);border-radius:6px;background:var(--teal-soft);}
+.bp-gen-row{display:flex;gap:8px;align-items:center;}
+.bp-gen-input{flex:1;font-family:var(--sans);font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:4px;}
+.bp-gen-hint{font-size:11px;color:#5a6b7a;margin:7px 2px 4px;}
+.bp-gen-item{display:flex;gap:10px;align-items:center;justify-content:space-between;background:#fff;border:1px solid var(--line);border-radius:5px;padding:8px 10px;margin-top:7px;}
+.bp-gen-main{min-width:0;flex:1;}
+.bp-gen-h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;}
+.bp-gen-name{font-weight:700;font-size:13px;color:var(--ink);}
+.bp-gen-form{font-size:10.5px;color:#7b8794;text-transform:uppercase;letter-spacing:.03em;}
+.bp-gen-actives{font-size:11px;color:#4a5a68;margin-top:3px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+.bp-gen-empty{font-size:12px;color:#8a6500;padding:8px 2px;}
 .fts{display:flex;gap:18px;flex-wrap:wrap;padding-top:9px;margin-top:8px;border-top:1px solid var(--line);}
 .ftl{font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:#857b6c;display:block;}
 .ftv{font-size:14px;font-weight:700;font-family:var(--mono);}
@@ -10064,28 +10076,38 @@ async function callClaudeF(blocks, maxTokens = 2500) {
     proxy,
     key
   } = aiConfig();
-  if (!proxy && !key) {
-    throw new Error('AI extraction is not configured. Open "AI Settings" in the intake panel and add your Enova extraction proxy URL (recommended) or an Anthropic API key.');
-  }
   const payload = {
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-5",
     max_tokens: maxTokens,
     messages: [{
       role: "user",
       content: blocks
     }]
   };
-  let r;
+  // Transport, in preference order:
+  //  (1) a custom Enova proxy URL (advanced), (2) a raw Anthropic key pasted in AI Settings
+  //  (quick internal testing only — visible in the file), or (3) DEFAULT: Enova's own Supabase
+  //  Edge Function `intake-extract`, which holds the API key SERVER-SIDE (never in the browser)
+  //  and only runs for signed-in users. No client setup needed — extraction just works.
+  let d;
   if (proxy) {
-    r = await fetch(proxy, {
+    const r = await fetch(proxy, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify(payload)
     });
-  } else {
-    r = await fetch("https://api.anthropic.com/v1/messages", {
+    if (!r.ok) {
+      let t = '';
+      try {
+        t = await r.text();
+      } catch (e) {}
+      throw new Error(`Extraction API error ${r.status}${t ? ': ' + t.slice(0, 200) : ''}`);
+    }
+    d = await r.json();
+  } else if (key) {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -10095,15 +10117,32 @@ async function callClaudeF(blocks, maxTokens = 2500) {
       },
       body: JSON.stringify(payload)
     });
+    if (!r.ok) {
+      let t = '';
+      try {
+        t = await r.text();
+      } catch (e) {}
+      throw new Error(`Extraction API error ${r.status}${t ? ': ' + t.slice(0, 200) : ''}`);
+    }
+    d = await r.json();
+  } else {
+    // Built-in secure default — server-side key via the Edge Function.
+    const {
+      data,
+      error
+    } = await sb.functions.invoke('intake-extract', {
+      body: payload
+    });
+    if (error) {
+      let msg = error && error.message || 'service error';
+      try {
+        const b = await error.context.json();
+        if (b && b.error) msg = b.error;
+      } catch (e) {}
+      throw new Error('AI extraction failed: ' + msg);
+    }
+    d = data;
   }
-  if (!r.ok) {
-    let t = '';
-    try {
-      t = await r.text();
-    } catch (e) {}
-    throw new Error(`Extraction API error ${r.status}${t ? ': ' + t.slice(0, 200) : ''}`);
-  }
-  const d = await r.json();
   // Accept a raw Anthropic response, or a proxy that returns {text} / {content} / a JSON string.
   let raw;
   if (typeof d === 'string') raw = d;else if (typeof d.text === 'string') raw = d.text;else if (Array.isArray(d.content)) raw = d.content.filter(b => b.type === "text").map(b => b.text).join("");else raw = JSON.stringify(d);
@@ -10577,7 +10616,7 @@ function FIntakePanel({
       marginBottom: 8,
       color: "#c4d3dd"
     }
-  }, engine === "offline" ? /*#__PURE__*/React.createElement(React.Fragment, null, "\u26A1 ", /*#__PURE__*/React.createElement("strong", null, "Offline parser"), " \u2014 reads pasted/typed text and .txt / .docx / .xlsx entirely in your browser. No API, no cost, works with zero setup. For PDFs or images, switch to AI.") : /*#__PURE__*/React.createElement(React.Fragment, null, "\u2728 ", /*#__PURE__*/React.createElement("strong", null, "AI extraction"), " \u2014 sends the request to your extraction proxy; best for messy PDFs and images. Falls back to the offline parser automatically if the API is unavailable.")), showAI && /*#__PURE__*/React.createElement("div", {
+  }, engine === "offline" ? /*#__PURE__*/React.createElement(React.Fragment, null, "\u26A1 ", /*#__PURE__*/React.createElement("strong", null, "Offline parser"), " \u2014 reads pasted/typed text and .txt / .docx / .xlsx entirely in your browser. No API, no cost, works with zero setup. For PDFs or images, switch to AI.") : /*#__PURE__*/React.createElement(React.Fragment, null, "\u2728 ", /*#__PURE__*/React.createElement("strong", null, "AI extraction"), " \u2014 runs through Enova's secure server-side extraction service; best for messy PDFs and images. Falls back to the offline parser automatically if it's unavailable.")), showAI && /*#__PURE__*/React.createElement("div", {
     className: "falert info",
     style: {
       marginBottom: 8
@@ -10615,11 +10654,11 @@ function FIntakePanel({
     className: "fbtn sec sm",
     onClick: () => setShowAI(false)
   }, "Cancel"))), engine === "ai" && !configured && !showAI && /*#__PURE__*/React.createElement("div", {
-    className: "falert warn",
+    className: "falert",
     style: {
       marginBottom: 8
     }
-  }, "AI engine selected but no proxy/key is set. Click ", /*#__PURE__*/React.createElement("strong", null, "\u2699 AI Settings"), " to connect it, or switch to the ", /*#__PURE__*/React.createElement("strong", null, "\u26A1 Offline"), " engine \u2014 no setup needed."), mode === "upload" && /*#__PURE__*/React.createElement("div", {
+  }, "\u2728 Uses Enova's built-in secure extraction \u2014 reads PDFs & images server-side, no key in this file. ", /*#__PURE__*/React.createElement("strong", null, "\u2699 AI Settings"), " is optional (a custom proxy or key). If extraction reports the key isn't set, an Enova admin adds ", /*#__PURE__*/React.createElement("code", null, "ANTHROPIC_API_KEY"), " in Supabase \u2192 Edge Functions \u2192 Secrets."), mode === "upload" && /*#__PURE__*/React.createElement("div", {
     className: "fr",
     style: {
       alignItems: "center"
@@ -10978,6 +11017,62 @@ function FGummyBase({
 }
 
 // ── Formulation Page ────────────────────────────────────────────────────
+// §72 ONE ENGINE, NOT TWO — Build Full Formula + Generate-from-concept run the DETERMINISTIC engine
+// that lives in the DATABASE (erp_generate_formula: house system, shell sizing, fill balance, live
+// MISys cost — no AI), so the app and the DB can never drift. The client EnovaFormulator stays as an
+// OFFLINE fallback when the DB is unreachable. Returns EnovaFormulator.build's shape (DB sku → alt).
+async function runEngine(form, req) {
+  try {
+    const {
+      data,
+      error
+    } = await sb.rpc('erp_generate_formula', {
+      p_actives: (req.actives || []).map(a => ({
+        name: a.name,
+        alt: a.alt || null,
+        mg: Number(a.mg) || 0
+      })),
+      p_form: form,
+      p_serving_size: Number(req.servingSize) || 1,
+      p_target_serving_mg: Number(req.targetServingMg) > 0 ? Number(req.targetServingMg) : null,
+      p_target_serving_ml: Number(req.targetServingMl) > 0 ? Number(req.targetServingMl) : null,
+      // §73 per-unit roll-up inputs: servings/unit drives cols N/O/P + M92; PO qty drives batch cols W/X.
+      p_servings_per_unit: Number(req.servingsPerUnit) > 0 ? Number(req.servingsPerUnit) : null,
+      p_po_qty: Number(req.poQty) > 0 ? Number(req.poQty) : null,
+      p_packaging: Array.isArray(req.packaging) && req.packaging.length ? req.packaging : null
+    });
+    if (!error && data && !data.error && Array.isArray(data.rows) && data.rows.length) {
+      return {
+        form: data.form || form,
+        engine: 'db',
+        rows: data.rows.map(r => ({
+          name: r.name,
+          alt: r.sku || null,
+          mg: Number(r.mg) || 0,
+          role: r.role,
+          source: r.source,
+          confirm: !!r.confirm,
+          note: r.note || null
+        })),
+        warnings: data.warnings || [],
+        notes: data.notes || [],
+        detail: data
+      };
+    }
+  } catch (e) {/* fall back to the offline engine below */}
+  const EFmt = typeof window !== 'undefined' && window.EnovaFormulator ? window.EnovaFormulator : null;
+  if (EFmt) {
+    const o = EFmt.build(form, req);
+    if (o) o.engine = 'offline';
+    return o;
+  }
+  return {
+    form,
+    rows: [],
+    warnings: ['Formula engine unavailable — reconnect and try again.'],
+    notes: []
+  };
+}
 function FormulationPage({
   projects,
   setProjects,
@@ -11085,6 +11180,14 @@ function FormulationEditor({
     ...p,
     ...patch
   } : p));
+  // §71 Generate-from-concept state — search Enova's Blueprint Library and drop proven actives in.
+  const [bpOpen, setBpOpen] = useState(false);
+  const [bpQuery, setBpQuery] = useState('');
+  const [bpResults, setBpResults] = useState([]);
+  const [bpBusy, setBpBusy] = useState(false);
+  // §73 Deterministic-engine detail — the full Master Formula column set + M92 roll-up that
+  // erp_generate_formula returns. Populated on Build / Generate / the "Engine detail" button.
+  const [engineOut, setEngineOut] = useState(null);
 
   // Rename the Project # — the number a project is filed under. NEVER overwrites another project:
   // if the target number is already in use it is BLOCKED with a warning (pn is the DB primary key).
@@ -11341,13 +11444,47 @@ function FormulationEditor({
   // Keeps the customer actives, then adds/refreshes the Enova house-standard system for the form
   // (e.g. capsules: 0.75% mag stearate + 0.75% silica flow + MCC balanced to the shell). Every
   // added row is a real MISys SKU, flagged "Enova standard" and fully editable — nothing approved.
-  const buildTurnkey = () => {
-    if (locked) return;
-    const EFmt = typeof window !== 'undefined' && window.EnovaFormulator ? window.EnovaFormulator : null;
-    if (!EFmt) {
-      toast('Formulation engine still loading — try again in a moment.', 'warn');
-      return;
+  // §73 Finished-good packaging as a PER-UNIT list for the engine's M92 roll-up. Mirrors the cost
+  // core exactly (shell × pieces/container; house-standard label/foil/stick-display; shipper &
+  // non-stick display spread across the master case), so the engine's packaging_cost_per_unit equals
+  // the app's displayed packaging cost to the cent. Each line carries an explicit per-unit price and
+  // qty 1, so cost_unit = price. Empty when nothing is selected → engine flags packaging pending.
+  const buildEnginePackaging = () => {
+    const out = [];
+    const ppc = piecesPerContainer,
+      cpk = casePack || 1;
+    if (cfg.shell && proj.shellItem) {
+      const f = INV_IX[proj.shellItem.n];
+      out.push({
+        role: 'Capsule Shell',
+        desc: f && f.d || proj.shellItem.n,
+        sku: proj.shellItem.n,
+        price: (f && f.u != null ? f.u : 0) * ppc,
+        qty: 1
+      });
     }
+    (pkgSlots || []).forEach(slot => {
+      const sel = (proj.pkg || {})[slot.k];
+      if (!sel) return;
+      const f = INV_IX[sel.n];
+      let perUnit;
+      if (slot.k === 'foil') perUnit = ENOVA_STICKPACK_COST * ppc;else if (slot.k === 'display' && isStickForm && !isBulkPack) perUnit = ENOVA_STICK_DISPLAY_COST;else {
+        const u = slot.k === 'label' ? ENOVA_LABEL_COST : f && f.u != null ? f.u : 0;
+        const perCase = isBulkPack || slot.k === 'shipper' || slot.k === 'display';
+        perUnit = perCase ? u / cpk : u;
+      }
+      out.push({
+        role: slot.l,
+        desc: f && f.d || sel.n,
+        sku: sel.n,
+        price: perUnit,
+        qty: 1
+      });
+    });
+    return out;
+  };
+  const buildTurnkey = async () => {
+    if (locked) return;
     // Actives = every current row NOT previously added by the engine (flagged enovaStandard).
     // Using the flag (not a SKU list) preserves a customer active even when it IS a house SKU
     // (e.g. citric acid dosed as an active), and lets a rebuild cleanly replace the old system.
@@ -11366,13 +11503,16 @@ function FormulationEditor({
     // an explicit servVolMl override is set. Powder ("scoops") + stickpack ("Ea") carry the weight
     // separately in servWtMg.
     const isLiquidForm = /liquid|tincture|shot|syrup|sachet/i.test(proj.dosageForm || '');
-    const out = EFmt.build(proj.dosageForm, {
+    const out = await runEngine(proj.dosageForm, {
       actives,
       servingSize: proj.servingSize,
       servingsPerUnit: proj.servingsPerUnit,
+      poQty: Number(proj.batchUnits) > 0 ? Number(proj.batchUnits) : undefined,
+      packaging: buildEnginePackaging(),
       targetServingMg: Number(proj.servWtMg) > 0 ? Number(proj.servWtMg) : undefined,
       targetServingMl: Number(proj.servVolMl) > 0 ? Number(proj.servVolMl) : isLiquidForm && Number(proj.servingSize) > 0 ? Number(proj.servingSize) : undefined
     });
+    setEngineOut(out && out.detail ? out.detail : null);
     const sysOnly = (out.rows || []).filter(r => r.source && r.source !== 'request');
     if (!sysOnly.length) {
       toast(out.warnings && out.warnings[0] || 'No deterministic system for ' + proj.dosageForm + ' yet.', 'warn');
@@ -11406,6 +11546,152 @@ function FormulationEditor({
     logAudit(setProjects, proj.pn, 'Turnkey formula built (Enova Formulator)', [(out.notes || []).join(' · '), ...(out.warnings || [])].filter(Boolean).join(' | '));
     const warn = (out.warnings || []).length ? ' ⚠ ' + out.warnings[0] : '';
     toast('Built the Enova-standard system for ' + proj.dosageForm + ' (' + sysRows.length + ' component(s)) — review every row before approving.' + warn, warn ? 'warn' : 'ok');
+  };
+  // §71 Generate from concept — search the Enova Blueprint Library (concept → proven actives,
+  // seeded from Enova's own formulas), then drop the actives in and, for engine-supported forms,
+  // build the complete house-standard formula in one action. Nothing invented; everything flagged
+  // for review. Reuses the exact EnovaFormulator + INV_IX path as ⚙ Build Full Formula.
+  const bpSearch = async () => {
+    const q = (bpQuery || '').trim();
+    setBpBusy(true);
+    try {
+      const {
+        data,
+        error
+      } = await sb.rpc('erp_blueprint_search', {
+        q: q || null,
+        p_form: null
+      });
+      if (error) {
+        toast('Blueprint search failed: ' + error.message, 'err');
+        setBpResults([]);
+      } else setBpResults(data || []);
+    } catch (e) {
+      toast('Blueprint search failed.', 'err');
+      setBpResults([]);
+    }
+    setBpBusy(false);
+  };
+  const genFromBlueprint = async b => {
+    if (locked) {
+      toast('This formula is approved & locked. Unlock it first to replace the formula.', 'warn');
+      return;
+    }
+    setBpBusy(true);
+    try {
+      const {
+        data,
+        error
+      } = await sb.from('erp_blueprint_ingredients').select('name,sku,typical_mg,line_no').eq('blueprint_id', b.id).eq('is_active', true).order('line_no');
+      if (error) {
+        toast('Could not load blueprint: ' + error.message, 'err');
+        setBpBusy(false);
+        return;
+      }
+      const lines = (data || []).filter(l => (l.name || '').trim());
+      if (!lines.length) {
+        toast('That blueprint has no actives on file.', 'warn');
+        setBpBusy(false);
+        return;
+      }
+      if ((proj.ingredients || []).length && !(await confirmDialog({
+        message: `Replace the current ${(proj.ingredients || []).length}-ingredient formula on ${proj.pn} with ${lines.length} proposed active(s) from "${b.name}"?`,
+        confirmLabel: 'Use blueprint'
+      }))) {
+        setBpBusy(false);
+        return;
+      }
+      const activeRows = lines.map(l => ({
+        id: Math.random(),
+        item: l.sku && typeof INV_IX !== 'undefined' && INV_IX[l.sku] ? INV_IX[l.sku] : null,
+        inputMg: Number(l.typical_mg) || 0,
+        potencyPct: 100,
+        aiSuggested: true,
+        blueprintProposed: true,
+        importedName: typeof cleanIngName === 'function' ? cleanIngName(l.name) : l.name,
+        importedAlt: l.sku || null
+      }));
+      const form = (typeof normalizeImportedForm === 'function' ? normalizeImportedForm(b.dosage_form) : b.dosage_form) || proj.dosageForm;
+      const patch = {
+        ingredients: activeRows
+      };
+      if (form && form !== proj.dosageForm) patch.dosageForm = form;
+      let sysCount = 0,
+        warnTxt = '';
+      if (/capsule|tablet|caplet|powder|stick|liquid|tincture|shot|syrup|sachet/i.test(form || '')) {
+        const isLiquidForm = /liquid|tincture|shot|syrup|sachet/i.test(form || '');
+        const out = await runEngine(form, {
+          actives: activeRows.filter(r => (Number(r.inputMg) || 0) > 0).map(r => ({
+            name: r.importedName,
+            alt: r.importedAlt,
+            mg: Number(r.inputMg) || 0
+          })),
+          servingSize: proj.servingSize,
+          servingsPerUnit: proj.servingsPerUnit,
+          poQty: Number(proj.batchUnits) > 0 ? Number(proj.batchUnits) : undefined,
+          packaging: buildEnginePackaging(),
+          targetServingMg: Number(proj.servWtMg) > 0 ? Number(proj.servWtMg) : undefined,
+          targetServingMl: Number(proj.servVolMl) > 0 ? Number(proj.servVolMl) : isLiquidForm && Number(proj.servingSize) > 0 ? Number(proj.servingSize) : undefined
+        });
+        setEngineOut(out && out.detail ? out.detail : null);
+        const sysOnly = (out.rows || []).filter(r => r.source && r.source !== 'request');
+        const haveAlts = new Set(activeRows.map(r => r.importedAlt || r.item && r.item.n).filter(Boolean));
+        const sysRows = sysOnly.filter(r => !(r.alt && haveAlts.has(r.alt))).map(r => ({
+          id: Math.random(),
+          item: r.alt && typeof INV_IX !== 'undefined' && INV_IX[r.alt] ? INV_IX[r.alt] : null,
+          inputMg: r.mg,
+          potencyPct: 100,
+          importedName: r.name,
+          importedAlt: r.alt || null,
+          enovaRole: r.role || null,
+          enovaNote: r.note || null,
+          enovaStandard: true,
+          enovaConfirm: !!r.confirm,
+          aiSuggested: true
+        }));
+        sysCount = sysRows.length;
+        warnTxt = (out.warnings || []).length ? ' ⚠ ' + out.warnings[0] : '';
+        patch.ingredients = [...activeRows, ...sysRows];
+      }
+      upd(patch);
+      logAudit(setProjects, proj.pn, 'Generated from concept blueprint', `"${b.name}" → ${activeRows.length} active(s)${sysCount ? ` + ${sysCount} house-standard` : ''}`);
+      setBpOpen(false);
+      toast(`Loaded ${activeRows.length} proposed active(s) from "${b.name}"${sysCount ? ` + ${sysCount} house-standard component(s)` : ''} — review every row before approving.${warnTxt}`, warnTxt ? 'warn' : 'ok');
+    } catch (e) {
+      toast('Generate from concept failed: ' + (e && e.message || e), 'err');
+    }
+    setBpBusy(false);
+  };
+  // §73 Read-only: compute the deterministic-engine detail (full Master Formula column set + M92
+  // roll-up) for the CURRENT formula straight from erp_generate_formula + live MISys. Changes no row.
+  const showEngineDetail = async () => {
+    const activeRows = (proj.ingredients || []).filter(r => !r.enovaStandard);
+    const actives = activeRows.filter(r => (Number(r.inputMg) || 0) > 0).map(r => ({
+      name: r.importedName || r.item && r.item.d || '',
+      alt: r.importedAlt || r.item && r.item.n || null,
+      mg: Number(r.inputMg) || 0
+    }));
+    if (!actives.length) {
+      toast('Add at least one dosed active first.', 'warn');
+      return;
+    }
+    const isLiquidForm = /liquid|tincture|shot|syrup|sachet/i.test(proj.dosageForm || '');
+    const out = await runEngine(proj.dosageForm, {
+      actives,
+      servingSize: proj.servingSize,
+      servingsPerUnit: proj.servingsPerUnit,
+      poQty: Number(proj.batchUnits) > 0 ? Number(proj.batchUnits) : undefined,
+      packaging: buildEnginePackaging(),
+      targetServingMg: Number(proj.servWtMg) > 0 ? Number(proj.servWtMg) : undefined,
+      targetServingMl: Number(proj.servVolMl) > 0 ? Number(proj.servVolMl) : isLiquidForm && Number(proj.servingSize) > 0 ? Number(proj.servingSize) : undefined
+    });
+    if (out && out.detail) {
+      setEngineOut(out.detail);
+      toast('Engine detail computed from live MISys prices.', 'ok');
+    } else {
+      setEngineOut(null);
+      toast(out && out.warnings && out.warnings[0] || 'No deterministic engine for ' + proj.dosageForm + ' yet (gummies use the gummy base).', 'warn');
+    }
   };
   const setBaseItem = (i, item) => {
     if (locked) return;
@@ -11965,12 +12251,63 @@ function FormulationEditor({
     className: "fbtn sec sm",
     disabled: locked,
     onClick: addIng
-  }, "+ Add Ingredient"), /capsule|powder|stick|liquid|tincture|shot|syrup|sachet/i.test(proj.dosageForm || '') && /*#__PURE__*/React.createElement("button", {
+  }, "+ Add Ingredient"), /capsule|tablet|caplet|powder|stick|liquid|tincture|shot|syrup|sachet/i.test(proj.dosageForm || '') && /*#__PURE__*/React.createElement("button", {
     className: "fbtn navy sm",
     disabled: locked,
     onClick: buildTurnkey,
     title: "Add the Enova house-standard system for this form \u2014 derived from Enova's own formulas \u2014 and balance the fill: capsules fill to the shell, powder/stickpack balance the bulking carrier to the serving/stick weight, liquids balance water to the serving volume. Every added row is editable and taste levels are flagged for review."
-  }, "\u2699 Build Full Formula (Enova standard)")), /*#__PURE__*/React.createElement("div", {
+  }, "\u2699 Build Full Formula (Enova standard)"), /*#__PURE__*/React.createElement("button", {
+    className: "fbtn sec sm",
+    disabled: locked,
+    onClick: () => setBpOpen(o => !o),
+    title: "Search Enova's Blueprint Library \u2014 concept \u2192 proven actives from your real formulas \u2014 and generate a complete formula to review."
+  }, "\u2728 Generate from concept"), /capsule|tablet|caplet|powder|stick|liquid|tincture|shot|syrup|sachet/i.test(proj.dosageForm || '') && /*#__PURE__*/React.createElement("button", {
+    className: "fbtn sec sm",
+    onClick: showEngineDetail,
+    title: "Show the full Master Formula column set (input mg, g/unit, kg/unit, $/kg, vendor, cost/unit, batch) and the blend\u2192finished-good roll-up (direct materials per unit, cell M92) straight from erp_generate_formula + live MISys. Read-only \u2014 changes no row."
+  }, "\uD83E\uDDEE Engine detail (M92)")), bpOpen && /*#__PURE__*/React.createElement("div", {
+    className: "bp-gen"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bp-gen-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "bp-gen-input",
+    placeholder: "Concept, product, indication, or an active \u2014 e.g. \u201Csleep\u201D, \u201CNMN\u201D, \u201Cliver support\u201D",
+    value: bpQuery,
+    onChange: e => setBpQuery(e.target.value),
+    onKeyDown: e => {
+      if (e.key === 'Enter') bpSearch();
+    },
+    autoFocus: true
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "fbtn navy sm",
+    disabled: bpBusy,
+    onClick: bpSearch
+  }, bpBusy ? '…' : 'Search'), /*#__PURE__*/React.createElement("button", {
+    className: "fbtn del sm",
+    onClick: () => setBpOpen(false),
+    title: "Close"
+  }, "\xD7")), /*#__PURE__*/React.createElement("div", {
+    className: "bp-gen-hint"
+  }, "Proposes proven actives from Enova's Blueprint Library (built from your real formulas). Every line is flagged for review \u2014 nothing is invented."), bpResults.map(b => /*#__PURE__*/React.createElement("div", {
+    key: b.id,
+    className: "bp-gen-item"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bp-gen-main"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bp-gen-h"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "bp-gen-name"
+  }, b.name), /*#__PURE__*/React.createElement("span", {
+    className: "bp-gen-form"
+  }, b.dosage_form || '—', " \xB7 ", b.active_count, " active", b.active_count === 1 ? '' : 's')), /*#__PURE__*/React.createElement("div", {
+    className: "bp-gen-actives"
+  }, b.actives)), /*#__PURE__*/React.createElement("button", {
+    className: "fbtn navy sm",
+    disabled: locked || bpBusy,
+    onClick: () => genFromBlueprint(b)
+  }, "Use \u2192"))), !bpBusy && bpQuery.trim() && !bpResults.length && /*#__PURE__*/React.createElement("div", {
+    className: "bp-gen-empty"
+  }, "No matching blueprint. Try another term, or add the actives manually below.")), /*#__PURE__*/React.createElement("div", {
     className: "fts"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "ftl"
@@ -11988,7 +12325,154 @@ function FormulationEditor({
     className: "ftl"
   }, "Blend cost/unit"), /*#__PURE__*/React.createElement("span", {
     className: "ftv"
-  }, f$(blendCPU, 4))))), /*#__PURE__*/React.createElement("div", {
+  }, f$(blendCPU, 4))))), engineOut && /*#__PURE__*/React.createElement("div", {
+    className: "panel"
+  }, /*#__PURE__*/React.createElement("h2", null, "Deterministic Engine \u2014 Master Formula columns & M92", /*#__PURE__*/React.createElement("button", {
+    className: "fbtn sec sm",
+    onClick: showEngineDetail,
+    style: {
+      marginLeft: "auto"
+    },
+    title: "Recompute from the current formula + live MISys prices."
+  }, "\u21BB Recompute"), /*#__PURE__*/React.createElement("span", {
+    className: "fbadge ok"
+  }, "DB engine \xB7 no AI"), /*#__PURE__*/React.createElement("button", {
+    className: "fbtn del sm",
+    onClick: () => setEngineOut(null),
+    title: "Hide"
+  }, "\xD7")), /*#__PURE__*/React.createElement("p", {
+    className: "fsmall",
+    style: {
+      marginTop: -4,
+      marginBottom: 8
+    }
+  }, "Exactly what ", /*#__PURE__*/React.createElement("code", null, "erp_generate_formula"), " returns from live MISys prices \u2014 the per-line Master Formula columns and the blend\u2192finished-good roll-up (cell ", /*#__PURE__*/React.createElement("strong", null, "M92"), "). Read-only; changes no row above."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowX: "auto"
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "ftbl"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: "24%"
+    }
+  }, "Ingredient"), /*#__PURE__*/React.createElement("th", null, "SKU"), /*#__PURE__*/React.createElement("th", null, "Vendor"), /*#__PURE__*/React.createElement("th", null, "Input mg/srv"), /*#__PURE__*/React.createElement("th", null, "g/unit"), /*#__PURE__*/React.createElement("th", null, "kg/unit"), /*#__PURE__*/React.createElement("th", null, "$/kg"), /*#__PURE__*/React.createElement("th", null, "Cost/srv"), /*#__PURE__*/React.createElement("th", null, "Cost/unit"), engineOut.po_qty ? /*#__PURE__*/React.createElement("th", null, "Batch $") : null)), /*#__PURE__*/React.createElement("tbody", null, (engineOut.rows || []).map((r, i) => /*#__PURE__*/React.createElement("tr", {
+    key: i,
+    className: r.unpriced ? "f-flagged" : r.source && r.source !== "request" ? "f-ai" : ""
+  }, /*#__PURE__*/React.createElement("td", null, r.name, r.role ? /*#__PURE__*/React.createElement("div", {
+    className: "fsmall",
+    style: {
+      opacity: .7
+    }
+  }, r.role) : null), /*#__PURE__*/React.createElement("td", {
+    className: "fsmall",
+    style: {
+      fontFamily: "var(--mono)"
+    }
+  }, r.sku || "—"), /*#__PURE__*/React.createElement("td", {
+    className: "fsmall"
+  }, r.vendor || "—"), /*#__PURE__*/React.createElement("td", {
+    className: "fsmall",
+    style: {
+      fontFamily: "var(--mono)"
+    }
+  }, fN(r.input_mg_serving, 3)), /*#__PURE__*/React.createElement("td", {
+    className: "fsmall",
+    style: {
+      fontFamily: "var(--mono)"
+    }
+  }, r.g_unit != null ? fN(r.g_unit, 4) : "—"), /*#__PURE__*/React.createElement("td", {
+    className: "fsmall",
+    style: {
+      fontFamily: "var(--mono)"
+    }
+  }, r.kg_unit != null ? fN(r.kg_unit, 6) : "—"), /*#__PURE__*/React.createElement("td", {
+    className: "fsmall",
+    style: {
+      fontFamily: "var(--mono)"
+    }
+  }, r.price_per_kg != null ? f$(r.price_per_kg, 4) : /*#__PURE__*/React.createElement("span", {
+    className: "fbadge bad"
+  }, "no price")), /*#__PURE__*/React.createElement("td", {
+    className: "fsmall",
+    style: {
+      fontFamily: "var(--mono)"
+    }
+  }, f$(r.cost_per_serving, 5)), /*#__PURE__*/React.createElement("td", {
+    className: "fsmall",
+    style: {
+      fontFamily: "var(--mono)",
+      fontWeight: 600
+    }
+  }, r.cost_unit != null ? f$(r.cost_unit, 5) : "—"), engineOut.po_qty ? /*#__PURE__*/React.createElement("td", {
+    className: "fsmall",
+    style: {
+      fontFamily: "var(--mono)"
+    }
+  }, r.cost_batch != null ? f$(r.cost_batch, 2) : "—") : null))))), Array.isArray(engineOut.packaging_rows) && engineOut.packaging_rows.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "fsmall",
+    style: {
+      fontWeight: 600,
+      marginBottom: 4
+    }
+  }, "Finished-good packaging (per unit) \u2014 feeds M92"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: "6px 14px"
+    }
+  }, engineOut.packaging_rows.map((pk, i) => /*#__PURE__*/React.createElement("span", {
+    key: i,
+    className: "fsmall",
+    style: {
+      fontFamily: "var(--mono)"
+    }
+  }, pk.role, pk.sku ? " · " + pk.sku : "", ": ", f$(pk.cost_unit, 5))))), /*#__PURE__*/React.createElement("div", {
+    className: "fts"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "ftl"
+  }, "Blend cost/serving"), /*#__PURE__*/React.createElement("span", {
+    className: "ftv"
+  }, f$(engineOut.materials_cost_per_serving, 5))), engineOut.blend && engineOut.blend.serving_weight_g != null && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "ftl"
+  }, "Serving weight (g)"), /*#__PURE__*/React.createElement("span", {
+    className: "ftv"
+  }, fN(engineOut.blend.serving_weight_g, 4))), engineOut.blend && engineOut.blend.blend_cost_per_unit != null && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "ftl"
+  }, "Blend cost/unit (P69)"), /*#__PURE__*/React.createElement("span", {
+    className: "ftv"
+  }, f$(engineOut.blend.blend_cost_per_unit, 5))), engineOut.packaging_cost_per_unit != null && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "ftl"
+  }, "Packaging/unit"), /*#__PURE__*/React.createElement("span", {
+    className: "ftv"
+  }, f$(engineOut.packaging_cost_per_unit, 5))), engineOut.direct_materials_per_unit != null && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "ftl",
+    title: "Master Formula cell M92 \u2014 blend + packaging per finished unit"
+  }, "Direct materials/unit (M92)"), /*#__PURE__*/React.createElement("span", {
+    className: "ftv",
+    style: {
+      fontWeight: 700
+    }
+  }, f$(engineOut.direct_materials_per_unit, 5))), engineOut.batch && engineOut.batch.materials_cost != null && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "ftl"
+  }, "Batch materials (", Number(engineOut.batch.units).toLocaleString(), " u)"), /*#__PURE__*/React.createElement("span", {
+    className: "ftv"
+  }, f$(engineOut.batch.materials_cost, 2)))), Array.isArray(engineOut.unpriced_lines) && engineOut.unpriced_lines.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "falert warn",
+    style: {
+      marginTop: 8
+    }
+  }, "\u26A0 Unpriced line", engineOut.unpriced_lines.length > 1 ? "s" : "", " (no MISys cost \u2014 direct-materials figure is provisional): ", engineOut.unpriced_lines.join(", ")), engineOut.rollup_note && /*#__PURE__*/React.createElement("p", {
+    className: "fsmall",
+    style: {
+      marginTop: 6,
+      opacity: .85
+    }
+  }, engineOut.rollup_note)), /*#__PURE__*/React.createElement("div", {
     className: "panel"
   }, /*#__PURE__*/React.createElement("h2", null, "Packaging \u2014 ", container, " \xB7 ", ctInfo.label, /*#__PURE__*/React.createElement("button", {
     className: "fbtn sec sm",

@@ -1390,6 +1390,10 @@ body{font-family:var(--sans);font-size:13px;color:var(--ink);background:var(--pa
 .logo{font-size:16px;font-weight:800;color:var(--navy-dk);letter-spacing:-.01em;white-space:nowrap;}
 .logo span{font-weight:400;color:var(--navy);}
 .top-meta{font-size:11px;color:#8794a0;font-family:var(--mono);white-space:nowrap;}
+/* §74 Build stamp — identifies the running build at a glance (topbar + login screen). */
+.build-stamp{display:inline-block;margin-left:8px;padding:1px 6px;border-radius:9px;
+  background:#eef3f7;border:1px solid #d6e2ea;color:#5d7688;font-size:9.5px;
+  font-family:var(--mono);letter-spacing:.02em;vertical-align:1px;cursor:help;}
 .top-right{display:flex;gap:8px;align-items:center;margin-left:auto;}
 .tb-btn{
   font-family:var(--sans);font-size:11.5px;font-weight:600;
@@ -2651,6 +2655,19 @@ const {
   useEffect,
   useCallback
 } = React;
+
+/* ══════════════ §74 BUILD STAMP ══════════════
+   Identifies which build is actually running. Rendered in the topbar and
+   exposed on window.ENOVA_BUILD so the live deploy can be confirmed from the
+   browser console without hunting through the UI. Bump BUILD on every ship. */
+const BUILD_STAMP = {
+  build: '2026.07.26.1',
+  date: '2026-07-26',
+  label: 'M92 engine · tablet form · vendor col'
+};
+try {
+  window.ENOVA_BUILD = BUILD_STAMP;
+} catch (e) {}
 
 // ── Shared data ──────────────────────────────────────────────────────────
 const SEED = JSON.parse(document.getElementById('wip-seed').textContent);
@@ -8309,7 +8326,10 @@ function WIPBoardPage({
     onChange: e => e.target.files[0] && handleImport(e.target.files[0])
   }), /*#__PURE__*/React.createElement("span", {
     className: "top-meta"
-  }, projects.length, " projects \xB7 ", new Set(projects.map(p => p.customer)).size, " customers"), sfMsg && /*#__PURE__*/React.createElement("span", {
+  }, projects.length, " projects \xB7 ", new Set(projects.map(p => p.customer)).size, " customers", /*#__PURE__*/React.createElement("span", {
+    className: "build-stamp",
+    title: "Enova Brain build " + BUILD_STAMP.build + " · " + BUILD_STAMP.date + " · " + BUILD_STAMP.label
+  }, "build ", BUILD_STAMP.build)), sfMsg && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 10.5,
       color: sfMsg.startsWith('✓') ? '#4a9e4f' : sfMsg.startsWith('🔄') ? '#8fb9cc' : '#d9534f',
@@ -16495,7 +16515,10 @@ function LoginScreen() {
     className: "ew2"
   }, "SCIENCE"))), /*#__PURE__*/React.createElement("div", {
     className: "login-sub"
-  }, "Enova Brain \u2014 sign in"), /*#__PURE__*/React.createElement("input", {
+  }, "Enova Brain \u2014 sign in", /*#__PURE__*/React.createElement("span", {
+    className: "build-stamp",
+    title: "Build " + BUILD_STAMP.build + " · " + BUILD_STAMP.date + " · " + BUILD_STAMP.label
+  }, "build ", BUILD_STAMP.build)), /*#__PURE__*/React.createElement("input", {
     className: "login-in",
     type: "email",
     placeholder: "you@enovascience.com",

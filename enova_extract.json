@@ -1,0 +1,2344 @@
+[
+ {
+  "file": "03957b38-P261462V2_AM_Tonic_Powder_050826_Unflavored.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Powder",
+  "customer": "Evan Selby",
+  "product": "AM Tonic Unflavored",
+  "itemNo": "P26146-2",
+  "servingSize": 2.5834444444444444,
+  "servingsPerUnit": 30,
+  "sheetCostOfUnitCell": 1.602371823333333,
+  "ingredients": [
+   {
+    "name": "VegD3\u00ae Powder Organic",
+    "alt": "ALT-RP-1969",
+    "mgPerServing": 11,
+    "costPerServing": 0.006876682999999999
+   },
+   {
+    "name": "L-Glutamine",
+    "alt": "ALT-RP-0020",
+    "mgPerServing": 500,
+    "costPerServing": 0.0055
+   },
+   {
+    "name": "Green Tea (camellia sinesis_) leaf extract std to 90% polyphenols, 80% catechins Decaf",
+    "alt": "Pending",
+    "mgPerServing": 300,
+    "costPerServing": 0
+   },
+   {
+    "name": "DL Phenylalanine",
+    "alt": "ALT-RP-1310",
+    "mgPerServing": 300,
+    "costPerServing": 0.0066863999999999995
+   },
+   {
+    "name": "Lithium Orotate 9%",
+    "alt": "ALT-RP-1724",
+    "mgPerServing": 114.44444444444446,
+    "costPerServing": 0.010071111111111112
+   },
+   {
+    "name": "Organic Ginger Root Powder",
+    "alt": "Pending",
+    "mgPerServing": 100,
+    "costPerServing": 0
+   },
+   {
+    "name": "Organic Lions Mane Mushroom",
+    "alt": "ALT-RP-2135",
+    "mgPerServing": 300,
+    "costPerServing": 0.012998999999999998
+   },
+   {
+    "name": "Vitamin K2 (menaquinone 7) (MK-7) 1% powder DCP",
+    "alt": "ALT-RP-1445",
+    "mgPerServing": 8,
+    "costPerServing": 0.0037919999999999994
+   },
+   {
+    "name": "Ashwagandha Root Powder (Withania somnifera)",
+    "alt": "ALT-RP-0501",
+    "mgPerServing": 200,
+    "costPerServing": 0.0026122000000000003
+   },
+   {
+    "name": "Glucosamine HCl (Fermentation Derived)",
+    "alt": "ALT-RP-2334",
+    "mgPerServing": 750,
+    "costPerServing": 0.004875
+   },
+   {
+    "name": "Flv Mixed Berry Natural 6549JX vs: Flavor Producers",
+    "alt": "ALT-RP-0391-GP",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Organic Tapioca Maltodextrin DE10",
+    "alt": "ALT-RP-1578",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Citric Acid Anhydrous (Organic Compliant)",
+    "alt": "ALT-RP-0003",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "DL-MALIC ACID",
+    "alt": "ALT-RP-0015-GP",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Luo Han Guo (Monk Fruit) 40% VS:AMAX",
+    "alt": "ALT-RP-0935",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Bitter Blocker 7237012",
+    "alt": "ALT-RP-2230",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Silicon Dioxide",
+    "alt": "Pending",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Fine Sea Salt",
+    "alt": "ALT-RP-2122",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   }
+  ],
+  "nIngredients": 18,
+  "materialsCostPerUnit": 1.60237,
+  "costCellMismatch": false,
+  "bidTiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": null
+   }
+  ],
+  "bidPriced": false,
+  "pn": "P261462"
+ },
+ {
+  "file": "0b0f6f09-P26132__Edibolts_Tablet_30ct._Pricing__05142026_V1.xlsx",
+  "type": "PRICING",
+  "customer": "J.A.G. Alliance",
+  "product": null,
+  "form": "Capsule - Bottle",
+  "directMaterialsLanded": [
+   9285,
+   1.857,
+   0.8721412275583766
+  ],
+  "directLabor": [
+   533.2115384615385,
+   0.10664230769230769,
+   0.050084627431570994
+  ],
+  "mfgOverhead": [
+   828,
+   0.1656,
+   0.07777414501005232
+  ],
+  "totalCost": [
+   10646.211538461539,
+   2.1292423076923077,
+   1
+  ],
+  "totalRevenue": [
+   null,
+   null,
+   null
+  ],
+  "margin": [
+   null,
+   null,
+   null
+  ],
+  "tiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": 3.25,
+    "revenue": 16250,
+    "marginPct": 0.3448485207100591
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": 3.23,
+    "revenue": 32300,
+    "marginPct": 0.3759002143367468
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": 3.21,
+    "revenue": 64200,
+    "marginPct": 0.3896752935537982
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": 3.19,
+    "revenue": 95700,
+    "marginPct": 0.39177357125632983
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": 3.17,
+    "revenue": 158500,
+    "marginPct": 0.3919355496238776
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": 3.15,
+    "revenue": 315000,
+    "marginPct": 0.3880748229548229
+   }
+  ],
+  "pn": "P26132"
+ },
+ {
+  "file": "3a5a596c-P26137_1V1__SF_Magnesium_Glycinate_Gummies_for_Adults_and_Kids4_60ct.___05202026.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Gummies",
+  "customer": "F.A.M.E. Health Labs, LLC.",
+  "product": "Magnesium Glycinate SF Gummies for Adults & Kids 4+ _ 60ct",
+  "itemNo": "P26137",
+  "servingSize": 1,
+  "servingsPerUnit": 60,
+  "sheetCostOfUnitCell": 0.03500778432222223,
+  "ingredients": [
+   {
+    "name": "Maltitol 80-55 Syrup",
+    "alt": "ALT-RL-1389",
+    "mgPerServing": 2150,
+    "costPerServing": 0.005977
+   },
+   {
+    "name": "Sorbitol Gran 50lb bag",
+    "alt": "ALT-RP-1247",
+    "mgPerServing": 855.2,
+    "costPerServing": 0.0024142295999999997
+   },
+   {
+    "name": "R/O Water",
+    "alt": "ALT-RP-0000",
+    "mgPerServing": 1000,
+    "costPerServing": 0
+   },
+   {
+    "name": "Slow Set Pectin - Classic CS502",
+    "alt": "ALT-RP-2013",
+    "mgPerServing": 160,
+    "costPerServing": 0.0033199999999999996
+   },
+   {
+    "name": "Citric Acid Anhydrous (Organic Compliant)",
+    "alt": "ALT-RP-0003",
+    "mgPerServing": 100,
+    "costPerServing": 0.0004288
+   },
+   {
+    "name": "Sodium Citrate",
+    "alt": "ALT-RP-1859",
+    "mgPerServing": 50,
+    "costPerServing": 0.000325
+   }
+  ],
+  "nIngredients": 6,
+  "materialsCostPerUnit": 0.7479,
+  "costCellMismatch": true,
+  "bidTiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": 6
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": 5.98
+   },
+   {
+    "units": 15000,
+    "pricePerUnit": 5.96
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": 5.94
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": 5.92
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": 5.9
+   }
+  ],
+  "bidPriced": true,
+  "pn": "P26137"
+ },
+ {
+  "file": "47ba4683-P261054V5_Seed_Power_Drink_Liquid_15mL_062326.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Liquid",
+  "customer": "Dayoutai",
+  "product": "Seed Power Drink Liquid 15 ml",
+  "itemNo": "P26105-4",
+  "servingSize": 15.721055571093418,
+  "servingsPerUnit": 15,
+  "sheetCostOfUnitCell": 0.04831922481341333,
+  "ingredients": [
+   {
+    "name": "L-Lysine",
+    "alt": null,
+    "mgPerServing": 500,
+    "costPerServing": 0
+   },
+   {
+    "name": "L-Arginine",
+    "alt": "ALT-RP-2381",
+    "mgPerServing": 5.0761421319796955,
+    "costPerServing": 4.060913705583756e-05
+   },
+   {
+    "name": "L-Ornithine",
+    "alt": "Pending",
+    "mgPerServing": 3.189996172004594,
+    "costPerServing": 0
+   },
+   {
+    "name": "GABA",
+    "alt": "ALT-RP-0592",
+    "mgPerServing": 202.02020202020202,
+    "costPerServing": 0.0017171717171717172
+   },
+   {
+    "name": "FORTIBONE Bovine Collagen Peptide",
+    "alt": "Pending",
+    "mgPerServing": 100,
+    "costPerServing": 0
+   },
+   {
+    "name": "Calcium Lactate Gluconate",
+    "alt": "Pending",
+    "mgPerServing": 1980.769230769231,
+    "costPerServing": 0
+   },
+   {
+    "name": "Vitamin K2 MK4 1.3% Powder",
+    "alt": "ALT-RP-1939",
+    "mgPerServing": 1.1,
+    "costPerServing": 0.0002519
+   },
+   {
+    "name": "Vitamin D3",
+    "alt": "ALT-RP-0506",
+    "mgPerServing": 4.4,
+    "costPerServing": 0.0001241108
+   },
+   {
+    "name": "POTASSIUM SORBATE GRAN FCC",
+    "alt": "ALT-RP-0001",
+    "mgPerServing": 16,
+    "costPerServing": 0.000264
+   },
+   {
+    "name": "Fibregrum B (Acacia Fiber)",
+    "alt": "ALT-RP-1695",
+    "mgPerServing": 5,
+    "costPerServing": 4.3150000000000005e-05
+   },
+   {
+    "name": "Xanthan Gum (FASTir\u00ae Xanthan EC)",
+    "alt": "ALT-RP-0174",
+    "mgPerServing": 20,
+    "costPerServing": 0.00031
+   },
+   {
+    "name": "Citric Acid Anhydrous (Organic Compliant)",
+    "alt": "ALT-RP-0003",
+    "mgPerServing": 40,
+    "costPerServing": 0.00017152
+   },
+   {
+    "name": "DL-MALIC ACID",
+    "alt": "ALT-RP-0015-GP",
+    "mgPerServing": 10,
+    "costPerServing": 0.00010957999999999999
+   },
+   {
+    "name": "Sucralose",
+    "alt": "ALT-RP-0052",
+    "mgPerServing": 2.5,
+    "costPerServing": 0.00011243999999999999
+   },
+   {
+    "name": "Food Flavor",
+    "alt": null,
+    "mgPerServing": 15,
+    "costPerServing": 0
+   },
+   {
+    "name": "R/O Water",
+    "alt": "ALT-RL-0000",
+    "mgPerServing": 12800,
+    "costPerServing": 0
+   },
+   {
+    "name": "Sodium Benzoate",
+    "alt": "ALT-RP-0065",
+    "mgPerServing": 16,
+    "costPerServing": 7.679999999999998e-05
+   }
+  ],
+  "nIngredients": 17,
+  "materialsCostPerUnit": 0.04832,
+  "costCellMismatch": false,
+  "bidTiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": null
+   }
+  ],
+  "bidPriced": false,
+  "pn": "P261054"
+ },
+ {
+  "file": "689c9167-P261471V2_PM_Tonic_Powder_051926_Blueberry.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Powder",
+  "customer": "Evan Selby",
+  "product": "\u00a0Sleep + Nervous System Recovery Tonic",
+  "itemNo": "P26191",
+  "servingSize": 5.921666666666667,
+  "servingsPerUnit": 30,
+  "sheetCostOfUnitCell": 6.219417099999999,
+  "ingredients": [
+   {
+    "name": "Cyracos\u00ae Lemon Balm",
+    "alt": null,
+    "mgPerServing": 100,
+    "costPerServing": 0.018000000000000002
+   },
+   {
+    "name": "Organic Chamomile S.E.",
+    "alt": "Pending",
+    "mgPerServing": 100,
+    "costPerServing": 0.01
+   },
+   {
+    "name": "Organic KSM-66 Ashwagandha Root Extract (Vegan)",
+    "alt": "ALT-RP-1785",
+    "mgPerServing": 200,
+    "costPerServing": 0.0152
+   },
+   {
+    "name": "Pharmagaba",
+    "alt": null,
+    "mgPerServing": 100,
+    "costPerServing": 0.025
+   },
+   {
+    "name": "Magnesium Glycinate 30% Powder",
+    "alt": "ALT-RP-1782",
+    "mgPerServing": 686.6666666666667,
+    "costPerServing": 0.0068673533333333345
+   },
+   {
+    "name": "Lactium",
+    "alt": "Pending",
+    "mgPerServing": 100,
+    "costPerServing": 0.02
+   },
+   {
+    "name": "L-THEANINE",
+    "alt": "ALT-RP-0594",
+    "mgPerServing": 200,
+    "costPerServing": 0.0042
+   },
+   {
+    "name": "Fenusmart",
+    "alt": null,
+    "mgPerServing": 200,
+    "costPerServing": 0.02
+   },
+   {
+    "name": "N&A Blueberry Flavor BL-50003",
+    "alt": "ALT-RP-2015",
+    "mgPerServing": 1000,
+    "costPerServing": 0.031235
+   },
+   {
+    "name": "Organic Tapioca Maltodextrin DE10",
+    "alt": "ALT-RP-1578",
+    "mgPerServing": 2000,
+    "costPerServing": 0.007162
+   },
+   {
+    "name": "Citric Acid Anhydrous (Organic Compliant)",
+    "alt": "ALT-RP-0003",
+    "mgPerServing": 400,
+    "costPerServing": 0.0017152
+   },
+   {
+    "name": "DL-MALIC ACID",
+    "alt": "ALT-RP-0015-GP",
+    "mgPerServing": 150,
+    "costPerServing": 0.0016437
+   },
+   {
+    "name": "Luo Han Guo (Monk Fruit) 40% VS:AMAX",
+    "alt": "ALT-RP-0935",
+    "mgPerServing": 50,
+    "costPerServing": 0.021
+   },
+   {
+    "name": "Bitter Blocker 7237012",
+    "alt": "ALT-RP-2230",
+    "mgPerServing": 450,
+    "costPerServing": 0.014899950000000002
+   },
+   {
+    "name": "Silicon Dioxide",
+    "alt": "Pending",
+    "mgPerServing": 100,
+    "costPerServing": 0
+   },
+   {
+    "name": "Fine Sea Salt",
+    "alt": "ALT-RP-2122",
+    "mgPerServing": 50,
+    "costPerServing": 6.57e-05
+   },
+   {
+    "name": "Reb M 95% (as OnoSweet\u2122)",
+    "alt": "ALT-RP-1867",
+    "mgPerServing": 35,
+    "costPerServing": 0.010325
+   }
+  ],
+  "nIngredients": 17,
+  "materialsCostPerUnit": 6.21942,
+  "costCellMismatch": false,
+  "bidTiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": 13.4
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": 13.38
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": 13.36
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": 13.34
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": 13.32
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": 13.3
+   }
+  ],
+  "bidPriced": true,
+  "pn": "P261471"
+ },
+ {
+  "file": "7cc1e30b-P261054V6_Seed_Power_Drink_Liquid_15mL_062526.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Liquid",
+  "customer": "Dayoutai",
+  "product": "Seed Power Drink Liquid 15 ml",
+  "itemNo": "P26105-4",
+  "servingSize": 16.989179036410412,
+  "servingsPerUnit": 15,
+  "sheetCostOfUnitCell": 0.0884698687182458,
+  "ingredients": [
+   {
+    "name": "L-Lysine HCL",
+    "alt": "ALT-RP-0792",
+    "mgPerServing": 507.35667174023337,
+    "costPerServing": 0.0031202435312024353
+   },
+   {
+    "name": "L-Arginine HCL",
+    "alt": "ALT-RP-0027",
+    "mgPerServing": 6.138735420503377,
+    "costPerServing": 4.7575199508901164e-05
+   },
+   {
+    "name": "L-Ornithine HCL",
+    "alt": null,
+    "mgPerServing": 3.222064699059157,
+    "costPerServing": 0
+   },
+   {
+    "name": "GABA",
+    "alt": "ALT-RP-0592",
+    "mgPerServing": 202.02020202020202,
+    "costPerServing": 0.0017171717171717172
+   },
+   {
+    "name": "FORTIBONE Bovine Collagen Peptide",
+    "alt": null,
+    "mgPerServing": 100,
+    "costPerServing": 0
+   },
+   {
+    "name": "Calcium Citrate 20%",
+    "alt": null,
+    "mgPerServing": 1253.0413625304136,
+    "costPerServing": 0
+   },
+   {
+    "name": "Maiggic\u2122 Vitamin K2 0.2% Powder F-2000",
+    "alt": null,
+    "mgPerServing": 5.5,
+    "costPerServing": 0
+   },
+   {
+    "name": "Vitamin D3",
+    "alt": "ALT-RP-0506",
+    "mgPerServing": 4.4,
+    "costPerServing": 0.0001241108
+   },
+   {
+    "name": "POTASSIUM SORBATE GRAN FCC",
+    "alt": "ALT-RP-0001",
+    "mgPerServing": 6,
+    "costPerServing": 9.899999999999998e-05
+   },
+   {
+    "name": "Fibregrum B (Acacia Fiber)",
+    "alt": "ALT-RP-1695",
+    "mgPerServing": 5,
+    "costPerServing": 4.3150000000000005e-05
+   },
+   {
+    "name": "Xanthan Gum (FASTir\u00ae Xanthan EC)",
+    "alt": "ALT-RP-0174",
+    "mgPerServing": 20,
+    "costPerServing": 0.00031
+   },
+   {
+    "name": "Citric Acid Anhydrous (Organic Compliant)",
+    "alt": "ALT-RP-0003",
+    "mgPerServing": 40,
+    "costPerServing": 0.00017152
+   },
+   {
+    "name": "DL-MALIC ACID",
+    "alt": "ALT-RP-0015-GP",
+    "mgPerServing": 10,
+    "costPerServing": 0.00010957999999999999
+   },
+   {
+    "name": "Sucralose",
+    "alt": "ALT-RP-0052",
+    "mgPerServing": 2.5,
+    "costPerServing": 0.00011243999999999999
+   },
+   {
+    "name": "Food Flavor",
+    "alt": null,
+    "mgPerServing": 15,
+    "costPerServing": 0
+   },
+   {
+    "name": "R/O Water",
+    "alt": "ALT-RL-0000",
+    "mgPerServing": 14800,
+    "costPerServing": 0
+   },
+   {
+    "name": "Sodium Benzoate",
+    "alt": "ALT-RP-0065",
+    "mgPerServing": 9,
+    "costPerServing": 4.32e-05
+   }
+  ],
+  "nIngredients": 17,
+  "materialsCostPerUnit": 0.08847,
+  "costCellMismatch": false,
+  "bidTiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": null
+   }
+  ],
+  "bidPriced": false,
+  "pn": "P261054"
+ },
+ {
+  "file": "7d2a643a-P26132__1V1__Edibolts_Tablet_30ct.__05142026.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Capsules",
+  "customer": "J.A.G. Alliance",
+  "product": "Edibolt Tablets 30ct.",
+  "itemNo": "26132-1",
+  "servingSize": 1,
+  "servingsPerUnit": 30,
+  "sheetCostOfUnitCell": 0.0459741235,
+  "ingredients": [
+   {
+    "name": "XYLITOL 35-70 mesh",
+    "alt": "ALT-RP-1254",
+    "mgPerServing": 408.9,
+    "costPerServing": 0.0026374050000000002
+   },
+   {
+    "name": "SLIPPERY ELM BARK POWDER",
+    "alt": "ALT-RP-0649",
+    "mgPerServing": 75,
+    "costPerServing": 0.0021749999999999994
+   },
+   {
+    "name": "Pea Protein P870",
+    "alt": "ALT-RP-2057",
+    "mgPerServing": 45,
+    "costPerServing": 0.00034636500000000006
+   },
+   {
+    "name": "Organic Inulin Agave",
+    "alt": "ALT-RP-0254",
+    "mgPerServing": 40,
+    "costPerServing": 0.000284
+   },
+   {
+    "name": "Customer Supplied Acmella oleracea",
+    "alt": null,
+    "mgPerServing": 36.2,
+    "costPerServing": 0
+   },
+   {
+    "name": "DIM (3,3' - DIINDOLYMETHANE)",
+    "alt": "ALT-RP-0966",
+    "mgPerServing": 30.9,
+    "costPerServing": 0.0015295500000000002
+   },
+   {
+    "name": "CS: CBD Full spectrum concentrate 99% pwd",
+    "alt": "ALT-RP-1273",
+    "mgPerServing": 20.6,
+    "costPerServing": 0.008239999999999999
+   },
+   {
+    "name": "CBC",
+    "alt": null,
+    "mgPerServing": 10,
+    "costPerServing": 0.02
+   },
+   {
+    "name": "CBG",
+    "alt": null,
+    "mgPerServing": 10,
+    "costPerServing": 0.008
+   },
+   {
+    "name": "Lactobacillus Rhamnosus 20 Billion CFU/g",
+    "alt": "ALT-RP-2185",
+    "mgPerServing": 15,
+    "costPerServing": 0.00218625
+   },
+   {
+    "name": "Guar Gum",
+    "alt": "ALT-RP-0467",
+    "mgPerServing": 12,
+    "costPerServing": 0.00011195999999999999
+   },
+   {
+    "name": "TRICALCIUM PHOSPHATE",
+    "alt": "ALT-RP-1606",
+    "mgPerServing": 15,
+    "costPerServing": 8.101500000000001e-05
+   },
+   {
+    "name": "Stearic Acid, 22.69 kg",
+    "alt": "ALT-RP-0726",
+    "mgPerServing": 15,
+    "costPerServing": 0.000108465
+   },
+   {
+    "name": "Magnesium Stearate; veggie based",
+    "alt": "ALT-RP-0472",
+    "mgPerServing": 3.8,
+    "costPerServing": 3.0578600000000006e-05
+   }
+  ],
+  "nIngredients": 14,
+  "materialsCostPerUnit": 1.37192,
+  "costCellMismatch": true,
+  "bidTiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": 3.25
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": 3.23
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": 3.21
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": 3.19
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": 3.17
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": 3.15
+   }
+  ],
+  "bidPriced": true,
+  "pn": "P26132"
+ },
+ {
+  "file": "8c8833de-P261472V3_PM_Tonic_Powder_050826_Unflavored_with_Biotin.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Powder",
+  "customer": "Evan Selby",
+  "product": "PM Tonic Unflavored",
+  "itemNo": "P26147-2",
+  "servingSize": 9.415000000000001,
+  "servingsPerUnit": 30,
+  "sheetCostOfUnitCell": 4.4302662,
+  "ingredients": [
+   {
+    "name": "Creatine Monohydrate \n200 mesh",
+    "alt": "ALT-RP-0030",
+    "mgPerServing": 5000,
+    "costPerServing": 0.04226
+   },
+   {
+    "name": "Organic Chamomile S.E.",
+    "alt": "Pending",
+    "mgPerServing": 300,
+    "costPerServing": 0
+   },
+   {
+    "name": "Organic KSM-66 Ashwagandha Root Extract (Vegan)",
+    "alt": "ALT-RP-1785",
+    "mgPerServing": 200,
+    "costPerServing": 0.0152
+   },
+   {
+    "name": "Glucosamine HCL 40 mesh (Vegetarian)",
+    "alt": "ALT-RP-1837",
+    "mgPerServing": 1500,
+    "costPerServing": 0.02625
+   },
+   {
+    "name": "Magnesium Biglycinate Chelate 10% (TRAACS\u00ae)",
+    "alt": "ALT-RP-2022",
+    "mgPerServing": 2060,
+    "costPerServing": 0.056050539999999996
+   },
+   {
+    "name": "Biotin 1%",
+    "alt": "ALT-RP-0084",
+    "mgPerServing": 100,
+    "costPerServing": 0.002225
+   },
+   {
+    "name": "L-THEANINE",
+    "alt": "ALT-RP-0594",
+    "mgPerServing": 250,
+    "costPerServing": 0.00525
+   },
+   {
+    "name": "Lithium Orotate 9%",
+    "alt": "ALT-RP-1724",
+    "mgPerServing": 5,
+    "costPerServing": 0.00043999999999999996
+   },
+   {
+    "name": "N&A Blueberry Flavor BL-50003",
+    "alt": "ALT-RP-2015",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Organic Tapioca Maltodextrin DE10",
+    "alt": "ALT-RP-1578",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Citric Acid Anhydrous (Organic Compliant)",
+    "alt": "ALT-RP-0003",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "DL-MALIC ACID",
+    "alt": "ALT-RP-0015-GP",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Luo Han Guo (Monk Fruit) 40% VS:AMAX",
+    "alt": "ALT-RP-0935",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Bitter Blocker 7237012",
+    "alt": "ALT-RP-2230",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Silicon Dioxide",
+    "alt": "Pending",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Fine Sea Salt",
+    "alt": "ALT-RP-2122",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   }
+  ],
+  "nIngredients": 16,
+  "materialsCostPerUnit": 4.43027,
+  "costCellMismatch": false,
+  "bidTiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": null
+   }
+  ],
+  "bidPriced": false,
+  "pn": "P261472"
+ },
+ {
+  "file": "8e509b12-P26139V2_AcneVeya_Capsules_120ct_6.9.26.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Capsules",
+  "customer": "Nutriissa",
+  "product": "AcneVeya Capsules 120ct",
+  "itemNo": "P26139",
+  "servingSize": 4,
+  "servingsPerUnit": 30,
+  "sheetCostOfUnitCell": 0.03593812332119566,
+  "ingredients": [
+   {
+    "name": "Vitamin B3, Niacinamide USP",
+    "alt": "ALT-RP-0192",
+    "mgPerServing": 22,
+    "costPerServing": 0.00020899999999999998
+   },
+   {
+    "name": "Vitamin B5 ( as Calcium D-Pantothenate)",
+    "alt": "ALT-RP-0070",
+    "mgPerServing": 2239.130434782609,
+    "costPerServing": 0.10523913043478261
+   },
+   {
+    "name": "L-Carnitine L-Tartrate",
+    "alt": "ALT-RP-1924",
+    "mgPerServing": 309,
+    "costPerServing": 0.008651999999999998
+   },
+   {
+    "name": "BioPerine\u00ae",
+    "alt": "ALT-RP-0068",
+    "mgPerServing": 5.15,
+    "costPerServing": 0.002727537849999999
+   },
+   {
+    "name": "Microcrystalline Cellulose",
+    "alt": "ALT-RP-0493",
+    "mgPerServing": 10,
+    "costPerServing": 5.222999999999999e-05
+   },
+   {
+    "name": "Precipitated Silica (Tixosil\u00ae 38A)",
+    "alt": "ALT-RP-0387",
+    "mgPerServing": 20,
+    "costPerServing": 0.00014252
+   },
+   {
+    "name": "Magnesium Stearate; veggie based",
+    "alt": "ALT-RP-0472",
+    "mgPerServing": 17.5,
+    "costPerServing": 0.000138075
+   }
+  ],
+  "nIngredients": 7,
+  "materialsCostPerUnit": 3.51481,
+  "costCellMismatch": true,
+  "bidTiers": [
+   {
+    "units": 2500,
+    "pricePerUnit": 7.94
+   },
+   {
+    "units": 5000,
+    "pricePerUnit": 7.92
+   },
+   {
+    "units": 1000,
+    "pricePerUnit": 7.9
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": 7.88
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": 7.86
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": 7.84
+   }
+  ],
+  "bidPriced": true,
+  "pn": "P26139"
+ },
+ {
+  "file": "92952237-P261463V1_AM_Tonic_Powder_050826_Unflavored_0_Phenylalanine.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Powder",
+  "customer": "Evan Selby",
+  "product": "AM Tonic Unflavored",
+  "itemNo": "P26146-2",
+  "servingSize": 2.283444444444444,
+  "servingsPerUnit": 30,
+  "sheetCostOfUnitCell": 1.4017798233333332,
+  "ingredients": [
+   {
+    "name": "VegD3\u00ae Powder Organic",
+    "alt": "ALT-RP-1969",
+    "mgPerServing": 11,
+    "costPerServing": 0.006876682999999999
+   },
+   {
+    "name": "L-Glutamine",
+    "alt": "ALT-RP-0020",
+    "mgPerServing": 500,
+    "costPerServing": 0.0055
+   },
+   {
+    "name": "Green Tea (camellia sinesis_) leaf extract std to 90% polyphenols, 80% catechins Decaf",
+    "alt": "Pending",
+    "mgPerServing": 300,
+    "costPerServing": 0
+   },
+   {
+    "name": "DL Phenylalanine",
+    "alt": "ALT-RP-1310",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Lithium Orotate 9%",
+    "alt": "ALT-RP-1724",
+    "mgPerServing": 114.44444444444446,
+    "costPerServing": 0.010071111111111112
+   },
+   {
+    "name": "Organic Ginger Root Powder",
+    "alt": "Pending",
+    "mgPerServing": 100,
+    "costPerServing": 0
+   },
+   {
+    "name": "Organic Lions Mane Mushroom",
+    "alt": "ALT-RP-2135",
+    "mgPerServing": 300,
+    "costPerServing": 0.012998999999999998
+   },
+   {
+    "name": "Vitamin K2 (menaquinone 7) (MK-7) 1% powder DCP",
+    "alt": "ALT-RP-1445",
+    "mgPerServing": 8,
+    "costPerServing": 0.0037919999999999994
+   },
+   {
+    "name": "Ashwagandha Root Powder (Withania somnifera)",
+    "alt": "ALT-RP-0501",
+    "mgPerServing": 200,
+    "costPerServing": 0.0026122000000000003
+   },
+   {
+    "name": "Glucosamine HCl (Fermentation Derived)",
+    "alt": "ALT-RP-2334",
+    "mgPerServing": 750,
+    "costPerServing": 0.004875
+   },
+   {
+    "name": "Flv Mixed Berry Natural 6549JX vs: Flavor Producers",
+    "alt": "ALT-RP-0391-GP",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Organic Tapioca Maltodextrin DE10",
+    "alt": "ALT-RP-1578",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Citric Acid Anhydrous (Organic Compliant)",
+    "alt": "ALT-RP-0003",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "DL-MALIC ACID",
+    "alt": "ALT-RP-0015-GP",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Luo Han Guo (Monk Fruit) 40% VS:AMAX",
+    "alt": "ALT-RP-0935",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Bitter Blocker 7237012",
+    "alt": "ALT-RP-2230",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Silicon Dioxide",
+    "alt": "Pending",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Fine Sea Salt",
+    "alt": "ALT-RP-2122",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   }
+  ],
+  "nIngredients": 18,
+  "materialsCostPerUnit": 1.40178,
+  "costCellMismatch": false,
+  "bidTiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": null
+   }
+  ],
+  "bidPriced": false,
+  "pn": "P261463"
+ },
+ {
+  "file": "99523dcd-P261054V4_Seed_Power_Drink_Liquid_15mL_062226.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Liquid",
+  "customer": "Dayoutai",
+  "product": "Seed Power Drink Liquid 15 ml",
+  "itemNo": "P26105-4",
+  "servingSize": 15.817829230769231,
+  "servingsPerUnit": 30,
+  "sheetCostOfUnitCell": 0.29817119160000005,
+  "ingredients": [
+   {
+    "name": "L-Lysine HCL",
+    "alt": "ALT-RP-0792",
+    "mgPerServing": 400,
+    "costPerServing": 0.00246
+   },
+   {
+    "name": "L-Arginine HCL",
+    "alt": "ALT-RP-0027",
+    "mgPerServing": 5,
+    "costPerServing": 3.875e-05
+   },
+   {
+    "name": "L-Ornithine",
+    "alt": "Pending",
+    "mgPerServing": 2.5,
+    "costPerServing": 0
+   },
+   {
+    "name": "GABA",
+    "alt": "ALT-RP-0592",
+    "mgPerServing": 200,
+    "costPerServing": 0.0017000000000000001
+   },
+   {
+    "name": "FORTIBONE Collagen Peptide",
+    "alt": "Pending",
+    "mgPerServing": 100,
+    "costPerServing": 0
+   },
+   {
+    "name": "Calcium Lactate Gluconate",
+    "alt": "Pending",
+    "mgPerServing": 1980.769230769231,
+    "costPerServing": 0
+   },
+   {
+    "name": "Vitamin K2 MK4 1.3% Powder",
+    "alt": "ALT-RP-1939",
+    "mgPerServing": 1.1,
+    "costPerServing": 0.0002519
+   },
+   {
+    "name": "Vitamin D3",
+    "alt": "ALT-RP-0506",
+    "mgPerServing": 3.96,
+    "costPerServing": 0.00011169972
+   },
+   {
+    "name": "Sunflower Lecithin",
+    "alt": "ALT-RP-0618-GP-VS",
+    "mgPerServing": 200,
+    "costPerServing": 0.004289200000000001
+   },
+   {
+    "name": "Fibregrum B (Acacia Fiber)",
+    "alt": "ALT-RP-1695",
+    "mgPerServing": 5,
+    "costPerServing": 4.3150000000000005e-05
+   },
+   {
+    "name": "Xanthan Gum (FASTir\u00ae Xanthan EC)",
+    "alt": "ALT-RP-0174",
+    "mgPerServing": 20,
+    "costPerServing": 0.00031
+   },
+   {
+    "name": "Citric Acid Anhydrous (Organic Compliant)",
+    "alt": "ALT-RP-0003",
+    "mgPerServing": 40,
+    "costPerServing": 0.00017152
+   },
+   {
+    "name": "DL-MALIC ACID",
+    "alt": "ALT-RP-0015-GP",
+    "mgPerServing": 10,
+    "costPerServing": 0.00010957999999999999
+   },
+   {
+    "name": "Sucralose",
+    "alt": "ALT-RP-0052",
+    "mgPerServing": 2.5,
+    "costPerServing": 0.00011243999999999999
+   },
+   {
+    "name": "Food Flavor",
+    "alt": null,
+    "mgPerServing": 15,
+    "costPerServing": 0
+   },
+   {
+    "name": "R/O Water",
+    "alt": "ALT-RL-0000",
+    "mgPerServing": 12800,
+    "costPerServing": 0
+   },
+   {
+    "name": "Sodium Benzoate",
+    "alt": "ALT-RP-0065",
+    "mgPerServing": 16,
+    "costPerServing": 7.679999999999998e-05
+   },
+   {
+    "name": "POTASSIUM SORBATE GRAN FCC",
+    "alt": "ALT-RP-0001",
+    "mgPerServing": 16,
+    "costPerServing": 0.000264
+   }
+  ],
+  "nIngredients": 18,
+  "materialsCostPerUnit": 0.29817,
+  "costCellMismatch": false,
+  "bidTiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": null
+   }
+  ],
+  "bidPriced": false,
+  "pn": "P261054"
+ },
+ {
+  "file": "99ce5d09-P26160_Nutrissa_Gummies_05132026__Copy.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Gummies",
+  "customer": "Nutrissa",
+  "product": "Nutrissa Gummies",
+  "itemNo": "P26160",
+  "servingSize": 3,
+  "servingsPerUnit": 30,
+  "sheetCostOfUnitCell": 0.01907674065238095,
+  "ingredients": [
+   {
+    "name": "ELDERBERRY EXTRACT 50:1",
+    "alt": "ALT-RP-1609",
+    "mgPerServing": 120,
+    "costPerServing": 0.006
+   },
+   {
+    "name": "Black Seed Oil",
+    "alt": null,
+    "mgPerServing": 510,
+    "costPerServing": 0.013260000000000001
+   },
+   {
+    "name": "Zinc Gluconate (14% Zn - CAS 4468-02-4)",
+    "alt": "ALT-RP-0312",
+    "mgPerServing": 13.242857142857142,
+    "costPerServing": 0.00011308075714285711
+   },
+   {
+    "name": "VITAMIN D3 SD PWD. (Cholecalciferol) 100,000 iu/g CWD",
+    "alt": "ALT-RP-0201",
+    "mgPerServing": 8.8,
+    "costPerServing": 0.0001417592
+   }
+  ],
+  "nIngredients": 4,
+  "materialsCostPerUnit": 0.58545,
+  "costCellMismatch": true,
+  "bidTiers": [
+   {
+    "units": 2500,
+    "pricePerUnit": 6.18
+   },
+   {
+    "units": 5000,
+    "pricePerUnit": 6.16
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": 6.14
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": 6.12
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": 6.1
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": 6.08
+   }
+  ],
+  "bidPriced": true,
+  "pn": "P26160"
+ },
+ {
+  "file": "9e51b163-P261463V1_AM_Tonic_Powder_050826_Unflavored_0_Phenylalanine_0_Green_Tea.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Powder",
+  "customer": "Evan Selby",
+  "product": "AM Tonic Unflavored",
+  "itemNo": "P26146-3",
+  "servingSize": 1.869,
+  "servingsPerUnit": 30,
+  "sheetCostOfUnitCell": 1.0996464899999998,
+  "ingredients": [
+   {
+    "name": "VegD3\u00ae Powder Organic",
+    "alt": "ALT-RP-1969",
+    "mgPerServing": 11,
+    "costPerServing": 0.006876682999999999
+   },
+   {
+    "name": "L-Glutamine",
+    "alt": "ALT-RP-0020",
+    "mgPerServing": 500,
+    "costPerServing": 0.0055
+   },
+   {
+    "name": "Green Tea (camellia sinesis_) leaf extract std to 90% polyphenols, 80% catechins Decaf",
+    "alt": "Pending",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "DL Phenylalanine",
+    "alt": "ALT-RP-1310",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Lithium Orotate 9%",
+    "alt": "ALT-RP-1724",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Organic Ginger Root Powder",
+    "alt": "Pending",
+    "mgPerServing": 100,
+    "costPerServing": 0
+   },
+   {
+    "name": "Organic Lions Mane Mushroom",
+    "alt": "ALT-RP-2135",
+    "mgPerServing": 300,
+    "costPerServing": 0.012998999999999998
+   },
+   {
+    "name": "Vitamin K2 (menaquinone 7) (MK-7) 1% powder DCP",
+    "alt": "ALT-RP-1445",
+    "mgPerServing": 8,
+    "costPerServing": 0.0037919999999999994
+   },
+   {
+    "name": "Ashwagandha Root Powder (Withania somnifera)",
+    "alt": "ALT-RP-0501",
+    "mgPerServing": 200,
+    "costPerServing": 0.0026122000000000003
+   },
+   {
+    "name": "Glucosamine HCl (Fermentation Derived)",
+    "alt": "ALT-RP-2334",
+    "mgPerServing": 750,
+    "costPerServing": 0.004875
+   },
+   {
+    "name": "Flv Mixed Berry Natural 6549JX vs: Flavor Producers",
+    "alt": "ALT-RP-0391-GP",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Organic Tapioca Maltodextrin DE10",
+    "alt": "ALT-RP-1578",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Citric Acid Anhydrous (Organic Compliant)",
+    "alt": "ALT-RP-0003",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "DL-MALIC ACID",
+    "alt": "ALT-RP-0015-GP",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Luo Han Guo (Monk Fruit) 40% VS:AMAX",
+    "alt": "ALT-RP-0935",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Bitter Blocker 7237012",
+    "alt": "ALT-RP-2230",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Silicon Dioxide",
+    "alt": "Pending",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Fine Sea Salt",
+    "alt": "ALT-RP-2122",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   }
+  ],
+  "nIngredients": 18,
+  "materialsCostPerUnit": 1.09965,
+  "costCellMismatch": false,
+  "bidTiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": null
+   }
+  ],
+  "bidPriced": false,
+  "pn": "P261463"
+ },
+ {
+  "file": "a28cb0fb-P26139V2_AcneVeya_Capsules_120ct_6.4.26.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Capsules",
+  "customer": "Nutriissa",
+  "product": "AcneVeya Capsules 120ct",
+  "itemNo": "P26139",
+  "servingSize": 4,
+  "servingsPerUnit": 30,
+  "sheetCostOfUnitCell": 0.03585450823369565,
+  "ingredients": [
+   {
+    "name": "Vitamin B3, Niacinamide USP",
+    "alt": "ALT-RP-0192",
+    "mgPerServing": 22,
+    "costPerServing": 0.00020899999999999998
+   },
+   {
+    "name": "Vitamin B5 ( as Calcium D-Pantothenate)",
+    "alt": "ALT-RP-0070",
+    "mgPerServing": 2239.130434782609,
+    "costPerServing": 0.10523913043478261
+   },
+   {
+    "name": "L-Carnitine L-Tartrate",
+    "alt": "ALT-RP-1924",
+    "mgPerServing": 300,
+    "costPerServing": 0.0084
+   },
+   {
+    "name": "BioPerine\u00ae",
+    "alt": "ALT-RP-0068",
+    "mgPerServing": 5,
+    "costPerServing": 0.00264356
+   },
+   {
+    "name": "Microcrystalline Cellulose",
+    "alt": "ALT-RP-0493",
+    "mgPerServing": 10,
+    "costPerServing": 5.1000000000000006e-05
+   },
+   {
+    "name": "Precipitated Silica (Tixosil\u00ae 38A)",
+    "alt": "ALT-RP-0387",
+    "mgPerServing": 20,
+    "costPerServing": 0.00014252
+   },
+   {
+    "name": "Magnesium Stearate; veggie based",
+    "alt": "ALT-RP-0472",
+    "mgPerServing": 17.5,
+    "costPerServing": 0.0001408225
+   }
+  ],
+  "nIngredients": 7,
+  "materialsCostPerUnit": 3.50478,
+  "costCellMismatch": true,
+  "bidTiers": [
+   {
+    "units": 2500,
+    "pricePerUnit": 7.94
+   },
+   {
+    "units": 5000,
+    "pricePerUnit": 7.92
+   },
+   {
+    "units": 1000,
+    "pricePerUnit": 7.9
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": 7.88
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": 7.86
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": 7.84
+   }
+  ],
+  "bidPriced": true,
+  "pn": "P26139"
+ },
+ {
+  "file": "c04ce1d0-P26122V3_Whey_Protien_Tubs_15_servings_Chocolate_Flavor__51926.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Powder",
+  "customer": "Black Sheep Nutrition ",
+  "product": "Chocolate Whey Protein 15 servings",
+  "itemNo": "P26122",
+  "servingSize": 43.79611111111112,
+  "servingsPerUnit": 15,
+  "sheetCostOfUnitCell": 11.954889350000004,
+  "ingredients": [
+   {
+    "name": "UltraWhey 90 Instant",
+    "alt": "ALT-RP-2076",
+    "mgPerServing": 21111.11111111111,
+    "costPerServing": 0.49083333333333334
+   },
+   {
+    "name": "Whey Protein CONC 80% INSTANT US NON GMO",
+    "alt": "ALT-RP-0375",
+    "mgPerServing": 13750,
+    "costPerServing": 0.15965125
+   },
+   {
+    "name": "Solnul\u00ae",
+    "alt": "ALT-RP-2216",
+    "mgPerServing": 3500,
+    "costPerServing": 0.037485
+   },
+   {
+    "name": "Stevia 97-99%",
+    "alt": "ALT-RP-0006",
+    "mgPerServing": 135,
+    "costPerServing": 0.007087499999999999
+   },
+   {
+    "name": "Titan Sweet 17718",
+    "alt": "ALT-RP-1643",
+    "mgPerServing": 20,
+    "costPerServing": 0.00439884
+   },
+   {
+    "name": "Steviarome\u2122 2050 Natural Flavor",
+    "alt": "ALT-RP-1593",
+    "mgPerServing": 30,
+    "costPerServing": 0.0018
+   },
+   {
+    "name": "Belgian Dark Chocolate 8929A",
+    "alt": "ALT-RP-2027",
+    "mgPerServing": 800,
+    "costPerServing": 0.0223984
+   },
+   {
+    "name": "Chocolate Brownie 2543A",
+    "alt": "ALT-RP-1974",
+    "mgPerServing": 400,
+    "costPerServing": 0.018077599999999996
+   },
+   {
+    "name": "Vanilla Flavor 8432A",
+    "alt": "ALT-RP-1943",
+    "mgPerServing": 400,
+    "costPerServing": 0.0088184
+   },
+   {
+    "name": "Alkalized Cocoa Powder (Red Russet Cocoa) 10-12%",
+    "alt": "ALT-RP-1087",
+    "mgPerServing": 2000,
+    "costPerServing": 0.021816
+   },
+   {
+    "name": "Pink Himalayan Salt FINE (0-1mm) KILO",
+    "alt": "ALT-RP-0738",
+    "mgPerServing": 450,
+    "costPerServing": 0.0025596000000000004
+   },
+   {
+    "name": "Whey Masker 4427b PDR",
+    "alt": "ALT-RP-2079",
+    "mgPerServing": 900,
+    "costPerServing": 0.0186507
+   },
+   {
+    "name": "Guar Gum",
+    "alt": "ALT-RP-0467",
+    "mgPerServing": 200,
+    "costPerServing": 0.001866
+   },
+   {
+    "name": "Xanthan Gum (FASTir\u00ae Xanthan EC)",
+    "alt": "ALT-RP-0174",
+    "mgPerServing": 100,
+    "costPerServing": 0.00155
+   }
+  ],
+  "nIngredients": 14,
+  "materialsCostPerUnit": 11.95489,
+  "costCellMismatch": false,
+  "bidTiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": null
+   }
+  ],
+  "bidPriced": false,
+  "pn": "P26122"
+ },
+ {
+  "file": "ccbf7916-P261464V1_AM_Tonic_Powder_050826_Unflavored_0_Green_Tea.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Powder",
+  "customer": "Evan Selby",
+  "product": "AM Tonic Unflavored",
+  "itemNo": "P26146-2",
+  "servingSize": 2.283444444444444,
+  "servingsPerUnit": 30,
+  "sheetCostOfUnitCell": 1.602371823333333,
+  "ingredients": [
+   {
+    "name": "VegD3\u00ae Powder Organic",
+    "alt": "ALT-RP-1969",
+    "mgPerServing": 11,
+    "costPerServing": 0.006876682999999999
+   },
+   {
+    "name": "L-Glutamine",
+    "alt": "ALT-RP-0020",
+    "mgPerServing": 500,
+    "costPerServing": 0.0055
+   },
+   {
+    "name": "Green Tea (camellia sinesis_) leaf extract std to 90% polyphenols, 80% catechins Decaf",
+    "alt": "Pending",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "DL Phenylalanine",
+    "alt": "ALT-RP-1310",
+    "mgPerServing": 300,
+    "costPerServing": 0.0066863999999999995
+   },
+   {
+    "name": "Lithium Orotate 9%",
+    "alt": "ALT-RP-1724",
+    "mgPerServing": 114.44444444444446,
+    "costPerServing": 0.010071111111111112
+   },
+   {
+    "name": "Organic Ginger Root Powder",
+    "alt": "Pending",
+    "mgPerServing": 100,
+    "costPerServing": 0
+   },
+   {
+    "name": "Organic Lions Mane Mushroom",
+    "alt": "ALT-RP-2135",
+    "mgPerServing": 300,
+    "costPerServing": 0.012998999999999998
+   },
+   {
+    "name": "Vitamin K2 (menaquinone 7) (MK-7) 1% powder DCP",
+    "alt": "ALT-RP-1445",
+    "mgPerServing": 8,
+    "costPerServing": 0.0037919999999999994
+   },
+   {
+    "name": "Ashwagandha Root Powder (Withania somnifera)",
+    "alt": "ALT-RP-0501",
+    "mgPerServing": 200,
+    "costPerServing": 0.0026122000000000003
+   },
+   {
+    "name": "Glucosamine HCl (Fermentation Derived)",
+    "alt": "ALT-RP-2334",
+    "mgPerServing": 750,
+    "costPerServing": 0.004875
+   },
+   {
+    "name": "Flv Mixed Berry Natural 6549JX vs: Flavor Producers",
+    "alt": "ALT-RP-0391-GP",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Organic Tapioca Maltodextrin DE10",
+    "alt": "ALT-RP-1578",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Citric Acid Anhydrous (Organic Compliant)",
+    "alt": "ALT-RP-0003",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "DL-MALIC ACID",
+    "alt": "ALT-RP-0015-GP",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Luo Han Guo (Monk Fruit) 40% VS:AMAX",
+    "alt": "ALT-RP-0935",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Bitter Blocker 7237012",
+    "alt": "ALT-RP-2230",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Silicon Dioxide",
+    "alt": "Pending",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   },
+   {
+    "name": "Fine Sea Salt",
+    "alt": "ALT-RP-2122",
+    "mgPerServing": 0,
+    "costPerServing": 0
+   }
+  ],
+  "nIngredients": 18,
+  "materialsCostPerUnit": 1.60237,
+  "costCellMismatch": false,
+  "bidTiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": null
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": null
+   }
+  ],
+  "bidPriced": false,
+  "pn": "P261464"
+ },
+ {
+  "file": "e81e9b63-P26100V2_Farmaclick_Capsules_90ct_03_26_26.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Capsules",
+  "customer": "FarmaClick",
+  "product": "Men's Vitality Capsules 90 ct",
+  "itemNo": "P26100",
+  "servingSize": 3,
+  "servingsPerUnit": 30,
+  "sheetCostOfUnitCell": 0.023257624666666667,
+  "ingredients": [
+   {
+    "name": "Maca Root Extract 20:1 pwd",
+    "alt": "ALT-RP-1323",
+    "mgPerServing": 250,
+    "costPerServing": 0.00390875
+   },
+   {
+    "name": "Tongkat Ali 200:1",
+    "alt": "ALT-RP-2011",
+    "mgPerServing": 750,
+    "costPerServing": 0.036000000000000004
+   },
+   {
+    "name": "Shilajit Extract Fulvic Acid 20%",
+    "alt": "ALT-RP-0828",
+    "mgPerServing": 750,
+    "costPerServing": 0.009000000000000001
+   },
+   {
+    "name": "Zinc Bisglycinate Chelate",
+    "alt": "ALT-RP-0846",
+    "mgPerServing": 20.6,
+    "costPerServing": 0.0008629339999999998
+   },
+   {
+    "name": "Precipitated Silica (Tixosil\u00ae 38A)",
+    "alt": "ALT-RP-0387",
+    "mgPerServing": 10,
+    "costPerServing": 5.719e-05
+   }
+  ],
+  "nIngredients": 5,
+  "materialsCostPerUnit": 1.49487,
+  "costCellMismatch": true,
+  "bidTiers": [
+   {
+    "units": 500,
+    "pricePerUnit": 4.96
+   },
+   {
+    "units": 2500,
+    "pricePerUnit": 4.65
+   },
+   {
+    "units": 5000,
+    "pricePerUnit": 4.56
+   }
+  ],
+  "bidPriced": true,
+  "pn": "P26100"
+ },
+ {
+  "file": "e91854c9-P26139V2_Acnetane_Capsules_120ct_6.4.26.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Capsules",
+  "customer": "Nutriissa",
+  "product": "AcneVeya Capsules 120ct",
+  "itemNo": "P26139",
+  "servingSize": 4,
+  "servingsPerUnit": 30,
+  "sheetCostOfUnitCell": 0.03585450823369565,
+  "ingredients": [
+   {
+    "name": "Vitamin B3, Niacinamide USP",
+    "alt": "ALT-RP-0192",
+    "mgPerServing": 22,
+    "costPerServing": 0.00020899999999999998
+   },
+   {
+    "name": "Vitamin B5 ( as Calcium D-Pantothenate)",
+    "alt": "ALT-RP-0070",
+    "mgPerServing": 2239.130434782609,
+    "costPerServing": 0.10523913043478261
+   },
+   {
+    "name": "L-Carnitine L-Tartrate",
+    "alt": "ALT-RP-1924",
+    "mgPerServing": 300,
+    "costPerServing": 0.0084
+   },
+   {
+    "name": "BioPerine\u00ae",
+    "alt": "ALT-RP-0068",
+    "mgPerServing": 5,
+    "costPerServing": 0.00264356
+   },
+   {
+    "name": "Microcrystalline Cellulose",
+    "alt": "ALT-RP-0493",
+    "mgPerServing": 10,
+    "costPerServing": 5.1000000000000006e-05
+   },
+   {
+    "name": "Precipitated Silica (Tixosil\u00ae 38A)",
+    "alt": "ALT-RP-0387",
+    "mgPerServing": 20,
+    "costPerServing": 0.00014252
+   },
+   {
+    "name": "Magnesium Stearate; veggie based",
+    "alt": "ALT-RP-0472",
+    "mgPerServing": 17.5,
+    "costPerServing": 0.0001408225
+   }
+  ],
+  "nIngredients": 7,
+  "materialsCostPerUnit": 3.50478,
+  "costCellMismatch": true,
+  "bidTiers": [
+   {
+    "units": 2500,
+    "pricePerUnit": 7.94
+   },
+   {
+    "units": 5000,
+    "pricePerUnit": 7.92
+   },
+   {
+    "units": 1000,
+    "pricePerUnit": 7.9
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": 7.88
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": 7.86
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": 7.84
+   }
+  ],
+  "bidPriced": true,
+  "pn": "P26139"
+ },
+ {
+  "file": "eb7f6fef-P26137_SF_Magnesium_Glycinate_Gummies_for_Adults_and_Kids_4__60ct___05202026V1.xlsx",
+  "type": "PRICING",
+  "customer": "FAME Health Labs, LLC.",
+  "product": null,
+  "form": "Gummy",
+  "directMaterialsLanded": [
+   8676.581999999999,
+   2.8921939999999995,
+   0.8698949994547656
+  ],
+  "directLabor": [
+   404.0795580769231,
+   0.13469318602564104,
+   0.0405121264287028
+  ],
+  "mfgOverhead": [
+   893.625,
+   0.297875,
+   0.08959287411653172
+  ],
+  "totalCost": [
+   9974.286558076921,
+   3.3247621860256404,
+   1
+  ],
+  "totalRevenue": [
+   null,
+   null,
+   null
+  ],
+  "margin": [
+   null,
+   null,
+   null
+  ],
+  "tiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": 6,
+    "revenue": 30000,
+    "marginPct": 0.4644064487179488
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": 5.98,
+    "revenue": 59800.00000000001,
+    "marginPct": 0.4765616542320557
+   },
+   {
+    "units": 15000,
+    "pricePerUnit": 5.960000000000001,
+    "revenue": 89400.00000000001,
+    "marginPct": 0.4794695792462571
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": 5.940000000000001,
+    "revenue": 118800.00000000003,
+    "marginPct": 0.4800570189070191
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": 5.920000000000002,
+    "revenue": 177600.00000000006,
+    "marginPct": 0.48064842775467786
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": 5.900000000000002,
+    "revenue": 295000.0000000001,
+    "marginPct": 0.4807726597131684
+   }
+  ],
+  "pn": "P26137"
+ },
+ {
+  "file": "f4805632-P26124__1V1__The_Edge_Powder_051826.xlsx",
+  "type": "FORMULA",
+  "dosageForm": "Powder",
+  "customer": "J.A.G. Alliance",
+  "product": "The Edge",
+  "itemNo": 26124,
+  "servingSize": 9.500666666666666,
+  "servingsPerUnit": 1,
+  "sheetCostOfUnitCell": 0.259776484,
+  "ingredients": [
+   {
+    "name": "Creatine Monohydrate \n200 mesh",
+    "alt": "ALT-RP-0030",
+    "mgPerServing": 1500,
+    "costPerServing": 0.012678
+   },
+   {
+    "name": "myHMB\u00ae",
+    "alt": "ALT-RP-2058",
+    "mgPerServing": 750,
+    "costPerServing": 0.0375
+   },
+   {
+    "name": "L-Citrulline Malate 1:1",
+    "alt": "ALT-RP-1901",
+    "mgPerServing": 360,
+    "costPerServing": 0.006659999999999999
+   },
+   {
+    "name": "L-Arginine HCL",
+    "alt": "ALT-RP-0027",
+    "mgPerServing": 250,
+    "costPerServing": 0.0019375
+   },
+   {
+    "name": "L-THEANINE",
+    "alt": "ALT-RP-0594",
+    "mgPerServing": 200,
+    "costPerServing": 0.004200000000000001
+   },
+   {
+    "name": "Uva Ursi Powder",
+    "alt": "ALT-RP-2016",
+    "mgPerServing": 800,
+    "costPerServing": 0.014400000000000001
+   },
+   {
+    "name": "Ashwagandha Root Powder (Withania somnifera)",
+    "alt": "ALT-RP-0501",
+    "mgPerServing": 750,
+    "costPerServing": 0.00979575
+   },
+   {
+    "name": "TribulusTerrestris Extract Saponins 40% UV",
+    "alt": "ALT-RP-0752",
+    "mgPerServing": 845,
+    "costPerServing": 0.0169
+   },
+   {
+    "name": "Fadogia Agrestis 20:1",
+    "alt": "ALT-RP-2062",
+    "mgPerServing": 120,
+    "costPerServing": 0.0028799999999999997
+   },
+   {
+    "name": "Tongkat Ali 200:1",
+    "alt": "ALT-RP-2011",
+    "mgPerServing": 600,
+    "costPerServing": 0.0288
+   },
+   {
+    "name": "Andrographis 10%",
+    "alt": "ALT-RP-1000",
+    "mgPerServing": 500,
+    "costPerServing": 0.016
+   },
+   {
+    "name": "Holy Basil 10:1 Extract Powder",
+    "alt": "ALT-RP-1285",
+    "mgPerServing": 300,
+    "costPerServing": 0.0053424
+   },
+   {
+    "name": "Coleus Forskohlii Extract 4:1",
+    "alt": "ALT-RP-1925",
+    "mgPerServing": 400,
+    "costPerServing": 0.0092
+   },
+   {
+    "name": "DIM (3,3' - DIINDOLYMETHANE)",
+    "alt": "ALT-RP-0966",
+    "mgPerServing": 200,
+    "costPerServing": 0.0099
+   }
+  ],
+  "nIngredients": 14,
+  "materialsCostPerUnit": 0.17619,
+  "costCellMismatch": true,
+  "bidTiers": [
+   {
+    "units": 5000,
+    "pricePerUnit": 1
+   },
+   {
+    "units": 10000,
+    "pricePerUnit": 0.98
+   },
+   {
+    "units": 20000,
+    "pricePerUnit": 0.96
+   },
+   {
+    "units": 30000,
+    "pricePerUnit": 0.94
+   },
+   {
+    "units": 50000,
+    "pricePerUnit": 0.92
+   },
+   {
+    "units": 100000,
+    "pricePerUnit": 0.9
+   }
+  ],
+  "bidPriced": true,
+  "pn": "P26124"
+ }
+]

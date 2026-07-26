@@ -1,0 +1,13 @@
+# Normalize to LF in the repo. The app is developed on Windows but CI (GitHub Actions) and the
+# Supabase/Vercel tooling run on Linux; a CRLF-committed shell script or build file breaks there.
+* text=auto eol=lf
+
+# Shell scripts must be LF or bash fails with "\r: command not found".
+*.sh text eol=lf
+
+# Keep binary-ish assets untouched.
+*.png binary
+*.jpg binary
+*.pdf binary
+*.xlsx binary
+*.zip binary

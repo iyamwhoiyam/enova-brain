@@ -1,0 +1,25 @@
+name: CI — Enova Brain
+
+# Portable deploy gate: on every push/PR, prove index.html actually compiles, is brace/bracket
+# balanced, and equals the source — so a broken build can never reach Vercel. Needs only Babel
+# (no browser, no test fixtures, no absolute paths). The full 45-check regression suite is run
+# locally before each deploy per RUNBOOK.md (`bash run_all_tests.sh`).
+# → In branch protection, mark the "verify" check as Required.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    name: Deploy gate (parse · balance · source-sync)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify deploy build
+        run: npm run verify

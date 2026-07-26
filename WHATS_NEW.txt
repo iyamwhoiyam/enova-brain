@@ -1,0 +1,22 @@
+ENOVA BRAIN — full ERP buildout (2026-07-23; Approvals inbox added 2026-07-25). Overlay onto your repo, commit + push.
+MINIMUM to go live: commit index.html (the precompiled deploy build of everything below).
+
+APPROVALS INBOX (2026-07-25): new "Approvals" tab (was "Soon"). One queue for every pending Enova
+  e-signature — MFSO sign/verify/re-sign, QA batch disposition, formula approve & lock / re-approve on
+  drift, and the cross-department readiness sign-offs (R&D/QA/Production/Purchasing). Derived LIVE from
+  the project records (nothing invented); each "Review →" routes to the exact page where you sign.
+  KPI strip + type/blocks-only/text filters. Compile gate + ci_verify green; all derivation branches
+  drive-tested in the offline bundle. Only "Label Review" remains as a Soon tab.
+
+NEW TABS (all shipped, verified, 50/50 suite green):
+  Command Center ... live ops screen (floor MOs, inventory health, purchasing, QC, cash, alert rail; auto 45s)
+  Document Vault ... controlled documents: version + status lifecycle, sha-256, immutable storage, search/approve
+  Audit & Trace .... immutable audit trail (filter + CSV), lot/MO genealogy, printable project audit binder
+  Stock Control .... (earlier) transactional inventory/purchasing/MO with FEFO + lot traceability
+  ⌘K palette ....... press Ctrl/Cmd+K (or sidebar "Search") to jump to any project or page
+  WIP Board ........ (earlier) manager-swimlane matrix
+
+DEPLOY: after editing Enova_Brain_Studio_2.html, run `npm run build` then commit index.html.
+Files: index.html + source + tests + build/ci + AGENTS/RUNBOOK. .github/workflows/ci.yml runs the gate.
+
+ONE ITEM NEEDS YOU (not code): Supabase -> Authentication -> enable Leaked Password Protection.

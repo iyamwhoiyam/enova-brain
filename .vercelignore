@@ -1,0 +1,32 @@
+# Vercel serves ONLY the precompiled deploy build (index.html). Everything else in the repo —
+# source, tests, build scripts, docs, data catalogs, Supabase-as-code — is developer material
+# and must not be published to the public deploy surface.
+Enova_Brain_Studio_2.html
+*.prod.html
+*.offline.html
+*.offline.local.html
+verify.js
+ci_verify.js
+build_prod.js
+build_offline.js
+build_catalog.js
+resync_kernel.js
+expand_inv.js
+mine_sheets.js
+run_all_tests.sh
+test_*.js
+shoot_*.js
+enova_brain.js
+_sourcing_catalog.json
+_sourcing_mined.json
+_corpus_cases.json
+enova_extract.json
+docs/
+supabase/
+backups/
+shots/
+node_modules/
+AGENTS.md
+RUNBOOK.md
+README.md
+WHATS_NEW.txt

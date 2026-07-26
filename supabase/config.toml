@@ -1,0 +1,7 @@
+# Supabase project config for Enova Brain.
+# Link locally with:  supabase link --project-ref rjvcynsojdgyckhgrlfd
+project_id = "rjvcynsojdgyckhgrlfd"
+
+[db]
+# Postgres 17 (matches the hosted project). Bump if you change the remote engine.
+major_version = 17

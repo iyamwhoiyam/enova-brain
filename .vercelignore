@@ -1,6 +1,9 @@
-# Vercel serves ONLY the precompiled deploy build (index.html). Everything else in the repo —
-# source, tests, build scripts, docs, data catalogs, Supabase-as-code — is developer material
-# and must not be published to the public deploy surface.
+# Vercel deploys ONLY the precompiled build (index.html) + the serverless function in api/.
+# Everything else in the repo — source, tests, build scripts, docs, data catalogs,
+# Supabase-as-code — is developer material and must not reach the deploy surface.
+#
+# DO NOT ignore api/ — api/extract.js is the server-side Anthropic proxy that keeps
+# ANTHROPIC_API_KEY off the client. Ignoring it would silently break intake extraction.
 Enova_Brain_Studio_2.html
 *.prod.html
 *.offline.html

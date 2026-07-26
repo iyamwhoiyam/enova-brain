@@ -20,7 +20,13 @@ prior scattered build into one canonical tree.
 - **Supabase** holds the database, the write logic (transactional RPCs), and the **generator
   algorithms** (`erp_generate_formula` + the blueprint/form-rule tables). See [`supabase/README.md`](supabase/README.md).
 - **GitHub** holds this repo (source of truth for the app + build/CI + docs + DB-as-code).
-- **Vercel** hosts the app by serving the precompiled `index.html` from the repo on every push.
+- **Vercel** hosts the app: serves the precompiled `index.html` and runs the serverless
+  function in [`api/extract.js`](api/extract.js) (the Anthropic proxy for intake extraction).
+
+### Required Vercel environment variable
+`ANTHROPIC_API_KEY` — used by `api/extract.js`. Without it the function returns
+*"Server misconfigured"* and intake extraction fails. Set it in Vercel → Project → Settings →
+Environment Variables (optional: `ANTHROPIC_MODEL`). Never commit the key.
 
 ## What the app is
 A single-file React 18 application, `Enova_Brain_Studio_2.html` (~12.6k lines). The deploy
@@ -41,7 +47,8 @@ Label Review (the one remaining "Soon" page).
 | `_sourcing_catalog.json`, `_sourcing_mined.json`, `_corpus_cases.json`, `enova_extract.json`, `enova_brain.js` | Build/reference data catalogs + the standalone kernel. |
 | `supabase/` | **DB as code** — config, migration manifest, and the captured generator function. |
 | `docs/` | Architecture: kernel, formulation engine, validation scorecard, master brief + handoff. |
-| `vercel.json` / `.vercelignore` | Vercel serves **only** `index.html`; everything else is dev-only. |
+| `api/extract.js` | **Vercel serverless function** — server-side Anthropic proxy for intake extraction. Keeps `ANTHROPIC_API_KEY` off the client. |
+| `vercel.json` / `.vercelignore` | Vercel deploys **`index.html` + `api/`**; everything else is dev-only. |
 | `AGENTS.md` / `RUNBOOK.md` / `WHATS_NEW.txt` | Operating contract · deploy/rollback runbook · changelog. |
 
 ## Deploy loop

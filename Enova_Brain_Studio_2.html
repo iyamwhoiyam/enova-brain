@@ -2020,6 +2020,8 @@ table.ptbl tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--teal);}
 .app-nav-item .ni{font-size:15px;width:20px;text-align:center;flex-shrink:0;}
 .app-nav-item .ncount{margin-left:auto;background:rgba(255,255,255,.15);color:#cde4ec;
   font-size:10px;font-weight:700;padding:1px 7px;border-radius:9px;}
+.app-nav-item .ncount.hot{background:var(--amber);color:#3a2600;}
+.app-nav-item.active .ncount{background:rgba(255,255,255,.22);color:#fff;}
 .app-nav-item.soon{opacity:.4;cursor:not-allowed;}
 .app-nav-item.soon:hover{background:transparent;color:#aaccd8;}
 .app-nav-soon-tag{font-size:8.5px;background:rgba(255,255,255,.1);padding:1px 5px;
@@ -8541,6 +8543,11 @@ function IntakePage({ projects, setProjects, onToggleNav, targetPn, onTargetCons
   const upd = (patch) => setProjects(prev => prev.map(p => p.pn === pn ? { ...p, ...patch } : p));
   const setField = (k, v) => { const m = INTAKE_MAP[k]; if (m) upd({ [m]: v }); else upd({ intake: { ...((proj&&proj.intake)||{}), [k]: v } }); };
   const toggleMulti = (k, opt) => { const cur = Array.isArray(intakeVal(proj,k))?intakeVal(proj,k):[]; setField(k, cur.includes(opt) ? cur.filter(x=>x!==opt) : [...cur, opt]); };
+  // Returning-customer options — deduped from existing projects' canonical customer field, like the
+  // WIP quick-create `cust-opts` list, so picking a repeat customer reuses the SAME stored string
+  // (clean grouping, no duplicate customers). MUST be declared before the early `!proj` return so
+  // the hook order is stable every render (React rules-of-hooks).
+  const custOpts = useMemo(() => [...new Set((projects||[]).map(p=>p&&p.customer).filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b))), [projects]);
 
   const createIntake = () => {
     const freshPn = uniquePN(projects, nextPN(projects));
@@ -8601,6 +8608,14 @@ function IntakePage({ projects, setProjects, onToggleNav, targetPn, onTargetCons
         <option value="">— select —</option>{f.opts.map(o=><option key={o} value={o}>{o}</option>)}</select>;
     } else if (f.type==='area'){
       ctl = <textarea className={"ik-in ik-area"+(miss?" miss":"")} rows={2} value={v||''} placeholder={f.ph||''} onChange={e=>setField(f.k, e.target.value)}/>;
+    } else if (f.k==='customerName'){
+      // Returning-customer autocomplete: pick an existing customer or type a brand-new one.
+      ctl = <React.Fragment>
+        <input className={"ik-in"+(miss?" miss":"")} value={v||''} list="ik-cust-opts"
+          placeholder={f.ph||'Type to search returning customers, or enter a new one'}
+          onChange={e=>setField(f.k, e.target.value)}/>
+        <datalist id="ik-cust-opts">{custOpts.map(cn=><option key={cn} value={cn}/>)}</datalist>
+      </React.Fragment>;
     } else {
       ctl = <input className={"ik-in"+(miss?" miss":"")} value={v||''} placeholder={f.ph||''} onChange={e=>setField(f.k, e.target.value)}/>;
     }
@@ -12105,6 +12120,224 @@ function AuditTracePage({ projects, onToggleNav }){
    Assembles the floor (live MOs), inventory health, purchasing, QC dispositions, cash, and an alert rail into
    a single auto-refreshing operations view. Reads the erp_v_* aggregates + the live projects blob; polls every
    45s so it stays current without a manual reload. Tablet-friendly (the tile/panel grid wraps). */
+// ── Pipeline (Intake → Shipped) single-pane board ────────────────────────────────────────
+// The one view that follows a job across the whole commercial+production spine. DERIVED entirely
+// from the loaded projects via pipelineClass()/normalizeStage() — needs NO new DB objects, so it
+// renders live wherever the WIP board does. Cards open the existing Project page (no duplicate detail).
+function pipelineAgeDays(p){
+  const d = Date.parse((p && p.dateReceived) || '');
+  if (!isFinite(d)) return null;
+  return Math.max(0, Math.floor((Date.now() - d)/86400000));
+}
+const PIPE_SPINE = ["Pending Information","Formulation/Sample Development","Lab/Sampling","Sample Sent to Customer","BID Process","BID Sent","MFSO","PO Submitted","In Production"];
+// Documents present/outstanding for a job — DERIVED from the project blob fields (no live view needed).
+function pipeDocRow(proj){
+  return {
+    'Quote':       !!proj.bidPriced,
+    'Formula/BOM': !!(proj.ingredients && proj.ingredients.length),
+    'MFSO':        isSignedMFSO(proj.stage) || !!(proj.mfsoSigned && proj.mfsoSigned.signed),
+    'SO/PO':       !!(proj.commit && (proj.commit.soIssued || (proj.commit.poNumber && String(proj.commit.poNumber).trim()))),
+    'MO/Batch':    !!proj.qc || !!(proj.readiness && Array.isArray(proj.readiness.moNumbers) && proj.readiness.moNumbers.length),
+    'COA':         !!(proj.qc && Array.isArray(proj.qc.tests) && proj.qc.tests.some(t=>t && t.coa)),
+  };
+}
+// Slide-in per-job drawer for the Pipeline board: stage timeline + documents + details, without
+// leaving the board. "Open full project" still routes to the Project page for deep edits.
+function PipelineJobDrawer({ proj, onClose, onOpenProject }){
+  const cur = normalizeStage(proj.stage);
+  const spine = ["Pending Information","Formulation/Sample Development","Lab/Sampling","Sample Sent to Customer","BID Process","BID Sent","MFSO","PO Submitted","In Production","Completed"];
+  const curIdx = spine.indexOf(cur);
+  const blocked = cur==='On Hold';
+  const cancelled = cur==='Cancelled';
+  const docs = pipeDocRow(proj);
+  const age = pipelineAgeDays(proj);
+  const meta = [
+    ['Form', proj.dosageForm||'—'],
+    ['Bulk', proj.isBulk?'Yes':'No'],
+    ['Serving size', proj.servingSize!=null?String(proj.servingSize):'—'],
+    ['Servings / unit', proj.servingsPerUnit!=null?String(proj.servingsPerUnit):'—'],
+    ['Batch units', proj.batchUnits?String(proj.batchUnits):'—'],
+    ['Sales rep', proj.rep||'—'],
+    ['Project mgr', proj.pm||'—'],
+    ['Received', proj.dateReceivedDisplay||proj.dateReceived||'—'],
+    ['Age', age==null?'—':age+' days'],
+    ['Lifecycle', (PIPELINE_META[pipelineClass(proj)]||{}).label||pipelineClass(proj)],
+  ];
+  const H = ({children}) => <div style={{fontSize:12,fontWeight:800,textTransform:'uppercase',letterSpacing:'.05em',color:'#6b7b88',marginBottom:8}}>{children}</div>;
+  return (
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(20,32,40,.38)',zIndex:400,display:'flex',justifyContent:'flex-end'}}>
+      <div onClick={e=>e.stopPropagation()} style={{width:440,maxWidth:'92vw',height:'100%',background:'#fff',boxShadow:'-8px 0 30px rgba(0,0,0,.18)',overflow:'auto',display:'flex',flexDirection:'column'}}>
+        <div style={{padding:'14px 16px',borderBottom:'1px solid var(--line)',position:'sticky',top:0,background:'#fff',zIndex:2}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+            <span style={{fontWeight:800,color:'#b26a00',fontSize:15}}>{proj.pn}</span>
+            <button onClick={onClose} className="fbtn sec sm" title="Close">✕</button>
+          </div>
+          <div style={{fontWeight:700,fontSize:15,color:'var(--navy-dk)',marginTop:4}}>{cleanCustomer(proj.customer)||'—'}</div>
+          <div style={{fontSize:12,color:'#5a6b78',marginTop:2}}>{proj.product||'unnamed product'}</div>
+          <div style={{marginTop:8,display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+            <span style={{fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:8,background:blocked?'#fdf0dc':cancelled?'#f6e0e0':'#e6eef6',color:blocked?'#8a5a00':cancelled?'#9a3434':'#2f6ea5'}}>{cur}</span>
+            <CommitBadges p={proj}/>
+          </div>
+        </div>
+
+        <div style={{padding:'14px 16px',display:'flex',flexDirection:'column',gap:18}}>
+          <div>
+            <H>Formulation → production timeline</H>
+            {(blocked||cancelled) && <div style={{fontSize:11,fontWeight:600,color:blocked?'#8a5a00':'#9a3434',marginBottom:6}}>{blocked?'⏸ On hold — progress paused':'✕ Cancelled'}</div>}
+            {spine.map((s,i)=>{
+              const done = curIdx>=0 && i<curIdx;
+              const isCur = curIdx>=0 && i===curIdx;
+              const mark = done?'✓':isCur?'●':'○';
+              const col = done?'#3a7d3f':isCur?(blocked?'#e0912f':'#2f6ea5'):'#c3ccd4';
+              return (
+                <div key={s} style={{display:'flex',alignItems:'center',gap:10,padding:'3px 0'}}>
+                  <span style={{width:18,height:18,flexShrink:0,borderRadius:'50%',background:col,color:'#fff',fontSize:11,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700}}>{mark}</span>
+                  <span style={{fontSize:12,fontWeight:isCur?700:500,color:isCur?'var(--navy-dk)':(done?'#4a5b68':'#9aa6b0')}}>{s}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div>
+            <H>Documents</H>
+            <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+              {Object.keys(docs).map(kk=>{
+                const ok = docs[kk];
+                return <span key={kk} style={{fontSize:11,fontWeight:700,padding:'3px 9px',borderRadius:8,background:ok?'#e6f4e6':'#f1f3f5',color:ok?'#2f7d33':'#8a97a3',border:'1px solid '+(ok?'#bfe3bf':'#e2e6ea')}}>{(ok?'✓ ':'○ ')+kk}</span>;
+              })}
+            </div>
+          </div>
+
+          <div>
+            <H>Details</H>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px 14px'}}>
+              {meta.map(([lab,v])=>(
+                <div key={lab} style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:12,borderBottom:'1px dotted #e2e6ea',padding:'3px 0'}}>
+                  <span style={{color:'#7a8894'}}>{lab}</span><span style={{fontWeight:600,color:'var(--navy-dk)',textAlign:'right'}}>{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div style={{marginTop:'auto',padding:'12px 16px',borderTop:'1px solid var(--line)',position:'sticky',bottom:0,background:'#fff'}}>
+          <button className="fbtn ok" style={{width:'100%'}} onClick={()=>onOpenProject && onOpenProject(proj.pn)}>Open full project →</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PipelinePage({ projects, onToggleNav, onOpenProject }){
+  const [q,setQ] = useState('');
+  const [bucket,setBucket] = useState('ALL');
+  const [sel,setSel] = useState(null);
+  const selProj = useMemo(()=> (projects||[]).find(p=>p.pn===sel)||null, [projects, sel]);
+  const live = useMemo(()=> (projects||[]).filter(p=>{
+    const c = pipelineClass(p); return c==='PROSPECT'||c==='COMMITTED'||c==='PRODUCTION'||c==='ONHOLD';
+  }), [projects]);
+  const k = useMemo(()=>{
+    const c={ intake:0, live:live.length, prod:0, hold:0, delivered:0, archived:0 };
+    (projects||[]).forEach(p=>{ const cls=pipelineClass(p), s=normalizeStage(p&&p.stage);
+      if (s==='Pending Information') c.intake++;
+      if (cls==='PRODUCTION') c.prod++;
+      if (cls==='ONHOLD') c.hold++;
+      if (cls==='DELIVERED') c.delivered++;
+      if (cls==='ARCHIVED') c.archived++;
+    });
+    return c;
+  }, [projects, live]);
+  const funnel = useMemo(()=>{
+    const m={}; live.forEach(p=>{ const s=normalizeStage(p&&p.stage); m[s]=(m[s]||0)+1; });
+    return PIPE_SPINE.map(s=>({ stage:s, n:m[s]||0 }));
+  }, [live]);
+  const maxF = Math.max(1, ...funnel.map(f=>f.n));
+  const term = q.trim().toLowerCase();
+  const cards = useMemo(()=>{
+    let list = live.slice();
+    if (bucket!=='ALL') list = list.filter(p=>pipelineClass(p)===bucket);
+    if (term) list = list.filter(p=> (String(p.pn)+' '+cleanCustomer(p.customer)+' '+(p.product||'')+' '+(p.dosageForm||'')).toLowerCase().includes(term));
+    return list.sort((a,b)=> (pipelineAgeDays(b)||0)-(pipelineAgeDays(a)||0));
+  }, [live, bucket, term]);
+  const BUCKETS = [['ALL','All live'],['PROSPECT','Prospects'],['COMMITTED','Committed'],['PRODUCTION','In production'],['ONHOLD','On hold']];
+
+  const header = (
+    <div className="gen-top">
+      <button className="sb-toggle gen-ham" onClick={onToggleNav} title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+      <div className="gen-title">Pipeline</div>
+      <span className="fsmall" style={{marginLeft:10,color:'#6b7b88'}}>Intake → shipped · one board follows the job</span>
+    </div>
+  );
+  const Tile = ({value,label,tone}) => (
+    <div style={{flex:'1 1 0',minWidth:110,background:'#fff',border:'1px solid var(--line)',borderRadius:10,padding:'12px 14px'}}>
+      <div style={{fontSize:24,fontWeight:800,color:tone||'var(--navy)'}}>{value}</div>
+      <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em',color:'#6b7b88'}}>{label}</div>
+    </div>
+  );
+
+  return (
+    <div className="app-page gen-page" style={{background:'var(--paper)',overflow:'auto'}}>
+      {header}
+      <div style={{padding:'14px 18px',display:'flex',flexDirection:'column',gap:16}}>
+        <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+          <Tile value={k.intake} label="Sales intake" tone="#2f6ea5"/>
+          <Tile value={k.live} label="Live pipeline" tone="#17849e"/>
+          <Tile value={k.prod} label="In production" tone="#3a7d3f"/>
+          <Tile value={k.hold} label="On hold" tone="#e0912f"/>
+          <Tile value={k.delivered} label="Delivered" tone="#8a97a3"/>
+          <Tile value={k.archived} label="Archived leads" tone="#8a97a3"/>
+        </div>
+
+        <div style={{background:'#fff',border:'1px solid var(--line)',borderRadius:10,padding:'14px 16px'}}>
+          <div style={{fontSize:13,fontWeight:800,color:'var(--navy-dk)',marginBottom:10}}>Stage flow — live jobs</div>
+          {funnel.map(f=>(
+            <div key={f.stage} style={{display:'flex',alignItems:'center',gap:10,margin:'5px 0'}}>
+              <div style={{width:200,fontSize:12,color:'#4a5b68',textAlign:'right',flexShrink:0}}>{f.stage}</div>
+              <div style={{flex:1,background:'#eef2f5',borderRadius:6,height:18,position:'relative'}}>
+                <div style={{width:(100*f.n/maxF)+'%',minWidth:f.n?18:0,background:'linear-gradient(90deg,#2f6ea5,#17849e)',height:'100%',borderRadius:6}}/>
+              </div>
+              <div style={{width:34,fontSize:12,fontWeight:700,color:'var(--navy-dk)'}}>{f.n}</div>
+            </div>
+          ))}
+        </div>
+
+        <div>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginBottom:10}}>
+            {BUCKETS.map(([id,label])=>(
+              <button key={id} onClick={()=>setBucket(id)} className={'fbtn '+(bucket===id?'ok':'sec')+' sm'}>{label}</button>
+            ))}
+            <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search PN / customer / product…"
+              style={{marginLeft:'auto',minWidth:220,padding:'6px 10px',border:'1px solid var(--line)',borderRadius:8,fontSize:13}}/>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:10}}>
+            {cards.map(p=>{
+              const age = pipelineAgeDays(p);
+              return (
+                <div key={p.pn} data-pn={p.pn} onClick={()=>setSel(p.pn)}
+                  style={{background:'#fff',border:'1px solid var(--line)',borderRadius:10,padding:'11px 12px',cursor:'pointer'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',gap:6}}>
+                    <span style={{fontWeight:800,color:'#b26a00',fontSize:13}}>{p.pn}</span>
+                    <span style={{fontSize:10,fontWeight:700,color:'#7a8894'}}>{age==null?'':age+'d'}</span>
+                  </div>
+                  <div style={{fontWeight:700,fontSize:13,color:'var(--navy-dk)',margin:'2px 0'}}>{cleanCustomer(p.customer)||'—'}</div>
+                  <div style={{fontSize:12,color:'#5a6b78',lineHeight:1.3,minHeight:30}}>{(p.product||'').slice(0,80)||'—'}</div>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:6,marginTop:8}}>
+                    <span style={{fontSize:10,fontWeight:700,background:'#eef2f5',color:'#4a5b68',padding:'2px 7px',borderRadius:7}}>{p.dosageForm||'—'}</span>
+                    <span style={{fontSize:10,color:'#6b7b88'}}>{normalizeStage(p.stage)}</span>
+                  </div>
+                  <div style={{marginTop:6}}><CommitBadges p={p}/></div>
+                </div>
+              );
+            })}
+            {!cards.length && <div className="fsmall" style={{color:'#6b7b88',padding:12}}>No live jobs match.</div>}
+          </div>
+        </div>
+      </div>
+      {selProj && <PipelineJobDrawer proj={selProj} onClose={()=>setSel(null)} onOpenProject={onOpenProject} />}
+    </div>
+  );
+}
+
 function CommandCenterPage({ projects, onToggleNav }){
   const [state,setState] = useState({loading:true,err:null});
   const [d,setD] = useState({health:null,expiring:[],pos:[],mos:[],bott:[],cash:[],docs:[]});
@@ -12489,26 +12722,53 @@ function App({ session }) {
   const [, setInvVer] = useState(0);
   useEffect(() => { _onInventoryChange = () => setInvVer(v => v + 1); return () => { _onInventoryChange = null; }; }, []);
 
+  // Live queue depths for the rail badges — DERIVED from the loaded projects (no extra DB calls),
+  // so the rail shows where work is piled up (NetSuite/Katana style). Recomputed on project change.
+  const navCounts = useMemo(() => {
+    let pipeline=0, intake=0, quote=0, formulation=0, readiness=0, production=0, wip=0;
+    (projects||[]).forEach(p => {
+      const c = pipelineClass(p), s = normalizeStage(p && p.stage);
+      if (c==='PROSPECT'||c==='COMMITTED'||c==='PRODUCTION'||c==='ONHOLD') pipeline++;
+      if (s==='Pending Information') intake++;
+      if (s==='BID Process'||s==='BID Sent') quote++;
+      if (s==='Formulation/Sample Development') formulation++;
+      if (inReadinessPipeline(p)) readiness++;
+      if (s==='In Production'||s==='PO Submitted') production++;
+      if (isSignedMFSO(p && p.stage)) wip++;
+    });
+    return { pipeline, intake, quote, formulation, readiness, production, wip };
+  }, [projects]);
+
+  // Flat registry with optional `sect` (section label rendered ABOVE the row) and `count`
+  // (key into navCounts → badge). Every prior destination is preserved — nothing removed.
   const NAV_ITEMS = [
-    { id:'dashboard',   label:'Dashboard',   icon:'📊', ready:true },
+    { id:'dashboard',   label:'Dashboard',      icon:'📊', ready:true },
     { id:'command',     label:'Command Center', icon:'📡', ready:true },
-    { id:'intake',      label:'Sales Intake',icon:'📥', ready:true },
-    { id:'wip',         label:'WIP Board',   icon:'📋', ready:true },
-    { id:'readiness',   label:'Readiness',   icon:'🚦', ready:true },
-    { id:'projects',    label:'Projects',    icon:'🗃', ready:true },
-    { id:'formulation', label:'Formulation', icon:'🧪', ready:true },
-    { id:'quote',       label:'Quote',       icon:'💰', ready:true },
-    { id:'documents',   label:'Documents',   icon:'📄', ready:true },
+    { id:'pipeline',    label:'Pipeline',       icon:'🧭', ready:true, count:'pipeline' },
+
+    { sect:'Sales', id:'intake', label:'Sales Intake', icon:'📥', ready:true, count:'intake', hot:true },
+    { id:'quote',       label:'Quote',          icon:'💰', ready:true, count:'quote' },
+
+    { sect:'R&D', id:'formulation', label:'Formulation', icon:'🧪', ready:true, count:'formulation', hot:true },
+    { id:'review',      label:'Review Queue',   icon:'🔎', ready:true },
+    { id:'library',     label:'Formula Library',icon:'📚', ready:true },
+
+    { sect:'Manufacturing', id:'readiness', label:'Readiness', icon:'🚦', ready:true, count:'readiness' },
+    { id:'production',  label:'Production',      icon:'🏭', ready:true, count:'production' },
+
+    { sect:'Materials', id:'inventory', label:'Inventory', icon:'📦', ready:true },
+    { id:'stockctl',    label:'Stock Control',  icon:'🚚', ready:true },
+    { id:'sourcing',    label:'Sourcing',       icon:'🌱', ready:true },
+
+    { sect:'Operations', id:'wip', label:'WIP Board', icon:'📋', ready:true, count:'wip' },
+    { id:'projects',    label:'Projects',       icon:'🗃', ready:true },
+
+    { sect:'Documents & Records', id:'documents', label:'Documents', icon:'📄', ready:true },
     { id:'vault',       label:'Document Vault', icon:'📁', ready:true },
-    { id:'production',  label:'Production',   icon:'🏭', ready:true },
-    { id:'review',      label:'Review Queue', icon:'🔎', ready:true },
-    { id:'audit',       label:'Audit & Trace', icon:'🔗', ready:true },
-    { id:'inventory',   label:'Inventory',   icon:'📦', ready:true },
-    { id:'stockctl',    label:'Stock Control',icon:'🚚', ready:true },
-    { id:'sourcing',    label:'Sourcing',    icon:'🌱', ready:true },
-    { id:'library',     label:'Formula Library', icon:'📚', ready:true },
-    { id:'labels',      label:'Label Review',icon:'🏷', ready:false },
-    { id:'approvals',   label:'Approvals',   icon:'✅', ready:true },
+
+    { sect:'System', id:'audit', label:'Audit & Trace', icon:'🔗', ready:true },
+    { id:'approvals',   label:'Approvals',      icon:'✅', ready:true },
+    { id:'labels',      label:'Label Review',   icon:'🏷', ready:false },
   ];
 
   return (
@@ -12527,17 +12787,26 @@ function App({ session }) {
           title="Search / jump to anything (⌘K)">
           <span className="ni">🔍</span><span className="nlabel">Search</span><span className="app-search-kbd">⌘K</span>
         </div>
-        {NAV_ITEMS.map(item => (
-          <div key={item.id}
-            className={`app-nav-item ${nav===item.id?'active':''} ${!item.ready?'soon':''}`}
-            onClick={() => item.ready && setNav(item.id)}
-            title={collapsed ? item.label + (item.ready?'':' (Soon)') : undefined}>
-            <span className="ni">{item.icon}</span>
-            <span className="nlabel">{item.label}</span>
-            {item.ready && item.id==='wip' && <span className="ncount" title="Projects with a signed MFSO — customer-approved and in production">{projects.filter(p=>isSignedMFSO(p.stage)).length}</span>}
-            {!item.ready && <span className="app-nav-soon-tag">Soon</span>}
-          </div>
-        ))}
+        {NAV_ITEMS.map(item => {
+          const cnt = item.count ? navCounts[item.count] : 0;
+          const row = (
+            <div
+              className={`app-nav-item ${nav===item.id?'active':''} ${!item.ready?'soon':''}`}
+              onClick={() => item.ready && setNav(item.id)}
+              title={collapsed ? item.label + (item.ready?'':' (Soon)') : undefined}>
+              <span className="ni">{item.icon}</span>
+              <span className="nlabel">{item.label}</span>
+              {item.ready && !!cnt && <span className={`ncount${item.hot?' hot':''}`}>{cnt}</span>}
+              {!item.ready && <span className="app-nav-soon-tag">Soon</span>}
+            </div>
+          );
+          return (
+            <React.Fragment key={item.id}>
+              {item.sect && <div className="app-nav-sect">{item.sect}</div>}
+              {row}
+            </React.Fragment>
+          );
+        })}
         {sb && email && (
           <div className="sb-userchip">
             <div className="sb-userrow">
@@ -12560,6 +12829,7 @@ function App({ session }) {
         {writeErr && <div className="falert err" style={{margin:0,borderRadius:0,display:'flex',alignItems:'center',gap:8,zIndex:150}}><span style={{flex:1}}>⚠ {writeErr}</span><button className="fbtn sec sm" onClick={()=>setWriteErr(null)}>Dismiss</button></div>}
         {nav === 'dashboard' && <DashboardPage projects={projects} onToggleNav={toggleNav} />}
         {nav === 'command' && <CommandCenterPage projects={projects} onToggleNav={toggleNav} />}
+        {nav === 'pipeline' && <PipelinePage projects={projects} onToggleNav={toggleNav} onOpenProject={openProjectPage} />}
         {nav === 'intake' && <IntakePage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} targetPn={intakePn} onTargetConsumed={()=>setIntakePn(null)} />}
         {nav === 'wip' && <WIPBoardPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onFormulate={goFormulate} onOpenMFSO={goMFSO} onSendReview={sendReview} people={ENOVA_PEOPLE} openPagePn={openPn} onPageOpened={()=>setOpenPn(null)} onUpdateProject={updateProject} onRenameProject={renameProject} onDeleteProject={deleteProject} />}
         {nav === 'readiness' && <ReadinessPage projects={projects} setProjects={setProjects} onToggleNav={toggleNav} onOpenMFSO={goMFSO} onOpenProject={openProjectPage} gateConfig={rdyCfg} />}

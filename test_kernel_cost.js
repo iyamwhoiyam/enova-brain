@@ -47,21 +47,22 @@ function capCtx(overrides) {
 (() => {
   const r = B.cost(capProj(), capCtx());
   const v = r.view, b = r.breakdown;
-  // A: 500*1.03/1 = 515mg=.515g × $0.02 = $0.0103 ; B: 250*1.03/.5 = 515mg × $0.10 = $0.0515
-  A(near(v.actCPS, 0.0618, 1e-9), "actCPS = $0.0618/serving, got " + v.actCPS);
+  // COST default = claim as written, NO blanket overage: A 500mg/1=.5g×$0.02=$0.01 ;
+  // B 250mg/.5 potency=500mg=.5g×$0.10=$0.05  →  actCPS $0.06/serving.
+  A(near(v.actCPS, 0.06, 1e-9), "actCPS = $0.06/serving (no blanket overage), got " + v.actCPS);
   A(v.mbServings === 30, "servings/costing unit = 60/2 = 30");
-  A(near(b.activeCPU, 1.854, 1e-9), "activeCPU = $1.854/bottle (0.0618 × 30), got " + b.activeCPU);
+  A(near(b.activeCPU, 1.80, 1e-9), "activeCPU = $1.80/bottle (0.06 × 30), got " + b.activeCPU);
   A(near(b.shellCPU, 0.60, 1e-9), "shellCPU = $0.01 × 60 caps = $0.60");
   // packaging: container 0.12 + closure 0.03 + label PINNED to 0.15 (per-unit); shipper 3.60 per-case/12 = 0.30
   A(near(v.pkgPerUnit, 0.12 + 0.03 + 0.15, 1e-9), "per-unit packaging = 0.30 (label pinned to $0.15), got " + v.pkgPerUnit);
   A(near(v.pkgPerCase, 3.60, 1e-9), "per-case packaging (shipper) = $3.60");
   A(near(b.pkgCPU, 0.30 + 3.60 / 12, 1e-9), "pkgCPU = 0.30 + 3.60/12 = 0.60, got " + b.pkgCPU);
-  A(near(b.materialsCPU, 1.854 + 0.60 + 0.60, 1e-9), "materialsCPU = active+shell+pkg = 3.054, got " + b.materialsCPU);
+  A(near(b.materialsCPU, 1.80 + 0.60 + 0.60, 1e-9), "materialsCPU = active+shell+pkg = 3.00, got " + b.materialsCPU);
   // manual fallback: overhead = materials*.15 + laborManual*.15 ; cogs = materials + laborManual + overhead
-  const laborManual = 0.5, oh = 3.054 * 0.15 + laborManual * 0.15;
+  const laborManual = 0.5, oh = 3.00 * 0.15 + laborManual * 0.15;
   A(b.source === "manual", "no MB engine → manual source");
   A(near(b.overheadCPU, oh, 1e-9), "manual overhead = materials*.15 + labor*.15");
-  A(near(b.cogsPerUnit, 3.054 + laborManual + oh, 1e-9), "manual cogs = materials+labor+overhead, got " + b.cogsPerUnit);
+  A(near(b.cogsPerUnit, 3.00 + laborManual + oh, 1e-9), "manual cogs = materials+labor+overhead, got " + b.cogsPerUnit);
   A(b.dmExtraCPU === 0, "manual path has no freight/loss delta");
   A(b.piecesPerContainer === 60 && b.isBulk === false && b.container === "Bottle", "breakdown carries pack context");
 })();
@@ -70,8 +71,17 @@ function capCtx(overrides) {
 (() => {
   const p = capProj(); p.costOverride = { "ACT-A": 0.99 };   // $/g override wins over inventory
   const r = B.cost(p, capCtx());
-  // A now: .515g × $0.99 = $0.50985 ; B unchanged $0.0515 → /serving 0.56135 × 30 = 16.8405
-  A(near(r.breakdown.activeCPU, (0.515 * 0.99 + 0.0515) * 30, 1e-9), "override raises activeCPU, got " + r.breakdown.activeCPU);
+  // A now: .5g × $0.99 = $0.495 ; B unchanged $0.05 → /serving 0.545 × 30 = 16.35 (no blanket overage)
+  A(near(r.breakdown.activeCPU, (0.5 * 0.99 + 0.05) * 30, 1e-9), "override raises activeCPU, got " + r.breakdown.activeCPU);
+})();
+
+// ══ 2b. dosedMg (total ingredient used) is the cost basis when present ═════════
+(() => {
+  const p = capProj();                 // ACT-A claim 500mg, ACT-B claim 250mg
+  p.ingredients[0].dosedMg = 600;      // dosed 600mg of ACT-A ($0.02/g) = 0.6g × $0.02 = $0.012
+  const r = B.cost(p, capCtx());
+  // A driven by dosedMg (0.012); B has no dosedMg → claim path 250/.5=0.5g×$0.10=$0.05
+  A(near(r.view.actCPS, 0.012 + 0.05, 1e-9), "dosedMg drives A ($0.012), claim drives B ($0.05), got " + r.view.actCPS);
 })();
 
 // ══ 3. Master Bid path (injected engine) drives labor/overhead + freight delta ═

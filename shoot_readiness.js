@@ -16,16 +16,11 @@ catch (_) { console.log("SKIP: playwright not installed"); process.exit(0); }
   await p.goto(require("url").pathToFileURL(process.env.ENOVA_OFFLINE || require("path").join(__dirname,"index.offline.html")).href, { waitUntil: "load", timeout: 30000 });
   await p.waitForSelector(".app-nav-item", { timeout: 15000 });
 
-  // ── WIP board: collapsed column header stays HORIZONTAL (not rotated) ──
-  await p.click('.app-nav-item:has-text("WIP Board")'); await p.waitForTimeout(500);
-  await p.locator('.col-head', { hasText: 'Pending Information' }).first().click(); await p.waitForTimeout(300);
-  const wip = await p.evaluate(() => {
-    const el = [...document.querySelectorAll('.col-head-label')].find(e=>/pending information/i.test(e.textContent));
-    const col = el.closest('.col'); const head = col.querySelector('.col-head');
-    return { collapsed: col.classList.contains('col-collapsed'), bodyHidden: getComputedStyle(col.querySelector('.col-body')).display==='none', wm: getComputedStyle(head).writingMode };
-  });
-  ok(wip.collapsed && wip.bodyHidden, "WIP column collapses (body hidden)");
-  ok(/horizontal/.test(wip.wm), "WIP collapsed header horizontal, not rotated ("+wip.wm+")");
+  // ── WIP Workflow matrix renders with its stage columns (the kanban board was replaced by the matrix) ──
+  await p.click('.app-nav-item:has-text("WIP Board")'); await p.waitForTimeout(600);
+  ok(await p.$('.wipm'), "WIP Workflow matrix renders");
+  const wipStages = await p.$$eval('.col-head-label', els => els.length);
+  ok(wipStages >= 8, "WIP matrix shows the workflow stage columns ("+wipStages+")");
 
   // ── Readiness board ──
   await p.click('.app-nav-item:has-text("Readiness")'); await p.waitForTimeout(600);

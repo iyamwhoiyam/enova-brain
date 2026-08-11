@@ -54,6 +54,8 @@ run "intake gummy form"  node test_intake_gummy.js
 run "master formula import" node test_master_formula_import.js
 run "formulator capsules" node test_formulator_capsules.js
 run "formulator forms"    node test_formulator_forms.js
+run "formulator golden"   node test_formulator_golden.js
+run "all-forms conformance" node test_allforms_conformance.js
 run "formulator ui wiring" node test_formulator_ui.js
 run "stickpack + cost override" node test_stickpack.js
 run "slice1 unmatched cost"  node test_slice1_unmatched_cost.js
@@ -61,6 +63,9 @@ run "slice1 pp-grid cell"    node test_slice1_ppgrid.js
 run "project-number format" node test_pn.js
 run "enova brain kernel"  node test_enova_brain.js
 run "kernel cost core"    node test_kernel_cost.js
+run "radiantglow golden"  node test_kernel_cost_radiantglow.js
+run "powerlifepeak golden" node test_kernel_cost_powerlifepeak.js
+run "jag gummy golden"    node test_kernel_cost_jag_gummy.js
 run "kernel base parity"  node test_kernel_base.js
 run "kernel formulate"    node test_kernel_formulate.js
 run "kernel label engine" node test_kernel_label.js

@@ -225,13 +225,18 @@
     const laborManual = p.laborPerUnit != null ? num(p.laborPerUnit) : num(cfg.laborDefault);
     const overheadPct = p.overheadPct != null ? num(p.overheadPct) : 0.15;
 
-    // Actives — mirrors calcIng EXACTLY: keyed by row.item.n, override-aware, per-ingredient overage.
+    // Actives — cost the TOTAL ingredient actually dosed to reach the desired active.
+    //   • COST BASIS = row.dosedMg when present (worksheet "Input Per Serving", col I) — the total
+    //     material used; cost it directly (overage/potency are already reflected in the dosed amount).
+    //   • Fallback (no dosedMg): the label claim (row.inputMg, col G) adjusted by PER-INGREDIENT
+    //     overage (default 0 — no blanket 3%) and potency. This is the claim→dose bridge for rows a
+    //     reviewer entered as a claim; it defaults to "cost the claim as written" until a dose is set.
     const calcIng = (p.ingredients || []).map((row) => {
       if (!row || !row.item) return Object.assign({}, row, { mgPS: 0, cPS: 0, fresh: null });
       const fresh = invIx[row.item.n] || null;
       const pot = num(row.potencyPct) > 0 ? num(row.potencyPct) / 100 : 1;
-      const rov = row.overage != null ? num(row.overage) : num(p.overage);
-      const mgPS = (num(row.inputMg) * (1 + rov)) / pot;
+      const rov = row.overage != null ? num(row.overage) : 0;
+      const mgPS = row.dosedMg != null ? num(row.dosedMg) : (num(row.inputMg) * (1 + rov)) / pot;
       const uCost = skuCost(row.item.n, p, invIx);
       const cPS = (mgPS / 1000) * (uCost != null ? uCost : 0);
       return Object.assign({}, row, { item: fresh || row.item, mgPS, cPS, fresh });
@@ -258,11 +263,28 @@
     let pkgPerUnit = 0, pkgPerCase = 0;
     (ctInfo.pkg || []).forEach((slot) => {
       const sel = (p.pkg || {})[slot.k]; if (!sel) return;
-      if (slot.k === "foil") { pkgPerUnit += num(STICK) * piecesPerContainer; return; }
-      if (slot.k === "display" && stickForm && !isBulkPack) { pkgPerUnit += num(STICK_DISPLAY); return; }
+      // TOLL MANUFACTURING — sel.customerSupplied means the customer ships their own component
+      // (their bottle / cap / label / foil …): it costs Enova $0 and overrides EVERY house-standard
+      // pin. Reviewer-editable per slot in the packaging panel.
+      const csup = !!sel.customerSupplied;
+      if (slot.k === "foil") { pkgPerUnit += (csup ? 0 : num(STICK)) * piecesPerContainer; return; }
+      if (slot.k === "display" && stickForm && !isBulkPack) { pkgPerUnit += (csup ? 0 : num(STICK_DISPLAY)); return; }
       let u = skuCost(sel.n, p, invIx); u = (u != null ? u : 0);
-      if (slot.k === "label") u = num(LABEL);
-      if (isPerCase(slot.k)) pkgPerCase += u; else pkgPerUnit += u;
+      // House label standard ($0.15/printed label) applies ONLY when the reviewer hasn't priced it
+      // themselves: an explicit per-project costOverride for the label SKU, or a customer-supplied
+      // label, wins — so a JAG-style "unlabeled / customer labels it" unit isn't overstated $0.15.
+      const hasOv = !!(p.costOverride && sel.n != null && p.costOverride[sel.n] != null && isFinite(Number(p.costOverride[sel.n])));
+      if (csup) u = 0;
+      else if (slot.k === "label" && !hasOv) u = num(LABEL);
+      if (isPerCase(slot.k)) { pkgPerCase += u; return; }
+      // Honor a worksheet "qty/unit" multiplier on a per-unit packaging line — the worksheet costs
+      // every packaging row as (price/each × qty/unit). A container consumed at a fractional or
+      // multiple qty per finished unit (e.g. a negotiated container basis, or a true 2-bottle unit)
+      // then ties to the approved sheet. DEFAULTS TO 1 → byte-identical to prior behavior for every
+      // project that carries no qty. Per-case slots (shipper/display) keep the casePack path, which
+      // already spreads one case across N units, so we do NOT double-apply a qty there.
+      const q = (sel.qty != null && num(sel.qty) > 0) ? num(sel.qty) : 1;
+      pkgPerUnit += u * q;
     });
     const casePack = num(c.casePack) || 1;
     const pkgCPU = pkgPerUnit + pkgPerCase / (casePack || 1);

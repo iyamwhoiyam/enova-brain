@@ -1,11 +1,11 @@
 // §68 command palette — real-browser ⌘K drive.
-const NG=process.env.ENOVA_NG||require("path").join(__dirname,"node_modules");
+const NG=process.env.ENOVA_NG||"/home/claude/.npm-global/lib/node_modules";
 let chromium; try{({chromium}=require(NG+"/playwright"));}catch(_){console.log("SKIP");process.exit(0);}
 (async()=>{
   const b=await chromium.launch({headless:true}); const p=await b.newPage({viewport:{width:1500,height:950}});
   const errs=[]; p.on("pageerror",e=>errs.push(String(e.message||e)));
   const A=[]; const ok=(c,m)=>A.push((c?"✓":"✗")+" "+m);
-  await p.goto(require("url").pathToFileURL(process.env.ENOVA_OFFLINE || require("path").join(__dirname,"index.offline.html")).href,{waitUntil:"load",timeout:30000});
+  await p.goto("file:///root/index.offline.html",{waitUntil:"load",timeout:30000});
   await p.waitForSelector(".app-nav-item",{timeout:15000});
   ok(await p.$('.app-search'), "sidebar Search (⌘K) trigger present");
   // open via Ctrl+K
@@ -15,7 +15,7 @@ let chromium; try{({chromium}=require(NG+"/playwright"));}catch(_){console.log("
   await p.type('.cmdk-input','Command'); await p.waitForTimeout(300);
   const items = await p.$$eval('.cmdk-item .cmdk-lbl', els=>els.map(e=>e.textContent));
   ok(items.some(t=>/Command Center/.test(t)), "typing filters to pages ("+items.slice(0,3).join(' | ')+")");
-  await p.screenshot({path:(process.env.ENOVA_SHOTS||require("path").join(__dirname,"shots"))+"/cmdk.png"});
+  await p.screenshot({path:"/root/shots/cmdk.png"});
   // Enter navigates
   await p.keyboard.press('Enter'); await p.waitForTimeout(400);
   const title=await p.$eval('.gen-title',e=>e.textContent).catch(()=>'');

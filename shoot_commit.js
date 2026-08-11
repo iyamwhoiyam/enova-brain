@@ -18,8 +18,10 @@ catch (_) { console.log("SKIP: playwright not installed"); process.exit(0); }
   await p.click('.app-nav-item:has-text("Projects")'); await p.waitForTimeout(500);
   ok(await p.$('.scope-seg'), "Active/Archive/All segmented control present");
   const seg = await p.$$eval('.scope-seg button', els => els.map(e=>({t:e.textContent.trim(), on:e.classList.contains('on')})));
-  const activeOn = seg.find(s=>/Active/.test(s.t));
-  ok(activeOn && activeOn.on, "defaults to Active scope");
+  // Scope model is now the §59 lifecycle buckets (Pipeline/Prospects/Committed/Production/Delivered/Archived/All).
+  // The default working scope is the live "Pipeline" set (was "Active" in the old model).
+  const onBtn = seg.find(s=>s.on);
+  ok(onBtn && /Pipeline/.test(onBtn.t), "defaults to the live Pipeline scope ("+(onBtn?onBtn.t:'none')+")");
   const nActive = await p.$$eval('.ptbl tbody tr', r=>r.length);
   // switch to All → should show many more rows
   await p.click('.scope-seg button:has-text("All")'); await p.waitForTimeout(400);

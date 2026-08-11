@@ -17,7 +17,8 @@ let chromium; try { ({ chromium } = require(NG + "/playwright")); } catch(_){ co
   ok(frontBtns.some(t=>/Commercial/.test(t)) && frontBtns.some(t=>/Production/.test(t)), "Front control (Commercial / Production) present");
   ok(frontBtns.some(t=>/May 2025/.test(t)), "May-2025 scope toggle present");
 
-  const cols = async()=> p.$$eval('.board .col', e=>e.length);
+  // WIP is a Workflow MATRIX now (kanban board retired); a "column" == a workflow stage header.
+  const cols = async()=> p.$$eval('.col-head-label', e=>e.length);
   const allN = await cols();
   await p.click('.flt-btn:has-text("Commercial")'); await p.waitForTimeout(400);
   const commN = await cols();

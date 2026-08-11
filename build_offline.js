@@ -5,25 +5,20 @@
 // offline/admin mode against the embedded seed + inventory. Output: index.offline.html.
 //   Run:  node build_prod.js && node build_offline.js
 const fs = require("fs");
-const path = require("path");
-// Portable: resolve everything relative to this file (repo root) so the bundle builds on any
-// machine/CI. ENOVA_NG still overrides where the UMD deps come from (global npm dir on the
-// original dev sandbox); default is the repo's own node_modules.
-const ROOT = __dirname;
-const NG = process.env.ENOVA_NG || path.join(ROOT, "node_modules");
+const NG = process.env.ENOVA_NG || "/home/claude/.npm-global/lib/node_modules";
 const read = (p) => fs.readFileSync(p, "utf8");
 
-let html = read(process.env.ENOVA_PROD || path.join(ROOT, "index.prod.html"));
+let html = read("/root/index.prod.html");
 // Inlining a JS blob that contains the literal "</script>" (React-DOM & XLSX dev builds do, inside
 // strings) would prematurely close the HTML <script> element and throw "Invalid or unexpected
 // token". Escape it — the browser un-escapes "<\/script>" back to "</script>" at runtime.
 const inlineScript = (js) => `<script>\n${js.replace(/<\/(script)/gi, "<\\/$1")}\n</script>`;
 
 // Map each remote <script src="..."> to a local inline replacement (or a stub / removal).
-const REACT   = read(path.join(NG,"react/umd/react.development.js"));
-const REACTDOM = read(path.join(NG,"react-dom/umd/react-dom.development.js"));
-const XLSX    = read(path.join(NG,"xlsx/dist/xlsx.full.min.js"));
-const DECIMAL = read(path.join(NG,"decimal.js/decimal.js"));
+const REACT   = read("/root/node_modules/react/umd/react.development.js");
+const REACTDOM = read("/root/node_modules/react-dom/umd/react-dom.development.js");
+const XLSX    = read(NG + "/xlsx/dist/xlsx.full.min.js");
+const DECIMAL = read(NG + "/decimal.js/decimal.js");
 
 const repl = [
   [/<script[^>]*\bsrc="https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/react\/[^"]+"><\/script>/,        inlineScript(REACT)],
@@ -41,7 +36,7 @@ for (const [re, out] of repl) {
 }
 // Any leftover remote <script src> would fail to load offline and leave a blank page — fail loud.
 const leftover = (html.match(/<script[^>]*\bsrc="https?:\/\/[^"]+"/g) || []);
-fs.writeFileSync(process.env.ENOVA_OFFLINE || path.join(ROOT,"index.offline.html"), html);
+fs.writeFileSync("/root/index.offline.html", html);
 
 console.log("index.offline.html:", (html.length / 1024 / 1024).toFixed(2) + "MB");
 console.log("inlined: react", (REACT.length/1024|0)+"KB · react-dom", (REACTDOM.length/1024|0)+"KB · xlsx", (XLSX.length/1024|0)+"KB · decimal", (DECIMAL.length/1024|0)+"KB");

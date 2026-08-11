@@ -783,24 +783,18 @@
     const laborManual = p.laborPerUnit != null ? num(p.laborPerUnit) : num(cfg.laborDefault);
     const overheadPct = p.overheadPct != null ? num(p.overheadPct) : 0.15;
 
-    // Actives — mirrors calcIng EXACTLY: keyed by row.item.n, override-aware, per-ingredient overage.
+    // Actives — cost the TOTAL ingredient actually dosed to reach the desired active.
+    //   • COST BASIS = row.dosedMg when present (worksheet "Input Per Serving", col I) — the total
+    //     material used; cost it directly (overage/potency are already reflected in the dosed amount).
+    //   • Fallback (no dosedMg): the label claim (row.inputMg, col G) adjusted by PER-INGREDIENT
+    //     overage (default 0 — no blanket 3%) and potency. This is the claim→dose bridge for rows a
+    //     reviewer entered as a claim; it defaults to "cost the claim as written" until a dose is set.
     const calcIng = (p.ingredients || []).map((row) => {
-      if (!row) return { mgPS: 0, cPS: 0, fresh: null };
-      const pot = num(row.potencyPct) > 0 ? num(row.potencyPct) / 100 : 1;
-      const rov = row.overage != null ? num(row.overage) : num(p.overage);
-      const mgPS = (num(row.inputMg) * (1 + rov)) / pot;
-      // Slice 1 (no-$0 / traceability): a row with no matched MISys item can still carry a REAL
-      // manual/sheet cost keyed on importedAlt (e.g. a non-stocked sourced ingredient priced on the
-      // Project Page or captured at import). When such a cost resolves, the ingredient's mass AND
-      // cost must flow into COGS — otherwise it silently contributes $0 (the P26175 understatement).
-      // Rows that remain genuinely unpriced stay at zero, so matched formulas are penny-identical.
-      if (!row.item) {
-        const alt = row.importedAlt || null;
-        const uCost = alt ? skuCost(alt, p, invIx) : null;
-        if (uCost == null) return Object.assign({}, row, { mgPS: 0, cPS: 0, fresh: null });
-        return Object.assign({}, row, { mgPS, cPS: (mgPS / 1000) * uCost, fresh: null });
-      }
+      if (!row || !row.item) return Object.assign({}, row, { mgPS: 0, cPS: 0, fresh: null });
       const fresh = invIx[row.item.n] || null;
+      const pot = num(row.potencyPct) > 0 ? num(row.potencyPct) / 100 : 1;
+      const rov = row.overage != null ? num(row.overage) : 0;
+      const mgPS = row.dosedMg != null ? num(row.dosedMg) : (num(row.inputMg) * (1 + rov)) / pot;
       const uCost = skuCost(row.item.n, p, invIx);
       const cPS = (mgPS / 1000) * (uCost != null ? uCost : 0);
       return Object.assign({}, row, { item: fresh || row.item, mgPS, cPS, fresh });
@@ -827,11 +821,28 @@
     let pkgPerUnit = 0, pkgPerCase = 0;
     (ctInfo.pkg || []).forEach((slot) => {
       const sel = (p.pkg || {})[slot.k]; if (!sel) return;
-      if (slot.k === "foil") { pkgPerUnit += num(STICK) * piecesPerContainer; return; }
-      if (slot.k === "display" && stickForm && !isBulkPack) { pkgPerUnit += num(STICK_DISPLAY); return; }
+      // TOLL MANUFACTURING — sel.customerSupplied means the customer ships their own component
+      // (their bottle / cap / label / foil …): it costs Enova $0 and overrides EVERY house-standard
+      // pin. Reviewer-editable per slot in the packaging panel.
+      const csup = !!sel.customerSupplied;
+      if (slot.k === "foil") { pkgPerUnit += (csup ? 0 : num(STICK)) * piecesPerContainer; return; }
+      if (slot.k === "display" && stickForm && !isBulkPack) { pkgPerUnit += (csup ? 0 : num(STICK_DISPLAY)); return; }
       let u = skuCost(sel.n, p, invIx); u = (u != null ? u : 0);
-      if (slot.k === "label") u = num(LABEL);
-      if (isPerCase(slot.k)) pkgPerCase += u; else pkgPerUnit += u;
+      // House label standard ($0.15/printed label) applies ONLY when the reviewer hasn't priced it
+      // themselves: an explicit per-project costOverride for the label SKU, or a customer-supplied
+      // label, wins — so a JAG-style "unlabeled / customer labels it" unit isn't overstated $0.15.
+      const hasOv = !!(p.costOverride && sel.n != null && p.costOverride[sel.n] != null && isFinite(Number(p.costOverride[sel.n])));
+      if (csup) u = 0;
+      else if (slot.k === "label" && !hasOv) u = num(LABEL);
+      if (isPerCase(slot.k)) { pkgPerCase += u; return; }
+      // Honor a worksheet "qty/unit" multiplier on a per-unit packaging line — the worksheet costs
+      // every packaging row as (price/each × qty/unit). A container consumed at a fractional or
+      // multiple qty per finished unit (e.g. a negotiated container basis, or a true 2-bottle unit)
+      // then ties to the approved sheet. DEFAULTS TO 1 → byte-identical to prior behavior for every
+      // project that carries no qty. Per-case slots (shipper/display) keep the casePack path, which
+      // already spreads one case across N units, so we do NOT double-apply a qty there.
+      const q = (sel.qty != null && num(sel.qty) > 0) ? num(sel.qty) : 1;
+      pkgPerUnit += u * q;
     });
     const casePack = num(c.casePack) || 1;
     const pkgCPU = pkgPerUnit + pkgPerCase / (casePack || 1);
@@ -2242,7 +2253,8 @@ input.fcell:focus{border-color:var(--teal);outline:none;background:#fff;}
 .ftv{font-size:14px;font-weight:700;font-family:var(--mono);}
 .fcf .line{display:flex;justify-content:space-between;padding:4px 0;font-size:12.5px;}
 .fcf .total{border-top:1px solid var(--ink);margin-top:6px;padding-top:7px;font-weight:700;font-size:15px;}
-.pkgr{display:grid;grid-template-columns:110px 1fr 90px 100px;gap:6px;align-items:center;margin-bottom:6px;}
+.pkgr{display:grid;grid-template-columns:110px 1fr 92px 84px minmax(96px,auto) 108px;gap:6px;align-items:center;margin-bottom:6px;}
+.pkgr input.fcell{width:100%;box-sizing:border-box;font-size:11.5px;padding:4px 6px;}
 .pkgr label{font-size:10.5px;color:#857b6c;}
 .fsmall{font-size:10.5px;color:#857b6c;}
 .proj-picker{position:relative;}
@@ -5049,7 +5061,11 @@ function importRecordToPatch(rec) {
       id: Math.random(),
       item: i.item || null,
       inputMg: i.mgPerServing || 0,
-      potencyPct: 100,
+      dosedMg: i.dosedMg != null ? i.dosedMg : null,
+      potencyPct: Number(i.potencyPct) > 0 ? Number(i.potencyPct) : 100,
+      ...(i.overage != null && isFinite(Number(i.overage)) ? {
+        overage: Number(i.overage)
+      } : {}),
       importedName: i.name,
       importedAlt: i.alt
     }));
@@ -9735,6 +9751,11 @@ function parseMasterFormulaWorkbook(wb) {
     let inputMg = num(at(r, 6));
     if (inputMg == null) inputMg = num(at(r, 8));
     if (inputMg == null) inputMg = num(at(r, 9));
+    // COST BASIS = the TOTAL dosed amount ("Input Per Serving", col I → J fallback); the label claim is
+    // col G (inputMg). When only a claim exists, dosedMg falls back to it (cost the claim as written).
+    let dosedMg = num(at(r, 8));
+    if (dosedMg == null) dosedMg = num(at(r, 9));
+    if (dosedMg == null) dosedMg = inputMg;
     // A real ingredient row always has a NAME or an RM#/ALT. Requiring one excludes the blend-TOTAL
     // row (no name, RM# col holds 0/the sum) and anonymous filler — otherwise the total line imports
     // as a phantom 4,749 mg "ingredient".
@@ -9747,10 +9768,12 @@ function parseMasterFormulaWorkbook(wb) {
     // Per-gram cost from the sheet's line cost ÷ input grams. Carried so a non-stocked ingredient still
     // prices correctly (via a per-project cost override) even when its RM# isn't in MISys.
     const lineCost = costCol >= 0 ? num(at(r, costCol)) : null;
-    const userUnitCost = lineCost != null && lineCost > 0 && inputMg > 0 ? lineCost / (inputMg / 1000) : null;
+    const costBasisMg = dosedMg != null && dosedMg > 0 ? dosedMg : inputMg;
+    const userUnitCost = lineCost != null && lineCost > 0 && costBasisMg > 0 ? lineCost / (costBasisMg / 1000) : null;
     ingredients.push({
       name: a || (alt ? 'RM# ' + alt : '(unnamed component — verify)'),
       mgPerServing: inputMg != null ? inputMg : 0,
+      dosedMg: dosedMg != null ? dosedMg : null,
       rawUnitAsWritten: (inputMg != null ? inputMg : 0) + ' mg',
       potencyPct,
       overage,
@@ -11248,6 +11271,33 @@ function FormulationEditor({
       }
     });
   };
+  // Toll-manufacturing + fix-it-on-the-spot editing: flag a slot customer-supplied ($0), or write a
+  // per-project cost override for any SKU (kernel skuCost honors it). Clearing the edit restores the
+  // MISys/house price. Both are plain project fields — audit-visible, nothing global mutates.
+  const setPkgFlag = (k, patch) => {
+    if (locked) return;
+    const cur = (proj.pkg || {})[k];
+    if (!cur) return;
+    upd({
+      pkg: {
+        ...(proj.pkg || {}),
+        [k]: {
+          ...cur,
+          ...patch
+        }
+      }
+    });
+  };
+  const setSkuCost = (n, v) => {
+    if (locked || !n) return;
+    const ov = {
+      ...(proj.costOverride || {})
+    };
+    if (v == null || v === '') delete ov[n];else ov[n] = Number(v) || 0;
+    upd({
+      costOverride: ov
+    });
+  };
   // One-click: build a COMPLETE, quote-ready packaging set from live inventory
   // (sized to the finished-unit fill, neck-matched closure, label/desiccant/tamper/
   // shipper + scoop/shell as needed). Recalls a prior project's picks for the same spec.
@@ -11693,9 +11743,13 @@ function FormulationEditor({
     className: "ftbl"
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
     style: {
-      width: "30%"
+      width: "28%"
     }
-  }, "Ingredient"), /*#__PURE__*/React.createElement("th", null, "Input mg"), /*#__PURE__*/React.createElement("th", null, "Potency %"), /*#__PURE__*/React.createElement("th", null, "Overage %"), /*#__PURE__*/React.createElement("th", null, "mg/serving"), /*#__PURE__*/React.createElement("th", null, "Cost/serving"), /*#__PURE__*/React.createElement("th", null, "Cost/unit (", proj.servingsPerUnit, " serv)"), /*#__PURE__*/React.createElement("th", null, "Status"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, calcIng.map(row => {
+  }, "Ingredient"), /*#__PURE__*/React.createElement("th", {
+    title: "The label CLAIM \u2014 what the customer wants stated on the panel per serving."
+  }, "Claim mg"), /*#__PURE__*/React.createElement("th", null, "Potency %"), /*#__PURE__*/React.createElement("th", null, "Overage %"), /*#__PURE__*/React.createElement("th", {
+    title: "TOTAL ingredient used per serving to reach the claim \u2014 this is the COST BASIS. Blank = derived from claim \xD7 (1+overage) \xF7 potency."
+  }, "Dosed mg (total used)"), /*#__PURE__*/React.createElement("th", null, "Cost/serving"), /*#__PURE__*/React.createElement("th", null, "Cost/unit (", proj.servingsPerUnit, " serv)"), /*#__PURE__*/React.createElement("th", null, "Status"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, calcIng.map(row => {
     const cost_unit = row.cPS * (proj.servingsPerUnit || 1);
     const nc = row.item && (!row.fresh || row.fresh.u === 0);
     const nm = !row.item;
@@ -11752,12 +11806,29 @@ function FormulationEditor({
           overage: v === '' ? undefined : (Number(v) || 0) / 100
         });
       }
-    })), /*#__PURE__*/React.createElement("td", {
+    })), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("input", {
+      disabled: locked,
+      className: "fcell",
+      type: "number",
+      min: "0",
+      step: "0.0001",
+      title: "Total ingredient actually used per serving to hit the claim \u2014 the COST BASIS. Leave blank to derive it from claim \xD7 (1+overage) \xF7 potency.",
+      value: row.dosedMg != null ? row.dosedMg : "",
+      placeholder: fN(row.mgPS, 2),
+      onChange: e => {
+        const v = e.target.value;
+        mutIng(row.id, {
+          dosedMg: v === '' ? null : Number(v) || 0
+        });
+      }
+    }), /*#__PURE__*/React.createElement("div", {
       className: "fsmall",
       style: {
-        fontFamily: "var(--mono)"
-      }
-    }, fN(row.mgPS, 2)), /*#__PURE__*/React.createElement("td", {
+        fontFamily: "var(--mono)",
+        opacity: .7
+      },
+      title: row.dosedMg != null ? "Costing this dosed total." : "Derived from claim/overage/potency — enter a value to override the cost basis."
+    }, "costs ", fN(row.mgPS, 2), " mg", row.dosedMg != null ? "" : " (derived)")), /*#__PURE__*/React.createElement("td", {
       className: "fsmall",
       style: {
         fontFamily: "var(--mono)"
@@ -11847,11 +11918,18 @@ function FormulationEditor({
     const fresh = sel ? INV_IX[sel.n] : null;
     const auto = sel ? (proj.pkgAuto || {})[slot.k] : null;
     const autoLabel = auto ? auto.source === 'recalled' ? '♻ ' + auto.reason : '⚡ ' + auto.reason : null;
-    // House-standard finished-goods cost overrides the blank-material SKU price.
     const isStickDisplay = slot.k === 'display' && isStickForm && !isBulkPack;
-    const houseStd = slot.k === 'label' ? ENOVA_LABEL_COST : slot.k === 'foil' ? ENOVA_STICKPACK_COST : isStickDisplay ? ENOVA_STICK_DISPLAY_COST : null;
+    // Mirrors the kernel exactly: customer-supplied → $0; an explicit per-project cost edit
+    // (costOverride) → that price; else the house standard (label/foil/display); else MISys.
+    const csup = !!(sel && sel.customerSupplied);
+    const ov = sel && (proj.costOverride || {})[sel.n] != null && isFinite(Number((proj.costOverride || {})[sel.n])) ? Number((proj.costOverride || {})[sel.n]) : null;
+    const houseStd0 = slot.k === 'label' ? ENOVA_LABEL_COST : slot.k === 'foil' ? ENOVA_STICKPACK_COST : isStickDisplay ? ENOVA_STICK_DISPLAY_COST : null;
+    const houseStd = !csup && !(slot.k === 'label' && ov != null) ? houseStd0 : null;
     const stdSuffix = slot.k === 'foil' ? '/stick' : '';
-    const effUnit = !sel ? null : houseStd != null ? houseStd : fresh ? fresh.u : null;
+    const effUnit = !sel ? null : csup ? 0 : houseStd != null ? houseStd : ov != null ? ov : fresh ? fresh.u : null;
+    // Foil/display house standards aren't priced per-SKU in the kernel — only the toggle
+    // applies there; every other slot's cost is directly editable (fix a wrong price on the spot).
+    const editable = !!sel && !csup && slot.k !== 'foil' && !isStickDisplay;
     return /*#__PURE__*/React.createElement("div", {
       className: "pkgr",
       key: slot.k
@@ -11859,20 +11937,53 @@ function FormulationEditor({
       val: sel,
       cat: slot.cat,
       onSelect: item => setPkg(slot.k, item)
-    }), /*#__PURE__*/React.createElement("span", {
+    }), editable ? /*#__PURE__*/React.createElement("input", {
+      className: "fcell",
+      type: "number",
+      step: "0.0001",
+      min: "0",
+      disabled: locked,
+      title: "Cost per each — edit to correct this project's price (writes a project cost override; clear the field to restore the " + (slot.k === 'label' ? "$0.15 house label standard" : "MISys price") + ").",
+      value: effUnit != null ? effUnit : '',
+      placeholder: "\u2014",
+      onChange: e => setSkuCost(sel.n, e.target.value)
+    }) : /*#__PURE__*/React.createElement("span", {
       className: "fsmall"
-    }, effUnit != null ? f$(effUnit, 4) + (houseStd != null ? stdSuffix : '') : "—"), /*#__PURE__*/React.createElement("span", {
+    }, sel ? f$(effUnit != null ? effUnit : 0, 4) + (houseStd != null ? stdSuffix : '') : "—"), /*#__PURE__*/React.createElement("span", {
       className: "fsmall",
       title: "MISys on-hand"
-    }, fresh && fresh.q != null ? `${fN(fresh.q, 0)} on hand` : ""), /*#__PURE__*/React.createElement("span", null, houseStd != null && sel ? /*#__PURE__*/React.createElement("span", {
+    }, fresh && fresh.q != null ? `${fN(fresh.q, 0)} on hand` : ""), /*#__PURE__*/React.createElement("span", null, csup ? /*#__PURE__*/React.createElement("span", {
+      className: "fbadge warn",
+      title: "Toll manufacturing \u2014 the customer ships their own component; it costs Enova $0 and the house-standard price is suppressed."
+    }, "Customer supplied \xB7 $0") : ov != null && slot.k !== 'foil' && !isStickDisplay ? /*#__PURE__*/React.createElement("span", {
       className: "fbadge ok",
-      title: slot.k === 'label' ? "Enova standard: any printed label is $0.15 each (overrides the blank label-stock SKU price)" : slot.k === 'foil' ? "Enova standard: a stick pack is its own label at $0.15 each — the box carries one per stick pack" : "Enova standard: stick-pack retail display/carton box ~$1.00 each (per unit, separate from the master shipper)"
-    }, "Enova std ", f$(houseStd, 2), stdSuffix) : sel && (!fresh || fresh.u === 0) ? /*#__PURE__*/React.createElement("span", {
+      title: "Reviewer-edited price for this project (cost override). Clear the cost field to restore the standard."
+    }, "\u270E Edited ", f$(ov, 4)) : houseStd != null && sel ? /*#__PURE__*/React.createElement("span", {
+      className: "fbadge ok",
+      title: slot.k === 'label' ? "Enova standard: any printed label is $0.15 each (overrides the blank label-stock SKU price). Edit the cost or mark customer-supplied to change it." : slot.k === 'foil' ? "Enova standard: a stick pack is its own label at $0.15 each — the box carries one per stick pack" : "Enova standard: stick-pack retail display/carton box ~$1.00 each (per unit, separate from the master shipper)"
+    }, "Enova std ", f$(houseStd, 2), stdSuffix) : sel && (!fresh || fresh.u === 0) && ov == null ? /*#__PURE__*/React.createElement("span", {
       className: "fbadge bad"
     }, "No Cost") : autoLabel ? /*#__PURE__*/React.createElement("span", {
       className: "fbadge " + (auto.source === 'recalled' ? "ok" : "neutral"),
       title: auto.source === 'recalled' ? "Recalled from a prior project with the same spec" : "Auto-sized from live inventory — edit to override"
-    }, autoLabel) : ""));
+    }, autoLabel) : ""), sel ? /*#__PURE__*/React.createElement("label", {
+      className: "fsmall",
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 4,
+        whiteSpace: 'nowrap',
+        cursor: locked ? 'default' : 'pointer'
+      },
+      title: "Check when the customer packages/labels their own product (toll manufacturing) \u2014 this component ships from the customer and costs Enova $0."
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "checkbox",
+      disabled: locked,
+      checked: csup,
+      onChange: e => setPkgFlag(slot.k, {
+        customerSupplied: e.target.checked
+      })
+    }), " Cust. supplied") : /*#__PURE__*/React.createElement("span", null));
   }), /*#__PURE__*/React.createElement("div", {
     className: "fts"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
@@ -12206,7 +12317,7 @@ function ProjectsPage({
   onDeleteProject
 }) {
   const [pagePn, setPagePn] = useState(null); // open the full project page by PN
-  const [life, setLife] = useState('open'); // open | closed | all — absorbs WIP's old Open/Closed table views
+  const [life, setLife] = useState('open'); // open | closed | all — absorbs WIP's old Open/Closed table views (the §59 lifecycle scope inside ProjectTable is the real declutter lens, defaulting to "pipeline")
   const [scopeOlder, setScopeOlder] = useState(false); // §53 include projects received before 2025-05
   const pageProj = pagePn ? projects.find(p => p.pn === pagePn) : null;
   if (pageProj) {

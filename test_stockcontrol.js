@@ -1,7 +1,7 @@
 // §63 Stock Control — transactional inventory / purchasing / MO material issue. Helpers + SSR mounts.
-const fs=require("fs"); const NG=process.env.ENOVA_NG||require("path").join(__dirname,"node_modules");
+const fs=require("fs"); const NG=process.env.ENOVA_NG||"/home/claude/.npm-global/lib/node_modules";
 const React=require(NG+"/react"), ReactDOMServer=require(NG+"/react-dom/server"), babel=require(NG+"/@babel/core");
-const html=fs.readFileSync((process.env.ENOVA_SRC||require("path").join(__dirname,"Enova_Brain_Studio_2.html")),"utf8");
+const html=fs.readFileSync("/root/Enova_Brain_Studio_2.html","utf8");
 const invData=(html.match(/<script id="inv-data"[^>]*>([\s\S]*?)<\/script>/)||[])[1]||"[]";
 let code=html.match(/<script type="text\/babel"[^>]*>([\s\S]*?)<\/script>/)[1];
 code=code.replace(/ReactDOM\.createRoot\([\s\S]*?\.render\(<Root\/>\);/,"/*strip*/");

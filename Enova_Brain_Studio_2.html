@@ -2014,6 +2014,8 @@ table.ptbl tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--teal);}
 .app-sidebar.collapsed .app-nav-item.active{background:rgba(255,255,255,.12);box-shadow:inset 3px 0 0 var(--amber);}
 .app-sidebar.collapsed .app-nav-item .ni{width:auto;font-size:18px;}
 .app-sidebar.collapsed .app-nav-item.soon{display:none;}   /* hide non-clickable pages when collapsed */
+/* Full-system nav: every destination is first-class and always visible; the workflow-ordered
+   section headers do the organizing. (The earlier dim/hide treatment read as pages being gone.) */
 /* Sidebar toggle — lives at the top-right of the page topbar */
 .nav-toggle{background:#fff;border:1.5px solid var(--line);color:var(--navy-dk);cursor:pointer;
   font-size:16px;line-height:1;padding:6px 10px;border-radius:var(--r);transition:all .12s;flex-shrink:0;}
@@ -3479,6 +3481,44 @@ function migrateProject(raw){
   return p;
 }
 
+// ── Physical mass bounds per dose form — the batch-total tripwire. ────────────────────────────
+// A tablet/capsule physically cannot exceed ~2.5 g per piece; a scoop of powder ~100 g. When an
+// imported amount blows past these, the request almost certainly listed BATCH TOTALS (the whole
+// run's grams), not per-serving doses — the P26247 failure mode: 480,000 mg "per tablet" was
+// really 480 g for the 6,000-tablet order. Bounds are deliberately generous so no real formula
+// ever trips them.
+function formMassBounds(form){
+  const f = String(form||'');
+  if (/tablet|capsule/i.test(f)) return { perPiece:true,  max:2500 };    // mg per piece
+  if (/gumm/i.test(f))           return { perPiece:true,  max:15000 };   // mg per gummy
+  if (/powder|stick/i.test(f))   return { perPiece:false, max:100000 };  // mg per serving (100 g)
+  return null;                                                            // liquids etc: no auto bound
+}
+// Batch-total interpreter — PURE, per-row (unit-tested). A row above the physical bound is
+// divided by the batch quantity ONLY when that lands it back inside the bound; rows already
+// plausible (e.g. a carrier listed per-tablet on the same sheet) are left untouched. This is
+// unit INTERPRETATION with full disclosure — never invention: every conversion is flagged on
+// the row (batchConverted) and reported for the Enova reviewer.
+function batchTotalInterpret(rows, form, servingSize, batchUnits){
+  const b = formMassBounds(form);
+  const out = { converted:[], flagged:[], statedTotalOk:null };
+  if (!b) return out;
+  const ss = Number(servingSize)>0 ? Number(servingSize) : 1;
+  const lim = b.perPiece ? b.max*ss : b.max;             // per-SERVING limit
+  const N = Number(batchUnits)||0;
+  (rows||[]).forEach(r => {
+    const mg = Number(r.inputMg)||0;
+    if (mg <= lim) return;
+    if (N >= 100 && mg/N > 0 && mg/N <= lim){
+      r.inputMg = mg/N;
+      if (r.dosedMg!=null && isFinite(Number(r.dosedMg))) r.dosedMg = Number(r.dosedMg)/N;
+      r.batchConverted = true;
+      out.converted.push(r);
+    } else out.flagged.push(r);
+  });
+  return out;
+}
+
 // Data-quality / readiness checks. Pure; returns typed issues. The Enova employee is
 // still the authority (non-blocking) — but "safe/accurate" means these are shown before
 // approval and recorded in the audit trail.
@@ -3492,6 +3532,15 @@ function validateProject(p){
   const uncosted  = real.filter(r => { const it=resolve(r); return it && (it.u==null || it.u===0); });
   if (unmatched.length) errors.push(unmatched.length+' ingredient(s) not matched to a MISys SKU — COGS understated.');
   if (uncosted.length)  errors.push(uncosted.length+' matched ingredient(s) at $0.00 cost — needs pricing.');
+  // Physical impossibility gate — catches batch-totals-as-doses (P26247) before approval.
+  // (typeof-guarded so harnesses that slice validateProject alone keep working.)
+  const fb = (typeof formMassBounds==='function') ? formMassBounds(p.dosageForm) : null;
+  if (fb){
+    const ssv = Number(p.servingSize)>0 ? Number(p.servingSize) : 1;
+    const totMg = real.reduce((s,r)=>s+(Number(r.dosedMg!=null?r.dosedMg:r.inputMg)||0),0);
+    const perPiece = fb.perPiece ? totMg/ssv : totMg;
+    if (perPiece > fb.max) errors.push('Blend mass is '+Math.round(perPiece).toLocaleString()+' mg per '+(fb.perPiece?'piece':'serving')+' — physically impossible for '+(p.dosageForm||'this form')+' (max ~'+fb.max.toLocaleString()+' mg). The request likely listed BATCH TOTALS — divide the flagged amounts by the batch quantity.');
+  }
   if (!(Number(p.batchUnits)>0)) warnings.push('No batch quantity set — COGS is estimated at the form MOQ.');
   if (!(Number(p.servingsPerUnit)>0)) warnings.push('Servings per unit is 0.');
   // Project number must be the canonical P{YY}{NNN} (e.g. P26205). Legacy malformed numbers
@@ -6562,7 +6611,7 @@ function localExtractF(rawText){
   // potency/standardization descriptor (noted, never used as the dose).
   const UNIT_RE = /([\d][\d,]*\.?\d*)\s*(mcg|µg|ug|mg|grams?|gm\b|g\b|iu|billion cfu|billion|cfu)\b/ig;
   const SKIP_LINE = /^(client\b|customer\b|company\b|product\b|dosage form|total weight|net wt|net weight|powder sachet|serving size|servings? per|monthly|moq\b|minimum|quantity\b|qty\b|packaging\b|please\b|we are|we would|our\b|provide\b|label\b|certif|organic,|non-gmo|gluten|vegan\b|note[:s]|notes?\b)/i;
-  const ingredients=[]; const pctNotes=[];
+  const ingredients=[]; const pctNotes=[]; let statedTotalMg=null;
   for (let line of lines){
     if (!line) continue;
     line = line.replace(/^project description\s*[:\-]\s*/i,"");   // an ingredient may ride on this label line
@@ -6596,6 +6645,13 @@ function localExtractF(rawText){
     if(!name || name.length<2 || !/[a-z]/i.test(name)) continue;
     if(isGummy && GUMMY_SKIP.test(name)) continue;          // gummy base handled by the system
     let num = parseFloat(last[1].replace(/,/g,"")); const unit=last[2].toLowerCase();
+    // A "Total" line is the SERVING/TABLET WEIGHT, not an ingredient (P26247: "Total 800" was
+    // imported as an unmatched $0 row). Capture it as metadata for the batch-total cross-check.
+    if(/^(grand\s+)?totals?\b/i.test(name)){
+      let tmg=num; if(/^(g|gm|gram)/.test(unit)) tmg=num*1000; else if(/^(mcg|µg|ug)/.test(unit)) tmg=num/1000;
+      if(tmg>0){ statedTotalMg=tmg; notes.push('"Total '+last[1]+' '+last[2]+'" read as the stated serving/piece weight ('+tmg.toLocaleString()+' mg) — used as a cross-check, not an ingredient.'); }
+      continue;
+    }
     let mg;
     if(/^(mcg|µg|ug)/.test(unit)) mg=num/1000;
     else if(/^mg/.test(unit)) mg=num;
@@ -6650,6 +6706,7 @@ function localExtractF(rawText){
     servingSize: servingSize,
     servingsPerUnit: servingsPerUnit,
     batchQuantity: null,               // never auto-guessed — cost-critical, set manually
+    statedTotalMg: statedTotalMg,      // a "Total ___ mg/g" line = the stated serving/piece weight
     ingredients: ingredients,
     packagingDescription: packagingDescription||null,
     tierPricing: [],                   // prices are ALWAYS manual — never parsed
@@ -7592,6 +7649,27 @@ function FormulationEditor({ proj, projects, setProjects, autoGenPn, onGenConsum
     if (ext.servingSize!=null)     patch.servingSize    = Number(ext.servingSize)||1;
     if (ext.servingsPerUnit!=null) patch.servingsPerUnit = Number(ext.servingsPerUnit)||1;
     if (ext.batchQuantity!=null)   patch.batchUnits     = Number(ext.batchQuantity)||0;
+    // ── Batch-total tripwire (P26247): amounts that are physically impossible per piece/serving
+    // are the run's TOTALS. Divide ONLY the impossible rows by the batch qty (rows already
+    // plausible — e.g. a carrier listed per-tablet — stay untouched), disclose loudly, and
+    // cross-check against a stated "Total" weight when the sheet gave one. validateProject
+    // red-flags anything that remains impossible, so approval can't slip past it.
+    {
+      const effForm  = nf || proj.dosageForm;
+      const effSS    = patch.servingSize!=null ? patch.servingSize : (Number(proj.servingSize)||1);
+      const effBatch = (patch.batchUnits>0 ? patch.batchUnits : Number(proj.batchUnits)) || 0;
+      const bt = batchTotalInterpret(rows, effForm, effSS, effBatch);
+      if (bt.converted.length){
+        toast(bt.converted.length+' amount(s) were physically impossible per unit — read as BATCH TOTALS and divided by '+effBatch.toLocaleString()+' units ('+bt.converted.slice(0,3).map(r=>r.importedName).join(', ')+(bt.converted.length>3?', …':'')+'). Review every row before approving.','warn');
+        logAudit(setProjects, proj.pn, 'Batch-total interpretation', bt.converted.length+' amounts ÷ '+effBatch+' units (impossible per-unit mass)');
+      }
+      if (bt.flagged.length) toast(bt.flagged.length+' amount(s) exceed a physically possible per-unit mass and could NOT be auto-interpreted (no/odd batch qty) — fix before costing.','err');
+      if (ext.statedTotalMg>0 && rows.length){
+        const sum = rows.reduce((s,r)=>s+(Number(r.inputMg)||0),0);
+        if (Math.abs(sum-ext.statedTotalMg)/ext.statedTotalMg <= 0.02) toast('Cross-check ✓ ingredients sum to '+Math.round(sum).toLocaleString()+' mg — matches the sheet\'s stated total ('+ext.statedTotalMg.toLocaleString()+' mg).','ok');
+        else toast('Cross-check: ingredients sum to '+Math.round(sum).toLocaleString()+' mg but the sheet states a '+ext.statedTotalMg.toLocaleString()+' mg total — reconcile before approving.','warn');
+      }
+    }
     // Gummies are turnkey: always lock in a base variant + weight so the complete base
     // auto-includes. Use what was extracted; else keep existing; else a variant default
     // (Enova templates: sugar 4500 mg/gummy, sugar-free 3000 mg/gummy).
@@ -12793,33 +12871,34 @@ function App({ session }) {
 
   // Flat registry with optional `sect` (section label rendered ABOVE the row) and `count`
   // (key into navCounts → badge). Every prior destination is preserved — nothing removed.
+  // ── Full system, workflow-ordered (2026-08-11): EVERY page is first-class and always visible —
+  // nothing dimmed, nothing hidden. Organization follows the job's life: board → work the job →
+  // records → materials → oversight. The Shop-Ware simplification continues by folding content
+  // INTO the job page over time, never by hiding destinations.
   const NAV_ITEMS = [
-    { id:'dashboard',   label:'Dashboard',      icon:'📊', ready:true },
-    { id:'command',     label:'Command Center', icon:'📡', ready:true },
+    { id:'intake',      label:'＋ New Job',     icon:'📥', ready:true, count:'intake', hot:true },
+    { id:'wip',         label:'WIP Board',      icon:'📋', ready:true, count:'wip' },
     { id:'pipeline',    label:'Pipeline',       icon:'🧭', ready:true, count:'pipeline' },
 
-    { sect:'Sales', id:'intake', label:'Sales Intake', icon:'📥', ready:true, count:'intake', hot:true },
+    { sect:'Work the job', id:'formulation', label:'Formulation', icon:'🧪', ready:true, count:'formulation', hot:true },
     { id:'quote',       label:'Quote',          icon:'💰', ready:true, count:'quote' },
-
-    { sect:'R&D', id:'formulation', label:'Formulation', icon:'🧪', ready:true, count:'formulation', hot:true },
     { id:'review',      label:'Review Queue',   icon:'🔎', ready:true },
-    { id:'library',     label:'Formula Library',icon:'📚', ready:true },
+    { id:'readiness',   label:'Readiness',      icon:'🚦', ready:true, count:'readiness' },
+    { id:'production',  label:'Production',     icon:'🏭', ready:true, count:'production' },
 
-    { sect:'Manufacturing', id:'readiness', label:'Readiness', icon:'🚦', ready:true, count:'readiness' },
-    { id:'production',  label:'Production',      icon:'🏭', ready:true, count:'production' },
+    { sect:'Records', id:'projects', label:'Projects', icon:'🗃', ready:true },
+    { id:'library',     label:'Library',        icon:'📚', ready:true },
+    { id:'documents',   label:'Documents',      icon:'📄', ready:true },
+    { id:'vault',       label:'Document Vault', icon:'📁', ready:true },
 
     { sect:'Materials', id:'inventory', label:'Inventory', icon:'📦', ready:true },
     { id:'stockctl',    label:'Stock Control',  icon:'🚚', ready:true },
     { id:'sourcing',    label:'Sourcing',       icon:'🌱', ready:true },
 
-    { sect:'Operations', id:'wip', label:'WIP Board', icon:'📋', ready:true, count:'wip' },
-    { id:'projects',    label:'Projects',       icon:'🗃', ready:true },
-
-    { sect:'Documents & Records', id:'documents', label:'Documents', icon:'📄', ready:true },
-    { id:'vault',       label:'Document Vault', icon:'📁', ready:true },
-
-    { sect:'System', id:'audit', label:'Audit & Trace', icon:'🔗', ready:true },
+    { sect:'Oversight', id:'dashboard', label:'Reports', icon:'📈', ready:true },
+    { id:'command',     label:'Command Center', icon:'📡', ready:true },
     { id:'approvals',   label:'Approvals',      icon:'✅', ready:true },
+    { id:'audit',       label:'Audit & Trace',  icon:'🔗', ready:true },
     { id:'labels',      label:'Label Review',   icon:'🏷', ready:false },
   ];
 

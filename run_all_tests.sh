@@ -49,6 +49,7 @@ fi
 run "ssr renders"        node ssr_test.js
 # 3) Deterministic parsers & generators
 run "extraction parser"  node test_extract.js
+run "batch-total guard"  node test_batch_total_guard.js
 run "clean-name parser"  node test_cleanname.js
 run "intake gummy form"  node test_intake_gummy.js
 run "master formula import" node test_master_formula_import.js
